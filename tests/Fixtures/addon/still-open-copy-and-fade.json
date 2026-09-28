@@ -1,0 +1,248 @@
+{
+  "schema_version": 1,
+  "source": "ninjatrader_8",
+  "addon_version": "1.0.0",
+  "trade_id": "NT8-APEX_24570_135-ES_12_26-69a29cf876b57c6c",
+  "account_name": "APEX-24570-135",
+  "connection": "Rithmic",
+  "trade_type": "2ES",
+  "trade_type_other": null,
+  "instrument": {
+    "symbol": "ES",
+    "contract": "ES 12-26",
+    "tick_size": "0.25",
+    "point_value": "50"
+  },
+  "direction": "short",
+  "quantity": 2,
+  "total_entry_quantity": 2,
+  "entry": {
+    "occurred_at": "2026-09-24T09:30:00-04:00",
+    "average_price": "7800.00",
+    "order_name": "Entry"
+  },
+  "exit": {
+    "occurred_at": "2026-09-24T09:32:00-04:00",
+    "average_price": "7799.00",
+    "order_name": "Target1",
+    "reason": "profit_target"
+  },
+  "performance": {
+    "points": "1.00",
+    "ticks": 4,
+    "gross_pnl": "100.00",
+    "commission": "4.00",
+    "fees": null,
+    "net_pnl": "96.00"
+  },
+  "excursion": {
+    "mae_points": null,
+    "mfe_points": null,
+    "max_adverse_price": null,
+    "max_favorable_price": null,
+    "complete": false
+  },
+  "legs": [
+    {
+      "sequence": 1,
+      "runner": false,
+      "exit_order_id": "mo2",
+      "order_name": "Target1",
+      "reason": "profit_target",
+      "quantity": 2,
+      "exited_at": "2026-09-24T09:32:00-04:00",
+      "average_exit_price": "7799.00",
+      "points": "1.00",
+      "gross_pnl": "100.00",
+      "mae_points": null,
+      "mfe_points": null
+    }
+  ],
+  "executions": [
+    {
+      "execution_id": "m1",
+      "order_id": "mo1",
+      "occurred_at": "2026-09-24T09:30:00-04:00",
+      "action": "sell",
+      "role": "entry",
+      "quantity": 2,
+      "allocated_quantity": 2,
+      "price": "7800.00",
+      "commission": "2.00",
+      "fee": null,
+      "order_name": "Entry",
+      "position_after": -2
+    },
+    {
+      "execution_id": "m2",
+      "order_id": "mo2",
+      "occurred_at": "2026-09-24T09:32:00-04:00",
+      "action": "buy",
+      "role": "exit",
+      "quantity": 2,
+      "allocated_quantity": 2,
+      "price": "7799.00",
+      "commission": "2.00",
+      "fee": null,
+      "order_name": "Target1",
+      "position_after": 0
+    }
+  ],
+  "notes": [
+    {
+      "body": "H2 at the EMA. Follow the plan.",
+      "phase": "pre_trade",
+      "occurred_at": "2026-09-24T09:29:40-04:00"
+    },
+    {
+      "body": "T1 filled. Letting the runner work.",
+      "phase": "in_trade",
+      "occurred_at": "2026-09-24T09:31:25-04:00"
+    },
+    {
+      "body": "Runner stopped. Good management.",
+      "phase": "post_trade",
+      "occurred_at": "2026-09-24T09:36:40-04:00"
+    }
+  ],
+  "screenshot": {
+    "captured_at": "2026-09-24T09:36:21-04:00",
+    "caption": "5-minute ES with H2 at EMA"
+  },
+  "copies_source": "copier_workspace",
+  "copies_summary": {
+    "accounts": 2,
+    "matched": 1,
+    "missed": 0,
+    "still_open": 1,
+    "net_pnl": "11.00"
+  },
+  "copies": [
+    {
+      "account_name": "PA-APEX-24570-05",
+      "status": "still_open",
+      "instrument": {
+        "symbol": "MES",
+        "contract": "MES 12-26",
+        "tick_size": "0.25",
+        "point_value": "5"
+      },
+      "expected": {
+        "contract_size": "micro",
+        "multiplier": "2",
+        "faded": false,
+        "blown": false,
+        "quantity": 4
+      },
+      "warnings": [],
+      "direction": "short",
+      "quantity": 4,
+      "entry_average_price": "7800.00",
+      "exit_average_price": "7799.00",
+      "entered_at": "2026-09-24T09:30:01-04:00",
+      "exited_at": null,
+      "performance": {
+        "points": "1.00",
+        "ticks": 4,
+        "gross_pnl": "10.00",
+        "commission": "2.00",
+        "fees": null,
+        "net_pnl": "8.00"
+      },
+      "executions": [
+        {
+          "execution_id": "s1",
+          "order_id": "so1",
+          "occurred_at": "2026-09-24T09:30:01-04:00",
+          "action": "sell",
+          "role": "entry",
+          "quantity": 4,
+          "allocated_quantity": 4,
+          "price": "7800.00",
+          "commission": "1.00",
+          "fee": null,
+          "order_name": "Entry",
+          "position_after": -4
+        },
+        {
+          "execution_id": "s2",
+          "order_id": "so2",
+          "occurred_at": "2026-09-24T09:32:00-04:00",
+          "action": "buy",
+          "role": "exit",
+          "quantity": 2,
+          "allocated_quantity": 2,
+          "price": "7799.00",
+          "commission": "1.00",
+          "fee": null,
+          "order_name": "Target1",
+          "position_after": -2
+        }
+      ]
+    },
+    {
+      "account_name": "PA-APEX-24570-06",
+      "status": "matched",
+      "instrument": {
+        "symbol": "MES",
+        "contract": "MES 12-26",
+        "tick_size": "0.25",
+        "point_value": "5"
+      },
+      "expected": {
+        "contract_size": "micro",
+        "multiplier": "1",
+        "faded": true,
+        "blown": false,
+        "quantity": 2
+      },
+      "warnings": [
+        "faded copy"
+      ],
+      "direction": "long",
+      "quantity": 2,
+      "entry_average_price": "7800.25",
+      "exit_average_price": "7800.75",
+      "entered_at": "2026-09-24T09:30:02-04:00",
+      "exited_at": "2026-09-24T09:32:01-04:00",
+      "performance": {
+        "points": "0.50",
+        "ticks": 2,
+        "gross_pnl": "5.00",
+        "commission": "2.00",
+        "fees": null,
+        "net_pnl": "3.00"
+      },
+      "executions": [
+        {
+          "execution_id": "f1",
+          "order_id": "fo1",
+          "occurred_at": "2026-09-24T09:30:02-04:00",
+          "action": "buy",
+          "role": "entry",
+          "quantity": 2,
+          "allocated_quantity": 2,
+          "price": "7800.25",
+          "commission": "1.00",
+          "fee": null,
+          "order_name": "AI",
+          "position_after": 2
+        },
+        {
+          "execution_id": "f2",
+          "order_id": "fo2",
+          "occurred_at": "2026-09-24T09:32:01-04:00",
+          "action": "sell",
+          "role": "exit",
+          "quantity": 2,
+          "allocated_quantity": 2,
+          "price": "7800.75",
+          "commission": "1.00",
+          "fee": null,
+          "order_name": "AI",
+          "position_after": 0
+        }
+      ]
+    }
+  ]
+}

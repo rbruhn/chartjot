@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "source": "ninjatrader_8",
+  "addon_version": "1.0.0",
+  "trade_id": "NT8-Sim101-ES_12_26-241db5fe739d663b",
+  "account_name": "Sim101",
+  "connection": "NinjaTrader",
+  "trade_type": "F2EL",
+  "trade_type_other": null,
+  "instrument": {
+    "symbol": "ES",
+    "contract": "ES 12-26",
+    "tick_size": "0.25",
+    "point_value": "50"
+  },
+  "direction": "short",
+  "quantity": 1,
+  "total_entry_quantity": 1,
+  "entry": {
+    "occurred_at": "2026-09-24T09:30:30-04:00",
+    "average_price": "7805.25",
+    "order_name": null
+  },
+  "exit": {
+    "occurred_at": "2026-09-24T09:31:30-04:00",
+    "average_price": "7805.00",
+    "order_name": null,
+    "reason": "other"
+  },
+  "performance": {
+    "points": "0.25",
+    "ticks": 1,
+    "gross_pnl": "12.50",
+    "commission": "3.98",
+    "fees": null,
+    "net_pnl": "8.52"
+  },
+  "excursion": {
+    "mae_points": null,
+    "mfe_points": null,
+    "max_adverse_price": null,
+    "max_favorable_price": null,
+    "complete": false
+  },
+  "legs": [
+    {
+      "sequence": 1,
+      "runner": false,
+      "exit_order_id": "ro3",
+      "order_name": null,
+      "reason": "other",
+      "quantity": 1,
+      "exited_at": "2026-09-24T09:31:30-04:00",
+      "average_exit_price": "7805.00",
+      "points": "0.25",
+      "gross_pnl": "12.50",
+      "mae_points": null,
+      "mfe_points": null
+    }
+  ],
+  "executions": [
+    {
+      "execution_id": "r2",
+      "order_id": "ro2",
+      "occurred_at": "2026-09-24T09:30:30-04:00",
+      "action": "sell",
+      "role": "entry",
+      "quantity": 2,
+      "allocated_quantity": 1,
+      "price": "7805.25",
+      "commission": "1.99",
+      "fee": null,
+      "order_name": null,
+      "position_after": -1
+    },
+    {
+      "execution_id": "r3",
+      "order_id": "ro3",
+      "occurred_at": "2026-09-24T09:31:30-04:00",
+      "action": "buy",
+      "role": "exit",
+      "quantity": 1,
+      "allocated_quantity": 1,
+      "price": "7805.00",
+      "commission": "1.99",
+      "fee": null,
+      "order_name": null,
+      "position_after": 0
+    }
+  ],
+  "notes": [
+    {
+      "body": "H2 at the EMA. Follow the plan.",
+      "phase": "pre_trade",
+      "occurred_at": "2026-09-24T09:29:40-04:00"
+    },
+    {
+      "body": "T1 filled. Letting the runner work.",
+      "phase": "in_trade",
+      "occurred_at": "2026-09-24T09:31:25-04:00"
+    },
+    {
+      "body": "Runner stopped. Good management.",
+      "phase": "post_trade",
+      "occurred_at": "2026-09-24T09:36:40-04:00"
+    }
+  ],
+  "screenshot": {
+    "captured_at": "2026-09-24T09:36:21-04:00",
+    "caption": "5-minute ES with H2 at EMA"
+  },
+  "copies_source": null,
+  "copies_summary": null,
+  "copies": []
+}

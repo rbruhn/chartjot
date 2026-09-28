@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <!-- NinjaScript's compiler is older than the SDK's. Stay on what it accepts. -->
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <RootNamespace>ChartJot.Core</RootNamespace>
+    <AssemblyName>ChartJot.Core</AssemblyName>
+  </PropertyGroup>
+
+</Project>

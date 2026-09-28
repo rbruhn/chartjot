@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "source": "ninjatrader_8",
+  "addon_version": "1.0.0",
+  "trade_id": "NT8-APEX_24570_135-ES_12_26-04ee886e3bbeaef4",
+  "account_name": "APEX-24570-135",
+  "connection": "Rithmic",
+  "trade_type": "RS",
+  "trade_type_other": null,
+  "instrument": {
+    "symbol": "ES",
+    "contract": "ES 12-26",
+    "tick_size": "0.25",
+    "point_value": "50"
+  },
+  "direction": "short",
+  "quantity": 1,
+  "total_entry_quantity": 1,
+  "entry": {
+    "occurred_at": "2026-09-24T09:30:00-04:00",
+    "average_price": "7794.25",
+    "order_name": null
+  },
+  "exit": {
+    "occurred_at": "2026-09-24T09:33:20-04:00",
+    "average_price": "7796.75",
+    "order_name": null,
+    "reason": "other"
+  },
+  "performance": {
+    "points": "-2.50",
+    "ticks": -10,
+    "gross_pnl": "-125.00",
+    "commission": "3.98",
+    "fees": null,
+    "net_pnl": "-128.98"
+  },
+  "excursion": {
+    "mae_points": "2.50",
+    "mfe_points": "1.25",
+    "max_adverse_price": "7796.75",
+    "max_favorable_price": "7793.00",
+    "complete": true
+  },
+  "legs": [
+    {
+      "sequence": 1,
+      "runner": false,
+      "exit_order_id": "no2",
+      "order_name": null,
+      "reason": "other",
+      "quantity": 1,
+      "exited_at": "2026-09-24T09:33:20-04:00",
+      "average_exit_price": "7796.75",
+      "points": "-2.50",
+      "gross_pnl": "-125.00",
+      "mae_points": "2.50",
+      "mfe_points": "1.25"
+    }
+  ],
+  "executions": [
+    {
+      "execution_id": "n1",
+      "order_id": "no1",
+      "occurred_at": "2026-09-24T09:30:00-04:00",
+      "action": "sell",
+      "role": "entry",
+      "quantity": 1,
+      "allocated_quantity": 1,
+      "price": "7794.25",
+      "commission": "1.99",
+      "fee": null,
+      "order_name": null,
+      "position_after": -1
+    },
+    {
+      "execution_id": "n2",
+      "order_id": "no2",
+      "occurred_at": "2026-09-24T09:33:20-04:00",
+      "action": "buy",
+      "role": "exit",
+      "quantity": 1,
+      "allocated_quantity": 1,
+      "price": "7796.75",
+      "commission": "1.99",
+      "fee": null,
+      "order_name": null,
+      "position_after": 0
+    }
+  ],
+  "notes": [],
+  "copies_source": null,
+  "copies_summary": null,
+  "copies": []
+}

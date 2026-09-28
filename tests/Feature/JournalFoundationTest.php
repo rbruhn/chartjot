@@ -1,0 +1,53 @@
+<?php
+
+use App\Models\User;
+use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+
+uses(LazilyRefreshDatabase::class);
+
+test('creating a user creates a private journal with a hashed intake token', function () {
+    $user = User::factory()->create();
+
+    expect($user->journal)->not->toBeNull()
+        ->and($user->journal->user_id)->toBe($user->id)
+        ->and($user->journal->ingest_token_hash)->not->toBeEmpty()
+        ->and($user->journal->ingest_token_hash)->toStartWith('$2');
+});
+
+test('pending users are logged out and redirected to the pending approval page', function () {
+    $user = User::factory()->pending()->create();
+
+    $this->actingAs($user)
+        ->get(route('journal.index'))
+        ->assertRedirect(route('register.pending'));
+
+    $this->assertGuest();
+});
+
+test('active users can view only their own journal', function () {
+    $user  = User::factory()->create();
+    $other = User::factory()->create();
+
+    $this->actingAs($user)
+        ->get(route('journal.index'))
+        ->assertOk()
+        ->assertSee($user->journal->name);
+
+    expect($user->can('view', $user->journal))->toBeTrue()
+        ->and($other->can('view', $user->journal))->toBeFalse()
+        ->and($other->can('update', $user->journal))->toBeFalse();
+});
+
+test('admin users do not get a journal', function () {
+    $admin = User::factory()->admin()->create();
+
+    expect($admin->journal)->toBeNull();
+});
+
+test('admin users visiting the journal index are redirected to the admin panel', function () {
+    $admin = User::factory()->admin()->create();
+
+    $this->actingAs($admin)
+        ->get(route('journal.index'))
+        ->assertRedirect(route('admin.users'));
+});
