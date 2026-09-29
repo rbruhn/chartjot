@@ -258,5 +258,48 @@ namespace ChartJot.Core.Tests
 
 			Assert.Empty(StagedTrades.Deserialize(trades.Serialize()).All);
 		}
+
+		[Fact]
+		public void SerializeDeserialize_RoundTripsTheReversalFlag()
+		{
+			StagedTrades staged = new StagedTrades();
+			CompletedTrade trade = WorkedExample();
+			trade.OpenedByReversal = true;
+			staged.Add(new StagedTrade { Trade = trade, Notes = new List<NoteRecord>() });
+
+			StagedTrades reloaded = StagedTrades.Deserialize(staged.Serialize());
+
+			Assert.True(reloaded.All[0].Trade.OpenedByReversal);
+		}
+
+		[Fact]
+		public void Deserialize_AStateFileWithoutTheReversalFlag_ReadsItAsFalse()
+		{
+			StagedTrades staged = new StagedTrades();
+			staged.Add(new StagedTrade { Trade = WorkedExample(), Notes = new List<NoteRecord>() });
+			string older = staged.Serialize().Replace(",\"opened_by_reversal\":false", "");
+
+			StagedTrades reloaded = StagedTrades.Deserialize(older);
+
+			Assert.DoesNotContain("opened_by_reversal", older);
+			Assert.False(reloaded.All[0].Trade.OpenedByReversal);
+		}
+
+		[Fact]
+		public void Deserialize_AStateFileWithoutTheReversalFlag_WorksItOutFromTheSplitFirstEntry()
+		{
+			TradeTracker tracker = new TradeTracker();
+			tracker.Apply(Buy("a", "o1", "", 1, 7804.75m, 0, 0, 1, isEntry: true));
+			tracker.Apply(Sell("b", "o2", "", 2, 7805.25m, 30, 0, -1, isEntry: true, isExit: true));
+			CompletedTrade reversed = tracker.Apply(Buy("c", "o3", "", 1, 7805.00m, 90, 0, 0, isExit: true)).Closed[0];
+			StagedTrades staged = new StagedTrades();
+			staged.Add(new StagedTrade { Trade = reversed, Notes = new List<NoteRecord>() });
+			string older = staged.Serialize().Replace(",\"opened_by_reversal\":true", "");
+
+			StagedTrades reloaded = StagedTrades.Deserialize(older);
+
+			Assert.DoesNotContain("opened_by_reversal", older);
+			Assert.True(reloaded.All[0].Trade.OpenedByReversal);
+		}
 	}
 }

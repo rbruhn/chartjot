@@ -44,6 +44,43 @@ namespace ChartJot.Core.Tests
 		}
 
 		[Fact]
+		public void RestoreExcursion_WithFillExcursions_RestoresEachFillsOwnRange()
+		{
+			Fill entry = Buy("a", "o1", "Entry", 2, 7700m, 0, 0, positionAfter: 2, isEntry: true);
+			Fill target = Sell("b", "o2", "Target1", 1, 7702m, 30, 0, positionAfter: 1, isExit: true);
+			TradeTracker before = new TradeTracker();
+			string tradeId = before.Apply(entry).Opened.TradeId;
+			before.OnPrice(Es.FullName, 7699m);
+			before.Apply(target);
+			before.OnPrice(Es.FullName, 7708m);
+			OpenTradeInfo saved = before.OpenTrades[0];
+
+			TradeTracker after = new TradeTracker();
+			after.Rebuild(entry.Account, Es.FullName, new[] { entry, target }, expectedPosition: 1);
+			after.RestoreExcursion(entry.Account, Es.FullName, tradeId, saved.Excursion,
+				saved.Fills.ToDictionary(f => f.Fill.ExecutionId, f => f.Excursion));
+			CompletedTrade closed = after.Apply(Sell("c", "o3", "Stop1", 1, 7701m, 90, 0, positionAfter: 0, isExit: true)).Closed[0];
+
+			Assert.Equal(2m, closed.Legs[0].MfePoints);
+			Assert.Equal(1m, closed.Legs[0].MaePoints);
+			Assert.Equal(8m, closed.Legs[1].MfePoints);
+		}
+
+		[Fact]
+		public void RestoreExcursion_WithoutFillExcursions_LeavesEarlierFillsAlone()
+		{
+			Fill entry = Buy("a", "o1", "Entry", 2, 7700m, 0, 0, positionAfter: 2, isEntry: true);
+			Fill target = Sell("b", "o2", "Target1", 1, 7702m, 30, 0, positionAfter: 1, isExit: true);
+			TradeTracker tracker = new TradeTracker();
+			tracker.Rebuild(entry.Account, Es.FullName, new[] { entry, target }, expectedPosition: 1);
+
+			tracker.RestoreExcursion(entry.Account, Es.FullName, tracker.OpenTrades[0].TradeId,
+				new ExcursionSnapshot { High = 7708m, Low = 7699m, HadTicks = true });
+
+			Assert.All(tracker.OpenTrades[0].Fills, f => Assert.False(f.Excursion.HadTicks));
+		}
+
+		[Fact]
 		public void RestoreExcursion_WhenNoOpenTrade_DoesNotThrow()
 		{
 			TradeTracker tracker = new TradeTracker();

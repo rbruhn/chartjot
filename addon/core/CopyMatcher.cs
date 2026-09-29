@@ -173,13 +173,19 @@ namespace ChartJot.Core
 			if (setup != null)
 			{
 				diagnostics.AddRange(setup.Diagnostics ?? new List<string>());
+				List<string> filtered = new List<string>();
 				foreach (FollowerSetup follower in setup.FollowerRows)
 				{
 					if (SameAccount(follower.Account, master.Account))
 						continue;
-					CopyResult result = EvaluateFollower(master, setup, follower, options, all, diagnostics);
+					CopyResult result = EvaluateFollower(master, setup, follower, options, all, diagnostics, filtered);
 					if (result != null)
 						results.Add(result);
+				}
+				if (filtered.Count > 0)
+				{
+					diagnostics.Add("Select Trade Direction does not allow " + DirectionWord(master.Direction) + " entries from flat; "
+						+ "Executions-mode followers not expected to copy this trade: " + string.Join(", ", filtered));
 				}
 			}
 			else
@@ -187,12 +193,13 @@ namespace ChartJot.Core
 				results.AddRange(EvaluateAutoDetect(master, options, all));
 			}
 
-			// If nobody at all copied, the copier itself probably did not act (a direction filter, paused, or off),
-			// which is not the same as several followers missing on their own.
+			// If nobody at all copied, the copier itself probably did not act, which is not the same as several
+			// followers missing on their own. A Select Trade Direction filter is not a cause here: the followers it
+			// applies to are already excluded above, and it never blocks Orders-mode followers or reversals.
 			if (setup != null && results.Count > 0 && results.All(r => r.Outcome == CopyOutcome.Missed) && !all.Any(c => c.EntryAt >= master.EntryAt - options.Window))
 			{
 				diagnostics.Add("no expected follower entered near the master's entry; the copier may not have copied this trade "
-					+ "(for example a Select Trade Direction filter, paused, or off)");
+					+ "(for example paused, off, or its dashboard not in the active workspace tab)");
 			}
 
 			return new CopyEvaluation
@@ -207,7 +214,7 @@ namespace ChartJot.Core
 		// ---- copier setup
 
 		private static CopyResult EvaluateFollower(CompletedTrade master, CopierSnapshot setup, FollowerSetup follower,
-			MatchOptions options, List<CopyCandidate> all, List<string> diagnostics)
+			MatchOptions options, List<CopyCandidate> all, List<string> diagnostics, List<string> filtered)
 		{
 			ExpectedCopy expected = BuildExpected(master, setup, follower, diagnostics);
 			DateTimeOffset lower = master.EntryAt - options.Window;
@@ -236,6 +243,12 @@ namespace ChartJot.Core
 
 			if (!IsExpected(setup, follower, master))
 				return null;
+
+			if (DirectionFiltered(setup, follower, master))
+			{
+				filtered.Add(follower.Account);
+				return null;
+			}
 
 			// A follower already holding a position in this market before the window opened is not matched.
 			bool alreadyIn = mine.Any(c => options.Families.SameMarket(master.Instrument, c.Instrument)
@@ -395,6 +408,18 @@ namespace ChartJot.Core
 			string single = (setup.SingleInstrument ?? "").Trim();
 			return string.Equals(single, master.Instrument.Symbol, StringComparison.OrdinalIgnoreCase)
 				|| string.Equals(single, master.Instrument.FullName, StringComparison.OrdinalIgnoreCase);
+		}
+
+		/// <summary>
+		/// The copier's Select Trade Direction filter (vendor-confirmed 2026-09-28) only blocks a master entry that
+		/// opens a position from flat, never a scale-in, exit or reversal (even one into the blocked direction), and
+		/// only for Executions-mode followers. Such a follower is not expected, like one outside Single instrument.
+		/// </summary>
+		private static bool DirectionFiltered(CopierSnapshot setup, FollowerSetup follower, CompletedTrade master)
+		{
+			if (!setup.SelectTradeDirectionEnabled || !follower.ExecutionsMode || master.OpenedByReversal)
+				return false;
+			return master.Direction == Direction.Long ? !setup.AllowLong : !setup.AllowShort;
 		}
 
 		// ---- auto-detect

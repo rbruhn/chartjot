@@ -725,5 +725,100 @@ namespace ChartJot.Core.Tests
 			Assert.Empty(e.Copies);
 			Assert.Null(e.Summary);
 		}
+
+		// ---- Select Trade Direction
+
+		private static CopierSnapshot FilteredSetup(bool enabled, bool allowLong, bool allowShort, params string[] rows)
+		{
+			return CopierSnapshotParser.Parse(MasterAccount, true, "All", "ES", "Round Up At 0.5", "Multiplier", rows, CopierSnapshotParser.SourceLive,
+				selectTradeDirectionEnabled: enabled, allowLong: allowLong, allowShort: allowShort);
+		}
+
+		// Short 1 from -60 s, then a 4-lot buy at 0 s reverses it into a long 3, closed at 380 s.
+		private static CompletedTrade ReversedLongMaster()
+		{
+			TradeTracker tracker = new TradeTracker();
+			tracker.Apply(Sell("rv1", "orv1", "Entry", 1, 100m, -60, 0m, -1, MasterAccount, Es, isEntry: true));
+			tracker.Apply(Buy("rv2", "orv2", "Entry", 4, 100m, 0, 0m, 3, MasterAccount, Es, isEntry: true, isExit: true));
+			return tracker.Apply(Sell("rv3", "orv3", "Close", 3, 101m, 380, 0m, 0, MasterAccount, Es, isExit: true)).Closed[0];
+		}
+
+		[Fact]
+		public void DirectionFilter_BlocksAnExecutionsModeFollowerOnAnEntryFromFlat()
+		{
+			CopyEvaluation e = Run(Master(Direction.Long), FilteredSetup(true, false, true, MicroExecutions));
+
+			Assert.Empty(e.Copies);
+			Assert.Contains(e.Diagnostics, d => d.Contains("Select Trade Direction does not allow long entries from flat") && d.Contains("PA-02"));
+			Assert.DoesNotContain(e.Diagnostics, d => d.Contains("may not have copied"));
+		}
+
+		[Fact]
+		public void DirectionFilter_BlocksShortEntriesWhenShortIsNotAllowed()
+		{
+			CopyEvaluation e = Run(Master(Direction.Short), FilteredSetup(true, true, false, MicroExecutions));
+
+			Assert.Empty(e.Copies);
+			Assert.Contains(e.Diagnostics, d => d.Contains("does not allow short entries from flat"));
+		}
+
+		[Fact]
+		public void DirectionFilter_DoesNotApplyToOrdersModeFollowers()
+		{
+			CopyEvaluation e = Run(Master(Direction.Long), FilteredSetup(true, false, true, MicroOrders));
+
+			Assert.Equal(CopyOutcome.Missed, Only(e).Outcome);
+			Assert.DoesNotContain(e.Diagnostics, d => d.Contains("Select Trade Direction"));
+		}
+
+		[Fact]
+		public void DirectionFilter_DoesNotApplyWhenTheMasterTradeWasOpenedByAReversal()
+		{
+			CompletedTrade master = ReversedLongMaster();
+			Assert.True(master.OpenedByReversal);
+
+			CopyEvaluation e = Run(master, FilteredSetup(true, false, true, MicroExecutions));
+
+			Assert.Equal(CopyOutcome.Missed, Only(e).Outcome);
+			Assert.DoesNotContain(e.Diagnostics, d => d.Contains("Select Trade Direction"));
+		}
+
+		[Fact]
+		public void DirectionFilter_AnAllowedDirectionIsStillExpected()
+		{
+			CopyEvaluation e = Run(Master(Direction.Long), FilteredSetup(true, true, false, MicroExecutions));
+
+			Assert.Equal(CopyOutcome.Missed, Only(e).Outcome);
+		}
+
+		[Fact]
+		public void DirectionFilter_AllowFlagsAreIgnoredWhenTheFilterIsOff()
+		{
+			CopyEvaluation e = Run(Master(Direction.Long), FilteredSetup(false, false, false, MicroExecutions));
+
+			Assert.Equal(CopyOutcome.Missed, Only(e).Outcome);
+		}
+
+		[Fact]
+		public void DirectionFilter_AFollowerThatCopiedAnywayIsStillMatched()
+		{
+			CopyEvaluation e = Run(Master(Direction.Long), FilteredSetup(true, false, true, MicroExecutions),
+				Mes("PA-02", Direction.Long, 3, 1, 380));
+
+			Assert.Equal(CopyOutcome.Matched, Only(e).Outcome);
+			Assert.DoesNotContain(e.Diagnostics, d => d.Contains("Select Trade Direction"));
+		}
+
+		[Fact]
+		public void DirectionFilter_OnlyTheExecutionsModeFollowerIsExcluded()
+		{
+			CopyEvaluation e = Run(Master(Direction.Long),
+				FilteredSetup(true, false, true, MicroExecutions, "PA-03|Slave|1|No|No|No|No|No|Default|No|Rithmic"));
+
+			CopyResult missed = Only(e);
+			Assert.Equal("PA-03", missed.Account);
+			Assert.Equal(CopyOutcome.Missed, missed.Outcome);
+			Assert.Contains(e.Diagnostics, d => d.Contains("Select Trade Direction") && d.Contains("PA-02") && !d.Contains("PA-03"));
+		}
 	}
 }
