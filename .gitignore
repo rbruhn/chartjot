@@ -40,7 +40,6 @@
 /build/bin/
 /build/obj/
 /database/database.sqlite
-/database/seeders/data/
 /deploy/supervisor/chartjot.conf
 /.mcp.json
 /node_modules
