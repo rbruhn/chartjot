@@ -355,9 +355,9 @@ namespace ChartJot.Core.Tests
 			Assert.Contains("expected MES, traded ES", r.Warnings);
 		}
 
-		private static int? Expected(int[] orders, double size, string rounding = "Round Up At 0.5", string mode = "Multiplier", bool executions = false, List<string> diag = null)
+		private static int? Expected(int[] orders, double size, string rounding = "Round Up At 0.5", string mode = "Multiplier", bool executions = false, List<string> diag = null, bool sizeColumnEnabled = true)
 		{
-			return CopyMatcher.ExpectedQuantity(orders, (decimal)size, rounding, mode, executions, diag ?? new List<string>());
+			return CopyMatcher.ExpectedQuantity(orders, (decimal)size, rounding, mode, executions, diag ?? new List<string>(), sizeColumnEnabled);
 		}
 
 		[Theory]
@@ -398,14 +398,16 @@ namespace ChartJot.Core.Tests
 		}
 
 		[Fact]
-		public void OrdersMode_AFractionThatDividesEvenlyIsFine_OtherwiseTheCheckIsSkipped()
+		public void OrdersMode_AFractionIsRoundedPerOrderByTheSizeRoundingSetting()
 		{
+			// Vendor-confirmed: Orders mode uses the same Size Rounding setting as Executions mode, per order.
 			List<string> diag = new List<string>();
 
-			Assert.Equal(2, Expected(new[] { 4 }, 0.5, diag: diag));       // 4 x 0.5 = 2 exactly
+			Assert.Equal(2, Expected(new[] { 4 }, 0.5, diag: diag));                              // 4 x 0.5 = 2 exactly
 			Assert.Empty(diag);
-			Assert.Null(Expected(new[] { 3 }, 0.5, diag: diag));           // 1.5: the Orders-mode rule is undocumented
-			Assert.Contains(diag, d => d.Contains("fractional size in Orders mode"));
+			Assert.Equal(2, Expected(new[] { 3 }, 0.5, rounding: "Round Up At 0.5"));              // 1.5 rounds up
+			Assert.Equal(1, Expected(new[] { 3 }, 0.5, rounding: "Round Down"));                   // 1.5 rounds down
+			Assert.Equal(1, Expected(new[] { 1 }, 0.5, rounding: "Round Down"));                   // 0.5 rounds down to 0, floored to 1
 		}
 
 		[Fact]
@@ -420,8 +422,28 @@ namespace ChartJot.Core.Tests
 		[Fact]
 		public void UnknownRoundingMatters_OnlyWhenAFractionAppears()
 		{
-			Assert.Equal(9, Expected(new[] { 3 }, 3.0, rounding: "Round Down", executions: true));
-			Assert.Null(Expected(new[] { 3 }, 0.5, rounding: "Round Down", executions: true));
+			// "Round Down" is a known mode now; use a made-up one to exercise the unknown-mode fallback.
+			Assert.Equal(9, Expected(new[] { 3 }, 3.0, rounding: "Nearest Ten Cents", executions: true));
+			Assert.Null(Expected(new[] { 3 }, 0.5, rounding: "Nearest Ten Cents", executions: true));
+		}
+
+		[Theory]
+		[InlineData(3, 3.0, false, 9)]    // no fraction: rounding mode is irrelevant
+		[InlineData(3, 0.5, true, 1)]     // 1.5, Executions mode: rounds down to 1
+		[InlineData(1, 0.5, true, 1)]     // 0.5 rounds down to 0, floored to 1
+		[InlineData(3, 0.5, false, 1)]    // 1.5, Orders mode: rounds down to 1 (same setting)
+		public void RoundDown_TruncatesInsteadOfRoundingHalfUp(int master, double size, bool executions, int expected)
+		{
+			Assert.Equal(expected, Expected(new[] { master }, size, rounding: "Round Down", executions: executions));
+		}
+
+		[Fact]
+		public void SizeColumnDisabled_EveryFollowerMirrorsTheMastersQuantityExactly()
+		{
+			// IsXEnabled = false: the Size column (and its rounding) is bypassed entirely.
+			Assert.Equal(3, Expected(new[] { 3 }, 2.0, sizeColumnEnabled: false));
+			Assert.Equal(3, Expected(new[] { 3 }, 2.0, mode: "Quantity", sizeColumnEnabled: false));
+			Assert.Equal(4, Expected(new[] { 1, 3 }, 0.5, executions: true, sizeColumnEnabled: false));
 		}
 
 		[Fact]
@@ -443,14 +465,14 @@ namespace ChartJot.Core.Tests
 		}
 
 		[Fact]
-		public void ANonExecutionsFollowerWithAFractionalSize_GetsNoQuantityWarning()
+		public void ANonExecutionsFollowerWithAFractionalSize_IsCheckedAfterRounding()
 		{
-			// Master 3 ES at 1/2x in Orders mode: the copier's per-order rounding is undocumented, so no check.
+			// Master 3 ES at 1/2x in Orders mode: 1.5 rounds up to 2 under the setup's Round Up At 0.5.
 			CopyEvaluation e = Run(Master(), Setup("PA-02|Slave|1/2|No|No|No|No|No|Default|No|Rithmic"), Mes("PA-02", Direction.Long, 1, 1, 380));
 
 			CopyResult r = Only(e);
-			Assert.Null(r.Expected.Quantity);
-			Assert.Empty(r.Warnings);
+			Assert.Equal(2, r.Expected.Quantity);
+			Assert.Equal(new[] { "expected 2 MES, filled 1 MES" }, r.Warnings.ToArray());
 			Assert.Equal(0.5m, r.Expected.Multiplier);
 		}
 

@@ -47,6 +47,23 @@ namespace ChartJot.Core
 		public string SingleInstrument { get; set; }
 		public string RoundingMode { get; set; }
 		public string MultiplierMode { get; set; }
+
+		/// <summary>IsXEnabled: the on/off switch for the Size column itself. When false, every follower takes
+		/// the master's exact quantity, whatever its Size cell says (vendor-confirmed 2026-09-28).</summary>
+		public bool SizeColumnEnabled { get; set; }
+
+		/// <summary>
+		/// SelectTradeDirection: on/off switch for the direction filter. Vendor-confirmed 2026-09-28: it only
+		/// filters a master fill that opens a position from flat -- scale-ins, exits and reversals are always
+		/// copied, even a reversal into the blocked direction -- and currently only applies to Executions-mode
+		/// followers; Orders-mode followers still copy a blocked-direction entry.
+		/// </summary>
+		public bool SelectTradeDirectionEnabled { get; set; }
+
+		/// <summary>Only meaningful when <see cref="SelectTradeDirectionEnabled"/> is true.</summary>
+		public bool AllowLong { get; set; }
+		public bool AllowShort { get; set; }
+
 		public IList<FollowerSetup> Followers { get; set; }
 
 		/// <summary>Things the parser tolerated (short rows, unknown values). For the diagnostic log.</summary>
@@ -74,7 +91,8 @@ namespace ChartJot.Core
 		/// Blown, Default mode; extra columns are ignored.
 		/// </summary>
 		public static CopierSnapshot Parse(string masterAccount, bool enabled, string instrumentMode, string singleInstrument,
-			string roundingMode, string multiplierMode, IEnumerable<string> rows, string source)
+			string roundingMode, string multiplierMode, IEnumerable<string> rows, string source,
+			bool sizeColumnEnabled = true, bool selectTradeDirectionEnabled = false, bool allowLong = true, bool allowShort = true)
 		{
 			if (string.IsNullOrWhiteSpace(masterAccount) || rows == null)
 				return null;
@@ -133,6 +151,10 @@ namespace ChartJot.Core
 				SingleInstrument = singleInstrument,
 				RoundingMode = roundingMode,
 				MultiplierMode = multiplierMode,
+				SizeColumnEnabled = sizeColumnEnabled,
+				SelectTradeDirectionEnabled = selectTradeDirectionEnabled,
+				AllowLong = allowLong,
+				AllowShort = allowShort,
 				Followers = followers,
 				Diagnostics = diagnostics
 			};
