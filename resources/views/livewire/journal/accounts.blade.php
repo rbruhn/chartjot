@@ -5,6 +5,7 @@ use App\Models\Account;
 use App\Models\Journal;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Livewire\Volt\Component;
 
 new class extends Component
@@ -19,6 +20,7 @@ new class extends Component
     public string $accountType     = 'funded';
     public string $startingBalance = '';
     public string $timezone        = '';
+    public string $connection      = '';
 
     #[Computed]
     public function accounts()
@@ -50,6 +52,7 @@ new class extends Component
         $this->accountType     = $account->account_type?->value ?? 'live';
         $this->startingBalance = $account->starting_balance !== null ? number_format((float) $account->starting_balance, 2, '.', '') : '';
         $this->timezone        = $account->timezone ?? '';
+        $this->connection      = $account->connection ?? '';
         $this->editingId       = $id;
         $this->creating        = false;
         unset($this->accounts);
@@ -67,6 +70,7 @@ new class extends Component
             'accountType'     => ['required', Rule::in(array_column(AccountType::cases(), 'value'))],
             'startingBalance' => ['nullable', 'numeric', 'min:0'],
             'timezone'        => ['nullable', 'string', 'timezone:all'],
+            'connection'      => ['nullable', 'string', 'max:100'],
         ]);
 
         $data = [
@@ -74,6 +78,7 @@ new class extends Component
             'account_type'     => AccountType::from($this->accountType),
             'starting_balance' => $this->startingBalance !== '' ? (float) $this->startingBalance : null,
             'timezone'         => $this->timezone ?: null,
+            'connection'       => $this->connection ?: null,
         ];
 
         if ($this->creating) {
@@ -89,6 +94,12 @@ new class extends Component
     public function confirmDelete(int $id): void
     {
         $this->confirmDeleteId = $id;
+    }
+
+    #[On('timezone-selected')]
+    public function setTimezone(string $timezone): void
+    {
+        $this->timezone = $timezone;
     }
 
     public function cancelDelete(): void
@@ -125,6 +136,7 @@ new class extends Component
         $this->accountType     = 'live';
         $this->startingBalance = '';
         $this->timezone        = '';
+        $this->connection      = '';
         $this->resetErrorBag();
     }
 }; ?>
@@ -135,15 +147,15 @@ new class extends Component
         {{-- Header --}}
         <div class="flex items-center justify-between">
             <div>
-                <h2 class="text-xl font-semibold text-gray-100">Accounts</h2>
-                <p class="mt-1 text-sm text-gray-400">
+                <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Accounts</h2>
+                <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
                     Manage your trading accounts. Create accounts here before importing trades from NinjaTrader.
                 </p>
             </div>
             @if(!$creating && !$editingId)
             <button wire:click="startCreate"
-                style="display:inline-flex;align-items:center;gap:0.5rem;padding:0.5rem 1rem;background:#2563eb;color:#fff;border:none;border-radius:0.375rem;font-size:0.875rem;font-weight:500;cursor:pointer"
-                onmouseover="this.style.background='#1d4ed8'" onmouseout="this.style.background='#2563eb'">
+                class="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                style="cursor:pointer">
                 <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
                 Add Account
             </button>
@@ -152,69 +164,84 @@ new class extends Component
 
         {{-- Delete error --}}
         @error('delete')
-        <div style="background:#450a0a;border:1px solid #991b1b;border-radius:0.5rem;padding:0.75rem 1rem;color:#fca5a5;font-size:0.875rem">
+        <div class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300">
             {{ $message }}
         </div>
         @enderror
 
         {{-- Create / Edit form --}}
         @if($creating || $editingId)
-        <div style="background:#111827;border:1px solid #374151;border-radius:0.5rem;padding:1.5rem">
-            <h3 class="text-base font-semibold text-gray-100 mb-4">
+        <div class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800" style="padding:1.5rem">
+            <h3 class="text-base font-semibold text-gray-900 dark:text-gray-100 mb-4">
                 {{ $creating ? 'New Account' : 'Edit Account' }}
             </h3>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
                 {{-- Name --}}
                 <div>
-                    <label class="block text-sm font-medium text-gray-300 mb-1">Account Name <span class="text-red-400">*</span></label>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Account Name <span class="text-red-500 dark:text-red-400">*</span></label>
                     <input wire:model="name" type="text" placeholder="e.g. Apex-123456"
-                        style="width:100%;background:#1f2937;border:1px solid #374151;border-radius:0.375rem;padding:0.5rem 0.75rem;color:#f9fafb;font-size:0.875rem;box-sizing:border-box">
-                    @error('name')<p class="mt-1 text-xs text-red-400">{{ $message }}</p>@enderror
+                        class="w-full rounded-md border border-gray-300 bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                        style="padding:0.5rem 0.75rem;font-size:0.875rem;box-sizing:border-box">
+                    @error('name')<p class="mt-1 text-xs text-red-500 dark:text-red-400">{{ $message }}</p>@enderror
                 </div>
 
                 {{-- Type --}}
                 <div>
-                    <label class="block text-sm font-medium text-gray-300 mb-1">Account Type <span class="text-red-400">*</span></label>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Account Type <span class="text-red-500 dark:text-red-400">*</span></label>
                     <select wire:model="accountType"
-                        style="width:100%;background:#1f2937;border:1px solid #374151;border-radius:0.375rem;padding:0.5rem 0.75rem;color:#f9fafb;font-size:0.875rem;box-sizing:border-box">
+                        class="w-full rounded-md border border-gray-300 bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                        style="padding:0.5rem 0.75rem;font-size:0.875rem;box-sizing:border-box">
                         @foreach($this->accountTypes as $type)
                         <option value="{{ $type->value }}">{{ $type->label() }}</option>
                         @endforeach
                     </select>
-                    @error('accountType')<p class="mt-1 text-xs text-red-400">{{ $message }}</p>@enderror
+                    @error('accountType')<p class="mt-1 text-xs text-red-500 dark:text-red-400">{{ $message }}</p>@enderror
                 </div>
 
                 {{-- Starting Balance --}}
                 <div>
-                    <label class="block text-sm font-medium text-gray-300 mb-1">Starting Balance</label>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Starting Balance</label>
                     <div style="position:relative">
-                        <span style="position:absolute;left:0.75rem;top:50%;transform:translateY(-50%);color:#9ca3af;font-size:0.875rem">$</span>
+                        <span class="text-gray-500 dark:text-gray-400" style="position:absolute;left:0.75rem;top:50%;transform:translateY(-50%);font-size:0.875rem">$</span>
                         <input wire:model="startingBalance" type="number" min="0" step="0.01" placeholder="50000.00"
-                            style="width:100%;background:#1f2937;border:1px solid #374151;border-radius:0.375rem;padding:0.5rem 0.75rem 0.5rem 1.5rem;color:#f9fafb;font-size:0.875rem;box-sizing:border-box">
+                            class="w-full rounded-md border border-gray-300 bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                            style="padding:0.5rem 0.75rem 0.5rem 1.5rem;font-size:0.875rem;box-sizing:border-box">
                     </div>
-                    <p class="mt-1 text-xs text-gray-500">Balance before your first trade in this journal.</p>
-                    @error('startingBalance')<p class="mt-1 text-xs text-red-400">{{ $message }}</p>@enderror
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-500">Balance before your first trade in this journal.</p>
+                    @error('startingBalance')<p class="mt-1 text-xs text-red-500 dark:text-red-400">{{ $message }}</p>@enderror
                 </div>
 
                 {{-- Timezone --}}
                 <div>
-                    <label class="block text-sm font-medium text-gray-300 mb-1">Timezone</label>
-                    <input wire:model="timezone" type="text" placeholder="Leave blank to use journal timezone"
-                        style="width:100%;background:#1f2937;border:1px solid #374151;border-radius:0.375rem;padding:0.5rem 0.75rem;color:#f9fafb;font-size:0.875rem;box-sizing:border-box">
-                    <p class="mt-1 text-xs text-gray-500">e.g. America/Chicago — defaults to journal timezone if blank.</p>
-                    @error('timezone')<p class="mt-1 text-xs text-red-400">{{ $message }}</p>@enderror
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Timezone</label>
+                    <livewire:components.timezone-picker
+                        :timezone="$timezone"
+                        :key="'account-timezone-'.($editingId ?? 'new')"
+                    />
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-500">Leave blank to use journal timezone.</p>
+                    @error('timezone')<p class="mt-1 text-xs text-red-500 dark:text-red-400">{{ $message }}</p>@enderror
+                </div>
+
+                {{-- Connection --}}
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Connection</label>
+                    <input wire:model="connection" type="text" placeholder="e.g. Rithmic, Tradovate"
+                        class="w-full rounded-md border border-gray-300 bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                        style="padding:0.5rem 0.75rem;font-size:0.875rem;box-sizing:border-box">
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-500">Optional — auto-filled from imports if left blank.</p>
+                    @error('connection')<p class="mt-1 text-xs text-red-500 dark:text-red-400">{{ $message }}</p>@enderror
                 </div>
             </div>
 
             <div style="display:flex;gap:0.75rem;margin-top:1.25rem">
                 <button wire:click="save"
-                    style="padding:0.5rem 1.25rem;background:#2563eb;color:#fff;border:none;border-radius:0.375rem;font-size:0.875rem;font-weight:500;cursor:pointer"
-                    onmouseover="this.style.background='#1d4ed8'" onmouseout="this.style.background='#2563eb'">
+                    class="rounded-md bg-blue-600 text-white hover:bg-blue-700"
+                    style="padding:0.5rem 1.25rem;font-size:0.875rem;font-weight:500;cursor:pointer">
                     Save
                 </button>
                 <button wire:click="cancel"
-                    style="padding:0.5rem 1.25rem;background:#374151;color:#d1d5db;border:none;border-radius:0.375rem;font-size:0.875rem;cursor:pointer"
-                    onmouseover="this.style.background='#4b5563'" onmouseout="this.style.background='#374151'">
+                    class="rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                    style="padding:0.5rem 1.25rem;font-size:0.875rem;cursor:pointer">
                     Cancel
                 </button>
             </div>
@@ -223,84 +250,84 @@ new class extends Component
 
         {{-- Accounts table --}}
         @if($this->accounts->isEmpty() && !$creating)
-        <div style="background:#111827;border:1px solid #374151;border-radius:0.5rem;padding:3rem;text-align:center">
-            <p class="text-gray-400 text-sm">No accounts yet. Add your first account to get started.</p>
+        <div class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800" style="padding:3rem;text-align:center">
+            <p class="text-gray-500 dark:text-gray-400 text-sm">No accounts yet. Add your first account to get started.</p>
         </div>
         @else
-        <div style="background:#111827;border:1px solid #374151;border-radius:0.5rem;overflow:hidden">
+        <div class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800" style="overflow:hidden">
             <table style="width:100%;border-collapse:collapse;font-size:0.875rem">
                 <thead>
-                    <tr style="border-bottom:1px solid #374151">
-                        <th style="text-align:left;padding:0.75rem 1rem;color:#9ca3af;font-weight:500;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">Name</th>
-                        <th style="text-align:left;padding:0.75rem 1rem;color:#9ca3af;font-weight:500;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">Type</th>
-                        <th style="text-align:right;padding:0.75rem 1rem;color:#9ca3af;font-weight:500;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">Starting Balance</th>
-                        <th style="text-align:right;padding:0.75rem 1rem;color:#9ca3af;font-weight:500;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">Net P&amp;L</th>
-                        <th style="text-align:right;padding:0.75rem 1rem;color:#9ca3af;font-weight:500;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">Current Balance</th>
-                        <th style="text-align:right;padding:0.75rem 1rem;color:#9ca3af;font-weight:500;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">Trades</th>
+                    <tr class="border-b border-gray-200 dark:border-gray-700">
+                        <th class="text-gray-500 dark:text-gray-400" style="text-align:left;padding:0.75rem 1rem;font-weight:500;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">Name</th>
+                        <th class="text-gray-500 dark:text-gray-400" style="text-align:left;padding:0.75rem 1rem;font-weight:500;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">Type</th>
+                        <th class="text-gray-500 dark:text-gray-400" style="text-align:right;padding:0.75rem 1rem;font-weight:500;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">Starting Balance</th>
+                        <th class="text-gray-500 dark:text-gray-400" style="text-align:right;padding:0.75rem 1rem;font-weight:500;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">Net P&amp;L</th>
+                        <th class="text-gray-500 dark:text-gray-400" style="text-align:right;padding:0.75rem 1rem;font-weight:500;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">Current Balance</th>
+                        <th class="text-gray-500 dark:text-gray-400" style="text-align:right;padding:0.75rem 1rem;font-weight:500;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">Trades</th>
                         <th style="padding:0.75rem 1rem"></th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
                     @foreach($this->accounts as $account)
                     @php
                         $netPnl    = (float) ($account->trades_sum_net_pnl ?? 0);
                         $balance   = $account->starting_balance !== null ? (float) $account->starting_balance + $netPnl : null;
-                        $pnlColor  = $netPnl >= 0 ? '#4ade80' : '#f87171';
+                        $pnlClass  = $netPnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400';
                     @endphp
-                    <tr style="border-bottom:1px solid #1f2937{{ $loop->last ? ';border-bottom:none' : '' }}">
-                        <td style="padding:0.875rem 1rem;color:#f9fafb;font-weight:500">
+                    <tr>
+                        <td class="text-gray-900 dark:text-gray-50" style="padding:0.875rem 1rem;font-weight:500">
                             {{ $account->name }}
                             @if($account->connection)
-                            <span style="margin-left:0.5rem;font-size:0.75rem;color:#6b7280">{{ $account->connection }}</span>
+                            <span class="text-gray-500 dark:text-gray-500" style="margin-left:0.5rem;font-size:0.75rem">{{ $account->connection }}</span>
                             @endif
                         </td>
                         <td style="padding:0.875rem 1rem">
                             @php
-                                $typeColors = [
-                                    'sim'    => ['bg' => '#1e3a5f', 'text' => '#93c5fd'],
-                                    'eval'   => ['bg' => '#3b1f5e', 'text' => '#d8b4fe'],
-                                    'funded' => ['bg' => '#713f12', 'text' => '#fde68a'],
+                                $typeClasses = [
+                                    'sim'    => 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
+                                    'eval'   => 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
+                                    'funded' => 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
                                 ];
-                                $tc = $typeColors[$account->account_type?->value ?? 'funded'] ?? $typeColors['funded'];
+                                $tc = $typeClasses[$account->account_type?->value ?? 'funded'] ?? $typeClasses['funded'];
                             @endphp
-                            <span style="display:inline-block;padding:0.125rem 0.5rem;border-radius:9999px;font-size:0.75rem;font-weight:500;background:{{ $tc['bg'] }};color:{{ $tc['text'] }}">
+                            <span class="{{ $tc }}" style="display:inline-block;padding:0.125rem 0.5rem;border-radius:9999px;font-size:0.75rem;font-weight:500">
                                 {{ $account->account_type?->label() ?? 'Funded' }}
                             </span>
                         </td>
-                        <td style="padding:0.875rem 1rem;text-align:right;color:#d1d5db">
+                        <td class="text-gray-700 dark:text-gray-300" style="padding:0.875rem 1rem;text-align:right">
                             {{ $account->starting_balance !== null ? '$'.number_format((float)$account->starting_balance, 2) : '—' }}
                         </td>
-                        <td style="padding:0.875rem 1rem;text-align:right;color:{{ $pnlColor }};font-weight:500">
+                        <td class="{{ $pnlClass }}" style="padding:0.875rem 1rem;text-align:right;font-weight:500">
                             {{ $netPnl >= 0 ? '+' : '' }}${{ number_format(abs($netPnl), 2) }}
                         </td>
-                        <td style="padding:0.875rem 1rem;text-align:right;color:#f9fafb;font-weight:500">
+                        <td class="text-gray-900 dark:text-gray-50" style="padding:0.875rem 1rem;text-align:right;font-weight:500">
                             {{ $balance !== null ? '$'.number_format($balance, 2) : '—' }}
                         </td>
-                        <td style="padding:0.875rem 1rem;text-align:right;color:#9ca3af">
+                        <td class="text-gray-500 dark:text-gray-400" style="padding:0.875rem 1rem;text-align:right">
                             {{ number_format($account->trades_count) }}
                         </td>
                         <td style="padding:0.875rem 1rem;text-align:right">
                             @if($confirmDeleteId === $account->id)
-                            <span style="font-size:0.8125rem;color:#d1d5db;margin-right:0.5rem">Delete?</span>
+                            <span class="text-gray-700 dark:text-gray-300" style="font-size:0.8125rem;margin-right:0.5rem">Delete?</span>
                             <button wire:click="delete({{ $account->id }})"
-                                style="padding:0.25rem 0.625rem;background:#991b1b;color:#fca5a5;border:none;border-radius:0.25rem;font-size:0.75rem;cursor:pointer;margin-right:0.25rem"
-                                onmouseover="this.style.background='#7f1d1d'" onmouseout="this.style.background='#991b1b'">
+                                class="rounded bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 dark:hover:bg-red-900/50"
+                                style="padding:0.25rem 0.625rem;font-size:0.75rem;cursor:pointer;margin-right:0.25rem">
                                 Yes
                             </button>
                             <button wire:click="cancelDelete"
-                                style="padding:0.25rem 0.625rem;background:#374151;color:#d1d5db;border:none;border-radius:0.25rem;font-size:0.75rem;cursor:pointer"
-                                onmouseover="this.style.background='#4b5563'" onmouseout="this.style.background='#374151'">
+                                class="rounded bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                                style="padding:0.25rem 0.625rem;font-size:0.75rem;cursor:pointer">
                                 No
                             </button>
                             @else
                             <button wire:click="startEdit({{ $account->id }})"
-                                style="padding:0.25rem 0.625rem;background:#1f2937;color:#9ca3af;border:1px solid #374151;border-radius:0.25rem;font-size:0.75rem;cursor:pointer;margin-right:0.25rem"
-                                onmouseover="this.style.color='#f9fafb'" onmouseout="this.style.color='#9ca3af'">
+                                class="rounded border border-gray-300 bg-white text-gray-600 hover:text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
+                                style="padding:0.25rem 0.625rem;font-size:0.75rem;cursor:pointer;margin-right:0.25rem">
                                 Edit
                             </button>
                             <button wire:click="confirmDelete({{ $account->id }})"
-                                style="padding:0.25rem 0.625rem;background:#1f2937;color:#9ca3af;border:1px solid #374151;border-radius:0.25rem;font-size:0.75rem;cursor:pointer"
-                                onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#9ca3af'">
+                                class="rounded border border-gray-300 bg-white text-gray-600 hover:text-red-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:text-red-400"
+                                style="padding:0.25rem 0.625rem;font-size:0.75rem;cursor:pointer">
                                 Delete
                             </button>
                             @endif

@@ -43,7 +43,7 @@ new class extends Component
 
         $this->timezone = $tz;
         $this->query    = $tz;
-        $this->dispatch('timezone-selected');
+        $this->dispatch('timezone-selected', timezone: $tz);
     }
 
     /** Common trading-zone defaults shown before the user types. */
