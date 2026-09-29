@@ -5,6 +5,7 @@ namespace App\Observers;
 use App\Mail\NewUserRegistered;
 use App\Models\Journal;
 use App\Models\User;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Session;
 
@@ -22,10 +23,26 @@ class UserObserver
             return;
         }
 
-        $admins = User::where('is_admin', true)->get();
-        if ($admins->isNotEmpty()) {
-            Mail::to($admins)->send(new NewUserRegistered($user));
+        $recipients = $this->registrationNotificationRecipients();
+        if ($recipients->isNotEmpty()) {
+            Mail::to($recipients)->send(new NewUserRegistered($user));
         }
+    }
+
+    /**
+     * Who gets "new user registered" emails. A single configured address
+     * (ADMIN_EMAIL) if set, so notifications don't fan out to every admin
+     * account — falls back to all admins otherwise, so environments without
+     * ADMIN_EMAIL configured (local/CI) keep the old behavior.
+     */
+    private function registrationNotificationRecipients(): Collection
+    {
+        $configured = config('mail.admin_notification_email');
+        if ($configured) {
+            return collect([$configured]);
+        }
+
+        return User::where('is_admin', true)->get();
     }
 
     public function updated(User $user): void {}

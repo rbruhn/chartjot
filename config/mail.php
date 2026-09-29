@@ -115,4 +115,18 @@ return [
         'name' => env('MAIL_FROM_NAME', env('APP_NAME', 'Laravel')),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Admin Notification Address
+    |--------------------------------------------------------------------------
+    |
+    | Where "new user registered" notifications go. If unset, falls back to
+    | every user with is_admin=true (see UserObserver) — set this to route
+    | notifications to one specific address instead, regardless of how many
+    | admin accounts exist.
+    |
+    */
+
+    'admin_notification_email' => env('ADMIN_EMAIL'),
+
 ];
