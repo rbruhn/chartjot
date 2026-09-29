@@ -7,15 +7,20 @@
 
         <title>{{ config('app.name', 'Laravel') }}</title>
 
-        <!-- Apply the saved theme before first paint, to avoid a flash of the wrong theme -->
+        <!-- Apply the saved theme before first paint, to avoid a flash of the wrong theme.
+             Re-applied on livewire:navigated too, since wire:navigate swaps the page
+             without re-running this script otherwise (each new page would silently
+             lose the dark class). -->
         <script>
-            (function () {
+            function applyTheme() {
                 const stored = localStorage.getItem('theme');
                 const dark = stored
                     ? stored === 'dark'
                     : window.matchMedia('(prefers-color-scheme: dark)').matches;
                 document.documentElement.classList.toggle('dark', dark);
-            })();
+            }
+            applyTheme();
+            document.addEventListener('livewire:navigated', applyTheme);
         </script>
 
         <!-- Fonts -->
