@@ -171,7 +171,7 @@ new class extends Component
 
         {{-- Create / Edit form --}}
         @if($creating || $editingId)
-        <div class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800" style="padding:1.5rem">
+        <div class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900" style="padding:1.5rem">
             <h3 class="text-base font-semibold text-gray-900 dark:text-gray-100 mb-4">
                 {{ $creating ? 'New Account' : 'Edit Account' }}
             </h3>
@@ -250,11 +250,11 @@ new class extends Component
 
         {{-- Accounts table --}}
         @if($this->accounts->isEmpty() && !$creating)
-        <div class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800" style="padding:3rem;text-align:center">
+        <div class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900" style="padding:3rem;text-align:center">
             <p class="text-gray-500 dark:text-gray-400 text-sm">No accounts yet. Add your first account to get started.</p>
         </div>
         @else
-        <div class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800" style="overflow:hidden">
+        <div class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900" style="overflow:hidden">
             <table style="width:100%;border-collapse:collapse;font-size:0.875rem">
                 <thead>
                     <tr class="border-b border-gray-200 dark:border-gray-700">
