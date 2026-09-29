@@ -42,11 +42,17 @@ jobs:
         run: |
           # Select the highest semantic-version tag reachable from HEAD.
           LATEST_TAG="$(git tag --merged HEAD --list --sort=-version:refname | grep -m1 -E '^[0-9]+\.[0-9]+\.[0-9]+$' || true)"
-          LATEST_TAG="${LATEST_TAG:-0.0.0}"
-          echo "Latest tag: $LATEST_TAG"
 
-          # Check commit messages in the current push for version bump indicators
-          COMMITS=$(git log ${LATEST_TAG}..HEAD --oneline)
+          if [[ -n "$LATEST_TAG" ]]; then
+            echo "Latest tag: $LATEST_TAG"
+            COMMITS="$(git log "${LATEST_TAG}..HEAD" --oneline)"
+            CURRENT_VERSION="$LATEST_TAG"
+          else
+            echo "No semantic tags found; starting from 0.0.0"
+            COMMITS="$(git log HEAD --oneline)"
+            CURRENT_VERSION="0.0.0"
+          fi
+
           echo "Commits since last tag:"
           echo "$COMMITS"
 
@@ -70,7 +76,7 @@ jobs:
 
           echo "Bump type: $BUMP_TYPE"
           echo "bump_type=$BUMP_TYPE" >> "$GITHUB_OUTPUT"
-          echo "current_version=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+          echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Calculate new version
         id: new_version
