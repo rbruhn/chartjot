@@ -47,7 +47,7 @@ new class extends Component
     {
         $account = $this->journal->accounts()->findOrFail($id);
         $this->name            = $account->name;
-        $this->accountType     = $account->account_type?->value ?? 'live';
+        $this->accountType     = $account->account_type?->value ?? 'funded';
         $this->startingBalance = $account->starting_balance !== null ? number_format((float) $account->starting_balance, 2, '.', '') : '';
         $this->connection      = $account->connection ?? '';
         $this->editingId       = $id;
@@ -128,7 +128,7 @@ new class extends Component
     private function resetForm(): void
     {
         $this->name            = '';
-        $this->accountType     = 'live';
+        $this->accountType     = 'funded';
         $this->startingBalance = '';
         $this->connection      = '';
         $this->resetErrorBag();
