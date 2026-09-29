@@ -645,3 +645,53 @@ test('cannot delete screenshot belonging to another journal', function () {
         ->test('journal.trade-journal', ['journal' => $journal])
         ->call('deleteScreenshot', $shot->id);
 });
+
+// ---------------------------------------------------------------------------
+// Trade delete
+// ---------------------------------------------------------------------------
+
+test('deleteTrade removes the trade, all associated data, and screenshot files', function () {
+    Storage::fake('local');
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal);
+
+    \App\Models\TradeExecution::factory()->create(['trade_id' => $trade->id]);
+    \App\Models\TradeNote::factory()->create(['trade_id' => $trade->id, 'created_by' => $user->id]);
+
+    $path = "trade-screenshots/{$journal->id}/{$trade->uuid}.png";
+    Storage::disk('local')->put($path, 'fake-image-data');
+    TradeScreenshot::factory()->create([
+        'trade_id'  => $trade->id,
+        'disk'      => 'local',
+        'path'      => $path,
+        'mime_type' => 'image/png',
+        'bytes'     => 15,
+        'source'    => \App\Enums\ScreenshotSource::ManualUpload,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->call('deleteTrade', $trade->uuid)
+        ->assertSet('selectedUuid', '');
+
+    expect(Trade::count())->toBe(0)
+        ->and(\App\Models\TradeExecution::count())->toBe(0)
+        ->and(\App\Models\TradeNote::count())->toBe(0)
+        ->and(TradeScreenshot::count())->toBe(0);
+    Storage::disk('local')->assertMissing($path);
+});
+
+test('cannot delete a trade belonging to another journal', function () {
+    [$user, $journal]            = journalUser();
+    [$otherUser, $otherJournal]  = journalUser();
+    $otherTrade = tradeInJournal($otherJournal);
+
+    $this->expectException(\Illuminate\Database\Eloquent\ModelNotFoundException::class);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('deleteTrade', $otherTrade->uuid);
+
+    expect(Trade::find($otherTrade->id))->not->toBeNull();
+});
