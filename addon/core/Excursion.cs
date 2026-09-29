@@ -8,6 +8,22 @@ namespace ChartJot.Core
 
 		/// <summary>True once at least one live last-trade price was seen. Fill prices alone do not count.</summary>
 		public bool HadTicks;
+
+		/// <summary>
+		/// <paramref name="current"/> widened by a range observed earlier (see <see cref="ExcursionTracker.Merge"/>).
+		/// <paramref name="current"/> always holds at least its fill prices, so it is never the empty snapshot.
+		/// </summary>
+		internal static ExcursionSnapshot Combine(ExcursionSnapshot current, ExcursionSnapshot earlier)
+		{
+			if (!earlier.HadTicks)
+				return current;
+			return new ExcursionSnapshot
+			{
+				High = earlier.High > current.High ? earlier.High : current.High,
+				Low = earlier.Low < current.Low ? earlier.Low : current.Low,
+				HadTicks = true
+			};
+		}
 	}
 
 	/// <summary>

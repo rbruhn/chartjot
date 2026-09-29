@@ -258,5 +258,31 @@ namespace ChartJot.Core.Tests
 
 			Assert.Empty(StagedTrades.Deserialize(trades.Serialize()).All);
 		}
+
+		[Fact]
+		public void SerializeDeserialize_RoundTripsTheReversalFlag()
+		{
+			StagedTrades staged = new StagedTrades();
+			CompletedTrade trade = WorkedExample();
+			trade.OpenedByReversal = true;
+			staged.Add(new StagedTrade { Trade = trade, Notes = new List<NoteRecord>() });
+
+			StagedTrades reloaded = StagedTrades.Deserialize(staged.Serialize());
+
+			Assert.True(reloaded.All[0].Trade.OpenedByReversal);
+		}
+
+		[Fact]
+		public void Deserialize_AStateFileWithoutTheReversalFlag_ReadsItAsFalse()
+		{
+			StagedTrades staged = new StagedTrades();
+			staged.Add(new StagedTrade { Trade = WorkedExample(), Notes = new List<NoteRecord>() });
+			string older = staged.Serialize().Replace(",\"opened_by_reversal\":false", "");
+
+			StagedTrades reloaded = StagedTrades.Deserialize(older);
+
+			Assert.DoesNotContain("opened_by_reversal", older);
+			Assert.False(reloaded.All[0].Trade.OpenedByReversal);
+		}
 	}
 }

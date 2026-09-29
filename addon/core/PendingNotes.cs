@@ -89,7 +89,11 @@ namespace ChartJot.Core
 
 		public static PendingNotes Deserialize(string json)
 		{
-			JsonValue root = JsonValue.Parse(json);
+			return FromJson(JsonValue.Parse(json));
+		}
+
+		internal static PendingNotes FromJson(JsonValue root)
+		{
 			PendingNotes pending = new PendingNotes();
 
 			foreach (JsonValue bucket in root.Items)

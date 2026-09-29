@@ -76,7 +76,11 @@ namespace ChartJot.Core
 
 		public static StagedTrades Deserialize(string json)
 		{
-			JsonValue root = JsonValue.Parse(json);
+			return FromJson(JsonValue.Parse(json));
+		}
+
+		internal static StagedTrades FromJson(JsonValue root)
+		{
 			StagedTrades staged = new StagedTrades();
 			foreach (JsonValue item in root.Items)
 				staged.Add(ReadStagedTrade(item));
@@ -127,7 +131,7 @@ namespace ChartJot.Core
 
 		// ---- CompletedTrade ----
 
-		private static void WriteCompletedTrade(JsonWriter w, CompletedTrade t)
+		internal static void WriteCompletedTrade(JsonWriter w, CompletedTrade t)
 		{
 			w.BeginObject();
 			w.Property("trade_id", t.TradeId);
@@ -166,6 +170,7 @@ namespace ChartJot.Core
 				w.EndObject();
 			}
 			w.Property("excursion_complete", t.ExcursionComplete);
+			w.Property("opened_by_reversal", t.OpenedByReversal);
 
 			w.Name("legs").BeginArray();
 			foreach (Leg leg in t.Legs ?? new List<Leg>())
@@ -180,7 +185,7 @@ namespace ChartJot.Core
 			w.EndObject();
 		}
 
-		private static CompletedTrade ReadCompletedTrade(JsonValue v)
+		internal static CompletedTrade ReadCompletedTrade(JsonValue v)
 		{
 			return new CompletedTrade
 			{
@@ -211,6 +216,7 @@ namespace ChartJot.Core
 					MaxFavorablePrice = v["excursion"]["max_favorable_price"].AsDecimal()
 				},
 				ExcursionComplete = v["excursion_complete"].AsBool(),
+				OpenedByReversal = v.Has("opened_by_reversal") && v["opened_by_reversal"].AsBool(),
 				Legs = v["legs"].Items.Select(ReadLeg).ToList(),
 				Fills = v["fills"].Items.Select(ReadTradeFill).ToList()
 			};
@@ -365,7 +371,7 @@ namespace ChartJot.Core
 
 		// ---- NoteRecord ----
 
-		private static void WriteNote(JsonWriter w, NoteRecord note)
+		internal static void WriteNote(JsonWriter w, NoteRecord note)
 		{
 			w.BeginObject();
 			w.Property("body", note.Body);
@@ -374,7 +380,7 @@ namespace ChartJot.Core
 			w.EndObject();
 		}
 
-		private static NoteRecord ReadNote(JsonValue v)
+		internal static NoteRecord ReadNote(JsonValue v)
 		{
 			return new NoteRecord
 			{
