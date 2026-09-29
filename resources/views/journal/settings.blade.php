@@ -64,7 +64,9 @@
                 <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Import executions</h3>
                 <p class="mt-1 mb-5 text-sm text-gray-600 dark:text-gray-400">
                     Upload an NT8 Trade Performance → Executions CSV to import missed or historical trades.
-                    Duplicate trades are skipped automatically.
+                    Duplicate trades are skipped automatically. Accounts must already exist on the
+                    <a href="{{ route('journal.accounts') }}" wire:navigate class="underline hover:no-underline">Accounts page</a>
+                    with matching names — trades for unknown accounts will fail to import.
                 </p>
                 <livewire:journal.csv-import :journal="$journal" />
             </div>
