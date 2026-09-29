@@ -33,6 +33,10 @@ namespace ChartJot.Core
 	{
 		public DateTimeOffset CapturedAt { get; set; }
 		public string Caption { get; set; }
+
+		/// <summary>"png" or "jpeg", whatever the format setting was at capture time. Settings can change later,
+		/// so this is what locates the file on disk by trade_id, not the current setting.</summary>
+		public string Format { get; set; }
 	}
 
 	/// <summary>What the trader chose or the AddOn knows at submission time.</summary>
