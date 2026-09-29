@@ -18,7 +18,7 @@ class AdminUserSeeder extends Seeder
         User::forceCreate([
             'name'     => env('ADMIN_NAME', 'Admin'),
             'email'    => env('ADMIN_EMAIL', 'admin@chartjot.local'),
-            'password' => Hash::make(env('ADMIN_PASSWORD', 'change-me-immediately!')),
+            'password' => Hash::make(env('ADMIN_PASSWORD', 'secret')),
             'status'   => UserStatus::Active,
             'is_admin' => true,
         ]);
