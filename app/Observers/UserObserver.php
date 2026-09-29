@@ -12,14 +12,14 @@ class UserObserver
 {
     public function created(User $user): void
     {
-        if ($user->is_admin) {
-            return;
-        }
-
         $token = Journal::createForUser($user);
 
         if (app()->bound('session')) {
             Session::flash('journal_ingest_token', $token);
+        }
+
+        if ($user->is_admin) {
+            return;
         }
 
         $admins = User::where('is_admin', true)->get();
