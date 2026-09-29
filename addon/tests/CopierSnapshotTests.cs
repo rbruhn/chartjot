@@ -27,6 +27,30 @@ namespace ChartJot.Core.Tests
 		}
 
 		[Fact]
+		public void SizeColumnAndDirectionFilterSettings_DefaultToTheirSafeValues()
+		{
+			CopierSnapshot snap = Parse("PA-02|Slave|1|No|No|No|No|No|Default|No|Rithmic");
+
+			Assert.True(snap.SizeColumnEnabled);
+			Assert.False(snap.SelectTradeDirectionEnabled);
+			Assert.True(snap.AllowLong);
+			Assert.True(snap.AllowShort);
+		}
+
+		[Fact]
+		public void SizeColumnAndDirectionFilterSettings_ThreadThroughWhenProvided()
+		{
+			CopierSnapshot snap = CopierSnapshotParser.Parse("APEX-24570-135", true, "All", "ES", "Round Up At 0.5", "Multiplier",
+				new[] { "PA-02|Slave|1|No|No|No|No|No|Default|No|Rithmic" }, CopierSnapshotParser.SourceLive,
+				sizeColumnEnabled: false, selectTradeDirectionEnabled: true, allowLong: true, allowShort: false);
+
+			Assert.False(snap.SizeColumnEnabled);
+			Assert.True(snap.SelectTradeDirectionEnabled);
+			Assert.True(snap.AllowLong);
+			Assert.False(snap.AllowShort);
+		}
+
+		[Fact]
 		public void TheMastersOwnRowIsSkipped_AndNoneRoleIsNotAFollower()
 		{
 			CopierSnapshot snap = Parse(

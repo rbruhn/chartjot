@@ -159,6 +159,7 @@ namespace ChartJot.Core
 	public static class CopyMatcher
 	{
 		public const string RoundUpAtHalf = "Round Up At 0.5";
+		public const string RoundDown = "Round Down";
 		public const string MultiplierModeName = "Multiplier";
 		public const string QuantityModeName = "Quantity";
 
@@ -290,7 +291,7 @@ namespace ChartJot.Core
 				Faded = follower.Fade,
 				Blown = follower.Blown,
 				Quantity = ExpectedQuantity(EntryOrderQuantities(master), follower.Multiplier, setup.RoundingMode, setup.MultiplierMode,
-					follower.ExecutionsMode, diagnostics)
+					follower.ExecutionsMode, diagnostics, setup.SizeColumnEnabled)
 			};
 		}
 
@@ -315,23 +316,30 @@ namespace ChartJot.Core
 		}
 
 		/// <summary>
-		/// How many contracts a follower should have entered in total, from the copier's own rules:
+		/// How many contracts a follower should have entered in total, from the copier's own rules (vendor-confirmed
+		/// 2026-09-28):
 		/// <list type="bullet">
-		/// <item>Size Calculation = Multiplier, Executions mode: the master's total times the multiplier, rounded per the
-		/// Size Rounding setting.</item>
-		/// <item>Size Calculation = Multiplier, Orders mode: each master order is mirrored and rounded on its own, and
-		/// never below 1, so the total is the sum over orders. When a fraction is involved the rounding rule for
-		/// Orders mode is not documented, so the check is skipped.</item>
-		/// <item>Size Calculation = Quantity: every master order is replaced by the same fixed count.</item>
+		/// <item>IsXEnabled = false: the Size column is off entirely. Every follower takes the master's exact
+		/// quantity order for order, regardless of Size Calculation, Size, or Size Rounding.</item>
+		/// <item>Size Calculation = Multiplier, Executions mode: the master's total times the multiplier, rounded per
+		/// the Size Rounding setting.</item>
+		/// <item>Size Calculation = Multiplier, Orders mode: each master order is mirrored and rounded on its own by
+		/// the same Size Rounding setting as Executions mode, then raised to 1 if that rounds to less, so the total
+		/// is the sum over orders.</item>
+		/// <item>Size Calculation = Quantity: every master order is replaced by the same fixed count; rounding does
+		/// not apply.</item>
 		/// </list>
-		/// The result is never below 1. Any setting that is not understood gives null (no check) and a diagnostic,
-		/// because a wrong guess would put false warnings on real copies.
+		/// The result is never below 1. A Size Rounding value that is not understood gives null (no check) and a
+		/// diagnostic, because a wrong guess would put false warnings on real copies.
 		/// </summary>
 		public static int? ExpectedQuantity(IList<int> masterEntryOrders, decimal size, string roundingMode, string multiplierMode,
-			bool executionsMode, IList<string> diagnostics)
+			bool executionsMode, IList<string> diagnostics, bool sizeColumnEnabled = true)
 		{
 			if (masterEntryOrders == null || masterEntryOrders.Count == 0)
 				return null;
+
+			if (!sizeColumnEnabled)
+				return masterEntryOrders.Sum();
 
 			string mode = (multiplierMode ?? "").Trim();
 			if (string.Equals(mode, QuantityModeName, StringComparison.OrdinalIgnoreCase))
@@ -355,13 +363,10 @@ namespace ChartJot.Core
 			int sum = 0;
 			foreach (int orderQuantity in masterEntryOrders)
 			{
-				decimal product = orderQuantity * size;
-				if (product != decimal.Truncate(product))
-				{
-					AddOnce(diagnostics, "a fractional size in Orders mode is rounded per master order by a rule that is not documented; expected quantity is not checked");
+				int? resolved = Resolve(orderQuantity * size, roundingMode, diagnostics);
+				if (!resolved.HasValue)
 					return null;
-				}
-				sum += Math.Max(1, (int)product);
+				sum += Math.Max(1, resolved.Value);
 			}
 			return sum;
 		}
@@ -371,8 +376,11 @@ namespace ChartJot.Core
 			if (value == decimal.Truncate(value))
 				return (int)value; // no fraction, so the rounding setting does not matter
 
-			if (string.Equals((roundingMode ?? "").Trim(), RoundUpAtHalf, StringComparison.OrdinalIgnoreCase))
+			string mode = (roundingMode ?? "").Trim();
+			if (string.Equals(mode, RoundUpAtHalf, StringComparison.OrdinalIgnoreCase))
 				return (int)Math.Round(value, MidpointRounding.AwayFromZero);
+			if (string.Equals(mode, RoundDown, StringComparison.OrdinalIgnoreCase))
+				return (int)decimal.Truncate(value);
 
 			AddOnce(diagnostics, "rounding mode '" + roundingMode + "' is not understood; expected quantity is not checked");
 			return null;
