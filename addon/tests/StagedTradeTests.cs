@@ -284,5 +284,22 @@ namespace ChartJot.Core.Tests
 			Assert.DoesNotContain("opened_by_reversal", older);
 			Assert.False(reloaded.All[0].Trade.OpenedByReversal);
 		}
+
+		[Fact]
+		public void Deserialize_AStateFileWithoutTheReversalFlag_WorksItOutFromTheSplitFirstEntry()
+		{
+			TradeTracker tracker = new TradeTracker();
+			tracker.Apply(Buy("a", "o1", "", 1, 7804.75m, 0, 0, 1, isEntry: true));
+			tracker.Apply(Sell("b", "o2", "", 2, 7805.25m, 30, 0, -1, isEntry: true, isExit: true));
+			CompletedTrade reversed = tracker.Apply(Buy("c", "o3", "", 1, 7805.00m, 90, 0, 0, isExit: true)).Closed[0];
+			StagedTrades staged = new StagedTrades();
+			staged.Add(new StagedTrade { Trade = reversed, Notes = new List<NoteRecord>() });
+			string older = staged.Serialize().Replace(",\"opened_by_reversal\":true", "");
+
+			StagedTrades reloaded = StagedTrades.Deserialize(older);
+
+			Assert.DoesNotContain("opened_by_reversal", older);
+			Assert.True(reloaded.All[0].Trade.OpenedByReversal);
+		}
 	}
 }
