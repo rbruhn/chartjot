@@ -85,6 +85,12 @@ namespace ChartJot.Core
 		/// <summary>False when the price feed was interrupted while the trade was open.</summary>
 		public bool ExcursionComplete { get; set; }
 
+		/// <summary>
+		/// True when this trade was opened by the fill that also closed the previous trade (a reversal), rather than
+		/// from flat. The copier's Select Trade Direction filter only ever blocks an entry from flat.
+		/// </summary>
+		public bool OpenedByReversal { get; set; }
+
 		public IList<Leg> Legs { get; set; }
 		public IList<TradeFill> Fills { get; set; }
 	}

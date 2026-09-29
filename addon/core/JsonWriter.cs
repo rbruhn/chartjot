@@ -96,6 +96,15 @@ namespace ChartJot.Core
 			return this;
 		}
 
+		/// <summary>Writes already-serialized JSON (another writer's output) as one value, so a state file can
+		/// nest the documents each store already produces.</summary>
+		internal JsonWriter Raw(string json)
+		{
+			BeforeValue();
+			sb.Append(json);
+			return this;
+		}
+
 		// name/value shortcuts
 		public JsonWriter Property(string name, string value) { return Name(name).String(value); }
 		public JsonWriter Property(string name, long value) { return Name(name).Int(value); }
