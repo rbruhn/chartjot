@@ -5,7 +5,6 @@ use App\Models\Account;
 use App\Models\Journal;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Computed;
-use Livewire\Attributes\On;
 use Livewire\Volt\Component;
 
 new class extends Component
@@ -19,7 +18,6 @@ new class extends Component
     public string $name            = '';
     public string $accountType     = 'funded';
     public string $startingBalance = '';
-    public string $timezone        = '';
     public string $connection      = '';
 
     #[Computed]
@@ -51,7 +49,6 @@ new class extends Component
         $this->name            = $account->name;
         $this->accountType     = $account->account_type?->value ?? 'live';
         $this->startingBalance = $account->starting_balance !== null ? number_format((float) $account->starting_balance, 2, '.', '') : '';
-        $this->timezone        = $account->timezone ?? '';
         $this->connection      = $account->connection ?? '';
         $this->editingId       = $id;
         $this->creating        = false;
@@ -69,7 +66,6 @@ new class extends Component
             'name'            => ['required', 'string', 'max:100', $uniqueRule],
             'accountType'     => ['required', Rule::in(array_column(AccountType::cases(), 'value'))],
             'startingBalance' => ['nullable', 'numeric', 'min:0'],
-            'timezone'        => ['nullable', 'string', 'timezone:all'],
             'connection'      => ['nullable', 'string', 'max:100'],
         ]);
 
@@ -77,7 +73,12 @@ new class extends Component
             'name'             => $this->name,
             'account_type'     => AccountType::from($this->accountType),
             'starting_balance' => $this->startingBalance !== '' ? (float) $this->startingBalance : null,
-            'timezone'         => $this->timezone ?: null,
+            // No per-account timezone override via the UI — always falls back to
+            // the journal's timezone (Account::effectiveTimezone()). A wrong
+            // per-account override silently corrupts imported trade times with
+            // no way to detect it, so this field isn't worth the risk for the
+            // rare case where it'd actually differ from the journal default.
+            'timezone'         => null,
             'connection'       => $this->connection ?: null,
         ];
 
@@ -94,12 +95,6 @@ new class extends Component
     public function confirmDelete(int $id): void
     {
         $this->confirmDeleteId = $id;
-    }
-
-    #[On('timezone-selected')]
-    public function setTimezone(string $timezone): void
-    {
-        $this->timezone = $timezone;
     }
 
     public function cancelDelete(): void
@@ -135,7 +130,6 @@ new class extends Component
         $this->name            = '';
         $this->accountType     = 'live';
         $this->startingBalance = '';
-        $this->timezone        = '';
         $this->connection      = '';
         $this->resetErrorBag();
     }
@@ -209,17 +203,6 @@ new class extends Component
                     </div>
                     <p class="mt-1 text-xs text-gray-500 dark:text-gray-500">Balance before your first trade in this journal.</p>
                     @error('startingBalance')<p class="mt-1 text-xs text-red-500 dark:text-red-400">{{ $message }}</p>@enderror
-                </div>
-
-                {{-- Timezone --}}
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Timezone</label>
-                    <livewire:components.timezone-picker
-                        :timezone="$timezone"
-                        :key="'account-timezone-'.($editingId ?? 'new')"
-                    />
-                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-500">Leave blank to use journal timezone.</p>
-                    @error('timezone')<p class="mt-1 text-xs text-red-500 dark:text-red-400">{{ $message }}</p>@enderror
                 </div>
 
                 {{-- Connection --}}
