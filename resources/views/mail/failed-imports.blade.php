@@ -11,10 +11,6 @@
         .header h1 { margin: 0; font-size: 1.25rem; }
         .body { padding: 1.5rem 2rem; }
         p { margin: 0 0 1rem; }
-        table { width: 100%; border-collapse: collapse; font-size: 0.875rem; margin: 1rem 0; }
-        th { background: #f3f4f6; text-align: left; padding: 0.5rem 0.75rem; border-bottom: 2px solid #e5e7eb; font-weight: 600; color: #374151; }
-        td { padding: 0.5rem 0.75rem; border-bottom: 1px solid #f3f4f6; color: #111827; }
-        .reason { color: #dc2626; }
         .footer { padding: 1rem 2rem; font-size: 0.75rem; color: #9ca3af; border-top: 1px solid #f3f4f6; }
     </style>
 </head>
@@ -29,30 +25,11 @@
             because the account name sent by NinjaTrader did not match any account in your journal.
         </p>
         <p>
-            A CSV of all failures is attached. To resolve this, go to your
-            <strong>Accounts</strong> page and create an account whose name exactly matches
-            what NinjaTrader is sending, then re-export and re-import those trades.
+            A CSV of all failures is attached (account name, trade ID, reason, and time
+            for each). To resolve this, go to your <strong>Accounts</strong> page and
+            create an account whose name exactly matches what NinjaTrader is sending,
+            then re-export and re-import those trades.
         </p>
-        <table>
-            <thead>
-                <tr>
-                    <th>Account Name</th>
-                    <th>Trade ID</th>
-                    <th>Reason</th>
-                    <th>Time</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach($failures as $f)
-                <tr>
-                    <td>{{ $f['account_name'] }}</td>
-                    <td>{{ $f['source_trade_id'] ?? '—' }}</td>
-                    <td class="reason">{{ $f['reason'] }}</td>
-                    <td>{{ $f['occurred_at'] }}</td>
-                </tr>
-                @endforeach
-            </tbody>
-        </table>
     </div>
     <div class="footer">
         Chart Jot · You are receiving this because a trade import failed for your journal.
