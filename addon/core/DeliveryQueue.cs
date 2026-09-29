@@ -265,7 +265,9 @@ namespace ChartJot.Core
 
 		/// <summary>Rebuilds a queue from <see cref="Serialize"/>'s output. Backoff timing for any future
 		/// retries uses this queue's own <paramref name="initialBackoff"/>/<paramref name="maxBackoff"/>, not
-		/// whatever produced the file.</summary>
+		/// whatever produced the file. A delivery saved while <see cref="DeliveryState.Sending"/> never had its answer
+		/// recorded (NT8 closed mid-request), so it comes back <see cref="DeliveryState.Pending"/> to be sent again;
+		/// the server's Idempotency-Key check makes that safe if the first request did arrive.</summary>
 		public static DeliveryQueue Deserialize(string json, TimeSpan? initialBackoff = null, TimeSpan? maxBackoff = null)
 		{
 			return FromJson(JsonValue.Parse(json), initialBackoff, maxBackoff);
@@ -281,7 +283,7 @@ namespace ChartJot.Core
 				{
 					TradeId = item["trade_id"].AsString(),
 					PayloadJson = item["payload_json"].AsString(),
-					State = ParseState(item["state"].AsString()),
+					State = Resumable(ParseState(item["state"].AsString())),
 					Attempts = item["attempts"].AsInt32(),
 					NextAttemptAt = ParseTimestamp(item["next_attempt_at"]),
 					SentAt = ParseTimestamp(item["sent_at"]),
@@ -306,6 +308,11 @@ namespace ChartJot.Core
 		private static DateTimeOffset? ParseTimestamp(JsonValue value)
 		{
 			return value.IsNull ? (DateTimeOffset?)null : DateTimeOffset.Parse(value.AsString(), CultureInfo.InvariantCulture, DateTimeStyles.None);
+		}
+
+		private static DeliveryState Resumable(DeliveryState state)
+		{
+			return state == DeliveryState.Sending ? DeliveryState.Pending : state;
 		}
 
 		private static DeliveryState ParseState(string value)

@@ -99,6 +99,21 @@ namespace ChartJot.Core.Tests
 		}
 
 		[Fact]
+		public void Deserialize_ADeliverySavedMidRequest_ComesBackPendingAndDue()
+		{
+			DeliveryQueue queue = new DeliveryQueue();
+			queue.Enqueue("t1", "{\"a\":1}");
+			queue.MarkSending("t1");
+
+			DeliveryQueue reloaded = DeliveryQueue.Deserialize(queue.Serialize());
+
+			QueuedDelivery d = reloaded.Find("t1");
+			Assert.Equal(DeliveryState.Pending, d.State);
+			Assert.Equal("{\"a\":1}", d.PayloadJson);
+			Assert.Equal("t1", Assert.Single(reloaded.Due(Now)).TradeId);
+		}
+
+		[Fact]
 		public void Deserialize_UnrecognizedState_ThrowsFormatException()
 		{
 			string json = "{\"configuration_error_halted\":false,\"deliveries\":[{\"trade_id\":\"t1\",\"payload_json\":\"{}\"," +
