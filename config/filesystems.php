@@ -36,6 +36,16 @@ return [
             'serve' => true,
             'throw' => false,
             'report' => false,
+            // Flysystem's own default (0700 dir / 0600 file) shuts out the web
+            // server's group entirely. Group-writable so PHP-FPM (www-data) and
+            // the deploy user (both members of the www-data group on the
+            // server) can both read/write files the other created — see
+            // WEB.md "Key Technical Rules" for why ACLs alone don't survive
+            // Laravel's own chmod() calls on newly created directories.
+            'permissions' => [
+                'file' => ['public' => 0664, 'private' => 0660],
+                'dir'  => ['public' => 0775, 'private' => 0770],
+            ],
         ],
 
         'public' => [
@@ -45,6 +55,10 @@ return [
             'visibility' => 'public',
             'throw' => false,
             'report' => false,
+            'permissions' => [
+                'file' => ['public' => 0664, 'private' => 0660],
+                'dir'  => ['public' => 0775, 'private' => 0770],
+            ],
         ],
 
         's3' => [
