@@ -70,6 +70,18 @@ namespace ChartJot.Core
 			return this;
 		}
 
+		/// <summary>
+		/// A raw JSON number, for state files read back by <see cref="JsonValue"/> (which parses numbers straight
+		/// into <c>decimal</c>, never through <c>double</c>). The outgoing API payload uses strings instead
+		/// (see <see cref="PayloadBuilder"/>) because that consumer's own JSON reader is not under our control.
+		/// </summary>
+		public JsonWriter Decimal(decimal value)
+		{
+			BeforeValue();
+			sb.Append(value.ToString(CultureInfo.InvariantCulture));
+			return this;
+		}
+
 		public JsonWriter Bool(bool value)
 		{
 			BeforeValue();
@@ -88,6 +100,7 @@ namespace ChartJot.Core
 		public JsonWriter Property(string name, string value) { return Name(name).String(value); }
 		public JsonWriter Property(string name, long value) { return Name(name).Int(value); }
 		public JsonWriter Property(string name, bool value) { return Name(name).Bool(value); }
+		public JsonWriter Property(string name, decimal value) { return Name(name).Decimal(value); }
 
 		public override string ToString()
 		{
