@@ -10,7 +10,8 @@
         <!-- Apply the saved theme before first paint, to avoid a flash of the wrong theme.
              Re-applied on livewire:navigated too, since wire:navigate swaps the page
              without re-running this script otherwise (each new page would silently
-             lose the dark class). -->
+             lose the dark class). Also syncs the Alpine store (registered below) so
+             every component reading it reflects the true state. -->
         <script>
             function applyTheme() {
                 const stored = localStorage.getItem('theme');
@@ -18,9 +19,22 @@
                     ? stored === 'dark'
                     : window.matchMedia('(prefers-color-scheme: dark)').matches;
                 document.documentElement.classList.toggle('dark', dark);
+                if (window.Alpine?.store('theme')) {
+                    window.Alpine.store('theme').dark = dark;
+                }
             }
             applyTheme();
             document.addEventListener('livewire:navigated', applyTheme);
+            document.addEventListener('alpine:init', () => {
+                Alpine.store('theme', {
+                    dark: document.documentElement.classList.contains('dark'),
+                    set(value) {
+                        this.dark = value;
+                        document.documentElement.classList.toggle('dark', value);
+                        localStorage.setItem('theme', value ? 'dark' : 'light');
+                    },
+                });
+            });
         </script>
 
         <!-- Fonts -->
