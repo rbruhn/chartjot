@@ -266,6 +266,28 @@ new class extends Component {
         unset($this->selectedTrade);
     }
 
+    public function deleteTrade(string $uuid): void
+    {
+        $trade = $this->journal->trades()
+            ->with('screenshots')
+            ->where('uuid', $uuid)
+            ->firstOrFail();
+
+        foreach ($trade->screenshots as $shot) {
+            Storage::disk($shot->disk)->delete($shot->path);
+        }
+
+        // Executions, legs, copies (+ their executions), screenshots, and notes
+        // all cascadeOnDelete at the DB level — only the screenshot files above
+        // need explicit cleanup, everything else goes with the trade row.
+        $trade->delete();
+
+        $this->selectedUuid  = '';
+        $this->editingTrade  = false;
+        $this->tradeEditForm = [];
+        unset($this->selectedTrade, $this->trades);
+    }
+
     public function holdingDuration(Trade $trade): string
     {
         $s = abs((int) $trade->entry_at->diffInSeconds($trade->exit_at));
@@ -622,6 +644,11 @@ new class extends Component {
                                 <button wire:click="startEditTrade"
                                     class="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
                                     Edit
+                                </button>
+                                <button wire:click="deleteTrade('{{ $t->uuid }}')"
+                                    wire:confirm="Delete this trade permanently? All notes, images, and trade data will be deleted. This cannot be undone."
+                                    class="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:border-red-300 dark:hover:border-red-500 transition-colors">
+                                    Delete
                                 </button>
                             @else
                                 <button wire:click="saveTrade"
