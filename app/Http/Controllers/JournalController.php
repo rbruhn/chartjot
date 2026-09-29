@@ -7,15 +7,9 @@ use Illuminate\View\View;
 
 class JournalController extends Controller
 {
-    public function index(Request $request): View|\Illuminate\Http\RedirectResponse
+    public function index(Request $request): View
     {
-        $user = $request->user();
-
-        if ($user->is_admin) {
-            return redirect()->route('admin.users');
-        }
-
-        $journal = $user->journal;
+        $journal = $request->user()->journal;
 
         $this->authorize('view', $journal);
 
