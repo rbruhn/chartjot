@@ -252,3 +252,29 @@ test('import is rejected when the journal has no timezone set', function () {
         ->and($result['errors'])->toHaveCount(1)
         ->and($result['errors'][0])->toContain('timezone');
 });
+
+test('each account timestamp is parsed using that account own timezone, not the journal default', function () {
+    $journal = journal(); // journal timezone: America/New_York
+    Account::factory()->create([
+        'journal_id' => $journal->id,
+        'name'       => 'PacificAccount',
+        'timezone'   => 'America/Los_Angeles', // 3 hours behind New York
+    ]);
+
+    // Identical local wall-clock time on both accounts.
+    $csv = csvFixture(
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-ny1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n" .
+        "ES 12-26,Sell,1,5004.00,1/2/2026 9:05:00 AM,exec-ny2,Exit,- ,ord-2,Stop,\$5.97,1,Sim101,,\n" .
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-la1,Entry,1 L,ord-3,Entry,\$5.97,1,PacificAccount,,\n" .
+        "ES 12-26,Sell,1,5004.00,1/2/2026 9:05:00 AM,exec-la2,Exit,- ,ord-4,Stop,\$5.97,1,PacificAccount,,\n"
+    );
+
+    $result = importer()->import($journal, $csv);
+    expect($result['trades_created'])->toBe(2);
+
+    $nyTrade = Trade::whereHas('account', fn ($q) => $q->where('name', 'Sim101'))->firstOrFail();
+    $laTrade = Trade::whereHas('account', fn ($q) => $q->where('name', 'PacificAccount'))->firstOrFail();
+
+    // Same local wall-clock time, 3 hours apart once converted to UTC.
+    expect($nyTrade->entry_at->diffInHours($laTrade->entry_at))->toBe(3.0);
+});
