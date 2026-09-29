@@ -38,6 +38,20 @@ namespace ChartJot.Core
 			Include(price);
 		}
 
+		/// <summary>
+		/// Folds in a high/low range observed before this tracker existed (a persisted snapshot from before an
+		/// AddOn restart). Account.Executions can rebuild fills after a restart, but not the live tick history in
+		/// between; this is the only way that range survives. A no-op when the snapshot never saw a live tick.
+		/// </summary>
+		public void Merge(ExcursionSnapshot snapshot)
+		{
+			if (!snapshot.HadTicks)
+				return;
+			HadTicks = true;
+			Include(snapshot.High);
+			Include(snapshot.Low);
+		}
+
 		public ExcursionSnapshot Snapshot()
 		{
 			return new ExcursionSnapshot { High = high, Low = low, HadTicks = HadTicks };

@@ -34,6 +34,10 @@ namespace ChartJot.Core
 		public int MaxQuantity { get; set; }
 		public bool FeedInterrupted { get; set; }
 
+		/// <summary>The running high/low observed so far. Save this: after a restart, only this snapshot (not
+		/// <c>Account.Executions</c>) can tell you the tick range seen before the restart.</summary>
+		public ExcursionSnapshot Excursion { get; set; }
+
 		/// <summary>The fills recorded so far, for copies that are still open.</summary>
 		public IList<TradeFill> Fills { get; set; }
 	}
@@ -286,6 +290,25 @@ namespace ChartJot.Core
 			return result;
 		}
 
+		/// <summary>
+		/// After <see cref="Rebuild"/> reconstructs an open trade from <c>Account.Executions</c>, folds in the
+		/// live tick range that was observed before an AddOn restart (only the persisted state file has that; it
+		/// is not in NT8's own records). Also flags the trade's feed as interrupted, since the gap itself was not
+		/// observed either way. A no-op if there is no open trade for the account/instrument, or a different
+		/// trade opened while the state file was stale.
+		/// </summary>
+		public void RestoreExcursion(string account, string instrumentFullName, string tradeId, ExcursionSnapshot snapshot)
+		{
+			PositionState state;
+			if (!states.TryGetValue(Key(account, instrumentFullName), out state) || state.Trade == null)
+				return;
+			if (state.Trade.TradeId != tradeId)
+				return;
+
+			state.Trade.Excursion.Merge(snapshot);
+			state.Trade.Excursion.Interrupted = true;
+		}
+
 		private static void AddFill(OpenTrade trade, Fill fill, FillRole role, int allocated, int signedAfter)
 		{
 			decimal share = (decimal)allocated / fill.Quantity;
@@ -320,6 +343,7 @@ namespace ChartJot.Core
 				SignedPosition = trade.Signed,
 				MaxQuantity = trade.MaxQuantity,
 				FeedInterrupted = trade.Excursion.Interrupted,
+				Excursion = trade.Excursion.Snapshot(),
 				Fills = new List<TradeFill>(trade.Fills)
 			};
 		}

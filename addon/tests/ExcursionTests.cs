@@ -94,5 +94,47 @@ namespace ChartJot.Core.Tests
 			Assert.Equal(1m, second.Excursion.MfePoints);   // low 100 (exit fill)
 			Assert.Equal(0m, second.Excursion.MaePoints);   // high 101 is the entry price
 		}
+
+		[Fact]
+		public void Merge_WithNoTicksInTheSnapshot_IsNoOp()
+		{
+			ExcursionTracker tracker = new ExcursionTracker();
+			tracker.AddFill(100m);
+
+			tracker.Merge(new ExcursionSnapshot { High = 200m, Low = 1m, HadTicks = false });
+
+			Assert.False(tracker.HadTicks);
+			ExcursionSnapshot snapshot = tracker.Snapshot();
+			Assert.Equal(100m, snapshot.High);
+			Assert.Equal(100m, snapshot.Low);
+		}
+
+		[Fact]
+		public void Merge_WithTicks_ExpandsTheRangeAndSetsHadTicks()
+		{
+			ExcursionTracker tracker = new ExcursionTracker();
+			tracker.AddFill(100m);
+
+			tracker.Merge(new ExcursionSnapshot { High = 105m, Low = 98m, HadTicks = true });
+
+			Assert.True(tracker.HadTicks);
+			ExcursionSnapshot snapshot = tracker.Snapshot();
+			Assert.Equal(105m, snapshot.High);
+			Assert.Equal(98m, snapshot.Low);
+		}
+
+		[Fact]
+		public void Merge_NarrowerThanCurrentRange_DoesNotShrinkIt()
+		{
+			ExcursionTracker tracker = new ExcursionTracker();
+			tracker.AddTick(90m);
+			tracker.AddTick(110m);
+
+			tracker.Merge(new ExcursionSnapshot { High = 100m, Low = 100m, HadTicks = true });
+
+			ExcursionSnapshot snapshot = tracker.Snapshot();
+			Assert.Equal(110m, snapshot.High);
+			Assert.Equal(90m, snapshot.Low);
+		}
 	}
 }
