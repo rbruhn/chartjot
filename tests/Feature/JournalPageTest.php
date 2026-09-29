@@ -52,12 +52,12 @@ test('journal page loads for authenticated user', function () {
         ->assertSee($journal->name);
 });
 
-test('admin is redirected to admin panel', function () {
+test('admin can visit the journal page like any other user', function () {
     $admin = User::factory()->create(['is_admin' => true]);
 
     $this->actingAs($admin)
         ->get('/journal')
-        ->assertRedirect(route('admin.users'));
+        ->assertStatus(200);
 });
 
 test('unauthenticated request is redirected to login', function () {
