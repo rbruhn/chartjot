@@ -268,7 +268,11 @@ namespace ChartJot.Core
 		/// whatever produced the file.</summary>
 		public static DeliveryQueue Deserialize(string json, TimeSpan? initialBackoff = null, TimeSpan? maxBackoff = null)
 		{
-			JsonValue root = JsonValue.Parse(json);
+			return FromJson(JsonValue.Parse(json), initialBackoff, maxBackoff);
+		}
+
+		internal static DeliveryQueue FromJson(JsonValue root, TimeSpan? initialBackoff, TimeSpan? maxBackoff)
+		{
 			DeliveryQueue queue = new DeliveryQueue(initialBackoff, maxBackoff);
 
 			foreach (JsonValue item in root["deliveries"].Items)

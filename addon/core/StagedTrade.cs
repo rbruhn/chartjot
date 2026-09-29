@@ -76,7 +76,11 @@ namespace ChartJot.Core
 
 		public static StagedTrades Deserialize(string json)
 		{
-			JsonValue root = JsonValue.Parse(json);
+			return FromJson(JsonValue.Parse(json));
+		}
+
+		internal static StagedTrades FromJson(JsonValue root)
+		{
 			StagedTrades staged = new StagedTrades();
 			foreach (JsonValue item in root.Items)
 				staged.Add(ReadStagedTrade(item));
@@ -127,7 +131,7 @@ namespace ChartJot.Core
 
 		// ---- CompletedTrade ----
 
-		private static void WriteCompletedTrade(JsonWriter w, CompletedTrade t)
+		internal static void WriteCompletedTrade(JsonWriter w, CompletedTrade t)
 		{
 			w.BeginObject();
 			w.Property("trade_id", t.TradeId);
@@ -166,6 +170,7 @@ namespace ChartJot.Core
 				w.EndObject();
 			}
 			w.Property("excursion_complete", t.ExcursionComplete);
+			w.Property("opened_by_reversal", t.OpenedByReversal);
 
 			w.Name("legs").BeginArray();
 			foreach (Leg leg in t.Legs ?? new List<Leg>())
@@ -180,9 +185,9 @@ namespace ChartJot.Core
 			w.EndObject();
 		}
 
-		private static CompletedTrade ReadCompletedTrade(JsonValue v)
+		internal static CompletedTrade ReadCompletedTrade(JsonValue v)
 		{
-			return new CompletedTrade
+			CompletedTrade trade = new CompletedTrade
 			{
 				TradeId = v["trade_id"].AsString(),
 				Account = v["account"].AsString(),
@@ -214,6 +219,13 @@ namespace ChartJot.Core
 				Legs = v["legs"].Items.Select(ReadLeg).ToList(),
 				Fills = v["fills"].Items.Select(ReadTradeFill).ToList()
 			};
+
+			// Files written before the flag existed: a reversal's new trade is the only one whose first entry fill
+			// is split (only the remainder of the flipping fill is allocated to it), so the fills still tell.
+			trade.OpenedByReversal = v.Has("opened_by_reversal")
+				? v["opened_by_reversal"].AsBool()
+				: trade.Fills.Where(f => f.Role == FillRole.Entry).Take(1).Any(f => f.AllocatedQuantity < f.Fill.Quantity);
+			return trade;
 		}
 
 		// ---- Leg ----
@@ -365,7 +377,7 @@ namespace ChartJot.Core
 
 		// ---- NoteRecord ----
 
-		private static void WriteNote(JsonWriter w, NoteRecord note)
+		internal static void WriteNote(JsonWriter w, NoteRecord note)
 		{
 			w.BeginObject();
 			w.Property("body", note.Body);
@@ -374,7 +386,7 @@ namespace ChartJot.Core
 			w.EndObject();
 		}
 
-		private static NoteRecord ReadNote(JsonValue v)
+		internal static NoteRecord ReadNote(JsonValue v)
 		{
 			return new NoteRecord
 			{
