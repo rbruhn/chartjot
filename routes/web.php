@@ -10,27 +10,27 @@ use Livewire\Volt\Volt;
 Route::redirect('/', '/journal');
 
 Route::get('journal', [JournalController::class, 'index'])
-    ->middleware(['auth', 'active'])
+    ->middleware(['auth', 'active', 'not-admin'])
     ->name('journal.index');
 
 Route::get('accounts', [JournalAccountsController::class, 'index'])
-    ->middleware(['auth', 'active'])
+    ->middleware(['auth', 'active', 'not-admin'])
     ->name('journal.accounts');
 
 Route::get('journal/settings', [JournalSettingsController::class, 'edit'])
-    ->middleware(['auth', 'active'])
+    ->middleware(['auth', 'active', 'not-admin'])
     ->name('journal.settings.edit');
 
 Route::put('journal/settings', [JournalSettingsController::class, 'update'])
-    ->middleware(['auth', 'active'])
+    ->middleware(['auth', 'active', 'not-admin'])
     ->name('journal.settings.update');
 
 Route::post('journal/settings/ingest-token', [JournalSettingsController::class, 'rotateToken'])
-    ->middleware(['auth', 'active'])
+    ->middleware(['auth', 'active', 'not-admin'])
     ->name('journal.settings.token.rotate');
 
 Route::get('journal/trades/{trade:uuid}/screenshots/{screenshot}', [TradeScreenshotController::class, 'show'])
-    ->middleware(['auth', 'active'])
+    ->middleware(['auth', 'active', 'not-admin'])
     ->name('journal.screenshot');
 
 Route::redirect('dashboard', '/journal')
