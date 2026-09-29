@@ -78,3 +78,24 @@ test('settings page does not show timezone warning after timezone is saved', fun
         ->assertStatus(200)
         ->assertDontSee('Time zone required before importing');
 });
+
+test('csv import is disabled with a note when the journal has no accounts', function () {
+    $user = User::factory()->create();
+
+    $this->actingAs($user)
+        ->get(route('journal.settings.edit'))
+        ->assertStatus(200)
+        ->assertSee('Create at least one')
+        ->assertDontSee('Drop your NT8 Executions CSV here');
+});
+
+test('csv import dropzone is available once an account exists', function () {
+    $user = User::factory()->create();
+    \App\Models\Account::factory()->create(['journal_id' => $user->journal->id]);
+
+    $this->actingAs($user)
+        ->get(route('journal.settings.edit'))
+        ->assertStatus(200)
+        ->assertSee('Drop your NT8 Executions CSV here')
+        ->assertDontSee('Create at least one');
+});

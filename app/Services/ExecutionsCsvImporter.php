@@ -45,7 +45,8 @@ class ExecutionsCsvImporter
             ];
         }
 
-        $fills = $this->parseFills($filePath, $journal->timezone);
+        $rawFills = $this->parseFills($filePath);
+        $fills = $this->resolveFillTimes($journal, $rawFills);
         $tradeGroups = $this->groupIntoTrades($fills);
 
         $created  = 0;
@@ -106,7 +107,7 @@ class ExecutionsCsvImporter
 
     // -------------------------------------------------------------------------
 
-    private function parseFills(string $filePath, string $timezone): array
+    private function parseFills(string $filePath): array
     {
         $fills = [];
         $handle = fopen($filePath, 'r');
@@ -139,7 +140,7 @@ class ExecutionsCsvImporter
                 'action' => strtolower(trim($row[1])) === 'buy' ? 'buy' : 'sell',
                 'quantity' => (int) trim($row[2]),
                 'price' => trim($row[3]),
-                'occurred_at' => $this->parseTime(trim($row[4]), $timezone),
+                'occurred_at_raw' => trim($row[4]),
                 'source_execution_id' => trim($row[5]),
                 'role' => strtolower(trim($row[6])) === 'entry' ? 'entry' : 'exit',
                 'position_after' => $this->parsePosition(trim($row[7])),
@@ -155,6 +156,27 @@ class ExecutionsCsvImporter
         fclose($handle);
 
         return $fills;
+    }
+
+    /**
+     * Convert each fill's raw timestamp using its own account's effective
+     * timezone (account override, falling back to the journal default) —
+     * not a single blanket timezone for the whole file. A CSV can cover
+     * multiple accounts, and accounts can each have their own timezone.
+     */
+    private function resolveFillTimes(Journal $journal, array $rawFills): array
+    {
+        $accountTimezones = $journal->accounts()
+            ->get(['name', 'timezone'])
+            ->mapWithKeys(fn (Account $a) => [$a->name => $a->timezone ?: $journal->timezone]);
+
+        foreach ($rawFills as &$fill) {
+            $timezone = $accountTimezones->get($fill['account_name'], $journal->timezone);
+            $fill['occurred_at'] = $this->parseTime($fill['occurred_at_raw'], $timezone);
+            unset($fill['occurred_at_raw']);
+        }
+
+        return $rawFills;
     }
 
     private function groupIntoTrades(array $fills): array
