@@ -187,7 +187,7 @@ namespace ChartJot.Core
 
 		internal static CompletedTrade ReadCompletedTrade(JsonValue v)
 		{
-			return new CompletedTrade
+			CompletedTrade trade = new CompletedTrade
 			{
 				TradeId = v["trade_id"].AsString(),
 				Account = v["account"].AsString(),
@@ -216,10 +216,16 @@ namespace ChartJot.Core
 					MaxFavorablePrice = v["excursion"]["max_favorable_price"].AsDecimal()
 				},
 				ExcursionComplete = v["excursion_complete"].AsBool(),
-				OpenedByReversal = v.Has("opened_by_reversal") && v["opened_by_reversal"].AsBool(),
 				Legs = v["legs"].Items.Select(ReadLeg).ToList(),
 				Fills = v["fills"].Items.Select(ReadTradeFill).ToList()
 			};
+
+			// Files written before the flag existed: a reversal's new trade is the only one whose first entry fill
+			// is split (only the remainder of the flipping fill is allocated to it), so the fills still tell.
+			trade.OpenedByReversal = v.Has("opened_by_reversal")
+				? v["opened_by_reversal"].AsBool()
+				: trade.Fills.Where(f => f.Role == FillRole.Entry).Take(1).Any(f => f.AllocatedQuantity < f.Fill.Quantity);
+			return trade;
 		}
 
 		// ---- Leg ----
