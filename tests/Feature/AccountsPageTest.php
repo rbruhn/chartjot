@@ -59,6 +59,24 @@ test('can create an account', function () {
         ->and((float) $account->starting_balance)->toBe(50000.0);
 });
 
+test('can create an account without touching the account type dropdown', function () {
+    [$user, $journal] = accountsUser();
+
+    // Regression: startCreate()/resetForm() must leave accountType on a value
+    // that actually exists in the AccountType enum, since a real user who
+    // doesn't interact with the dropdown never fires a wire:model change —
+    // whatever the property defaults to is what gets validated on save.
+    Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal])
+        ->call('startCreate')
+        ->set('name', 'Test-99999')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect(Account::where('journal_id', $journal->id)->where('name', 'Test-99999')->first())
+        ->not->toBeNull();
+});
+
 test('creating an account requires a name', function () {
     [$user, $journal] = accountsUser();
 
