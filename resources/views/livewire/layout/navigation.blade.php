@@ -70,6 +70,26 @@ new class extends Component
                             {{ __('Journal Settings') }}
                         </x-dropdown-link>
 
+                        <!-- Theme -->
+                        <div class="border-t border-gray-100 dark:border-gray-600 mt-1 pt-1 px-4 py-2 flex items-center justify-between"
+                             x-data="{ dark: document.documentElement.classList.contains('dark') }">
+                            <span class="text-sm text-gray-700 dark:text-gray-300">{{ __('Theme') }}</span>
+                            <div class="flex rounded-md overflow-hidden border border-gray-300 dark:border-gray-600">
+                                <button type="button"
+                                    @click="dark = false; document.documentElement.classList.remove('dark'); localStorage.setItem('theme', 'light')"
+                                    :class="!dark ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-gray-700 text-gray-500 dark:text-gray-300'"
+                                    class="px-2 py-1 text-xs font-medium transition">
+                                    {{ __('Light') }}
+                                </button>
+                                <button type="button"
+                                    @click="dark = true; document.documentElement.classList.add('dark'); localStorage.setItem('theme', 'dark')"
+                                    :class="dark ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-gray-700 text-gray-500 dark:text-gray-300'"
+                                    class="px-2 py-1 text-xs font-medium transition">
+                                    {{ __('Dark') }}
+                                </button>
+                            </div>
+                        </div>
+
                         <!-- Authentication -->
                         <button wire:click="logout" class="w-full text-start">
                             <x-dropdown-link>
@@ -126,6 +146,26 @@ new class extends Component
                 <x-responsive-nav-link :href="route('journal.settings.edit')" wire:navigate>
                     {{ __('Journal Settings') }}
                 </x-responsive-nav-link>
+
+                <!-- Theme -->
+                <div class="mt-2 px-4 py-2 flex items-center justify-between"
+                     x-data="{ dark: document.documentElement.classList.contains('dark') }">
+                    <span class="text-sm text-gray-600 dark:text-gray-400">{{ __('Theme') }}</span>
+                    <div class="flex rounded-md overflow-hidden border border-gray-300 dark:border-gray-600">
+                        <button type="button"
+                            @click="dark = false; document.documentElement.classList.remove('dark'); localStorage.setItem('theme', 'light')"
+                            :class="!dark ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-gray-700 text-gray-500 dark:text-gray-300'"
+                            class="px-2 py-1 text-xs font-medium transition">
+                            {{ __('Light') }}
+                        </button>
+                        <button type="button"
+                            @click="dark = true; document.documentElement.classList.add('dark'); localStorage.setItem('theme', 'dark')"
+                            :class="dark ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-gray-700 text-gray-500 dark:text-gray-300'"
+                            class="px-2 py-1 text-xs font-medium transition">
+                            {{ __('Dark') }}
+                        </button>
+                    </div>
+                </div>
 
                 <!-- Authentication -->
                 <button wire:click="logout" class="w-full text-start">
