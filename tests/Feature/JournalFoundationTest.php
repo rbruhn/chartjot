@@ -38,16 +38,17 @@ test('active users can view only their own journal', function () {
         ->and($other->can('update', $user->journal))->toBeFalse();
 });
 
-test('admin users do not get a journal', function () {
+test('admin users get their own journal like any other user', function () {
     $admin = User::factory()->admin()->create();
 
-    expect($admin->journal)->toBeNull();
+    expect($admin->journal)->not->toBeNull()
+        ->and($admin->journal->user_id)->toBe($admin->id);
 });
 
-test('admin users visiting the journal index are redirected to the admin panel', function () {
+test('admin users can visit the journal index like any other user', function () {
     $admin = User::factory()->admin()->create();
 
     $this->actingAs($admin)
         ->get(route('journal.index'))
-        ->assertRedirect(route('admin.users'));
+        ->assertOk();
 });
