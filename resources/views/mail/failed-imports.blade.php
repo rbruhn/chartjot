@@ -17,33 +17,19 @@
 <body>
 <div class="wrapper">
     <div class="header">
-        <h1>{{ $journalName }} — {{ $kind === 'mae_mfe' ? 'MAE/MFE Import' : 'Failed Trade Imports' }}</h1>
+        <h1>{{ $journalName }} — Failed Trade Imports</h1>
     </div>
     <div class="body">
-        {{-- Counts and guidance only: the failure details (accounts, trades, reasons) go in the attachment, never the body. --}}
-        @if ($kind === 'mae_mfe')
-            <p>
-                {{ count($failures) }} row{{ count($failures) === 1 ? '' : 's' }} from your Trades export could not be matched
-                to a trade in your journal, so no MAE/MFE was added for {{ count($failures) === 1 ? 'it' : 'them' }}.
-            </p>
-            <p>
-                A CSV of all failures is attached (account name, trade ID, reason, and time for each). Most often
-                the trade hasn't been imported from the Executions export yet, or the Trades export only covers part
-                of a trade — import the matching Executions export, or re-export the Trades grid for the full range,
-                then upload the Trades file again. Rows that were matched have already been imported.
-            </p>
-        @else
-            <p>
-                {{ count($failures) }} trade{{ count($failures) === 1 ? '' : 's' }} could not be imported
-                because the account name sent by NinjaTrader did not match any account in your journal.
-            </p>
-            <p>
-                A CSV of all failures is attached (account name, trade ID, reason, and time
-                for each). To resolve this, go to your <strong>Accounts</strong> page and
-                create an account whose name exactly matches what NinjaTrader is sending,
-                then re-export and re-import those trades.
-            </p>
-        @endif
+        <p>
+            {{ count($failures) }} trade{{ count($failures) === 1 ? '' : 's' }} could not be imported
+            because the account name sent by NinjaTrader did not match any account in your journal.
+        </p>
+        <p>
+            A CSV of all failures is attached (account name, trade ID, reason, and time
+            for each). To resolve this, go to your <strong>Accounts</strong> page and
+            create an account whose name exactly matches what NinjaTrader is sending,
+            then re-export and re-import those trades.
+        </p>
     </div>
     <div class="footer">
         Chart Jot · You are receiving this because a trade import failed for your journal.
