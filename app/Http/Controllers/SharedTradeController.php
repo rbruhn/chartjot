@@ -59,8 +59,8 @@ class SharedTradeController extends Controller
                 ->oldest()
                 ->get()
                 ->map(fn (TradeComment $c) => [
-                    ...$this->comment($c),
-                    'replies' => $c->replies->map(fn (TradeComment $r) => $this->comment($r))->all(),
+                    ...$this->comment($c, $trade),
+                    'replies' => $c->replies->map(fn (TradeComment $r) => $this->comment($r, $trade))->all(),
                 ])->all(),
         ]);
     }
@@ -76,13 +76,27 @@ class SharedTradeController extends Controller
         ]);
     }
 
-    private function comment(TradeComment $comment): array
+    /** An image attached to a comment on this trade, for anyone who can view the trade. */
+    public function commentImage(Request $request, Trade $trade, TradeComment $comment): StreamedResponse
+    {
+        abort_unless($request->user()->can('viewShared', $trade), 404);
+        abort_if($comment->trade_id !== $trade->id || ! $comment->hasImage(), 404);
+        abort_unless(Storage::disk($comment->image_disk)->exists($comment->image_path), 404);
+
+        return Storage::disk($comment->image_disk)->response($comment->image_path, null, [
+            'Content-Type'           => $comment->image_mime_type,
+            'X-Content-Type-Options' => 'nosniff',
+        ], 'inline');
+    }
+
+    private function comment(TradeComment $comment, Trade $trade): array
     {
         return [
-            'id'     => $comment->id,
-            'author' => $comment->author->name,
-            'body'   => $comment->body,
-            'when'   => $comment->created_at->diffForHumans(),
+            'id'        => $comment->id,
+            'author'    => $comment->author->name,
+            'body'      => $comment->body,
+            'when'      => $comment->created_at->diffForHumans(),
+            'image_url' => $comment->hasImage() ? route('trades.shared.comment-image', [$trade, $comment]) : null,
         ];
     }
 }

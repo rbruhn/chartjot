@@ -64,9 +64,11 @@ new class extends Component {
     public bool  $showInvite      = false;
 
     // Owner's side of the trade's comment thread (issue #18).
-    public string $commentBody = '';
-    public ?int   $replyToId   = null;
-    public string $replyBody   = '';
+    public string $commentBody  = '';
+    public mixed  $commentImage = null;
+    public ?int   $replyToId    = null;
+    public string $replyBody    = '';
+    public mixed  $replyImage   = null;
     public array $tradeEditForm   = [];
 
     public function mount(Journal $journal): void
@@ -371,23 +373,29 @@ new class extends Component {
     {
         $trade = $this->selectedTrade ?? abort(404);
 
-        app(TradeCommentPoster::class)->post($trade, auth()->user(), ['body' => $this->commentBody]);
+        app(TradeCommentPoster::class)->post($trade, auth()->user(), [
+            'body'  => $this->commentBody,
+            'image' => $this->commentImage,
+        ]);
 
-        $this->commentBody = '';
+        $this->commentBody  = '';
+        $this->commentImage = null;
         unset($this->threadComments, $this->hasConversation, $this->trades);
     }
 
     public function startReply(int $commentId): void
     {
-        $this->replyToId = $commentId;
-        $this->replyBody = '';
+        $this->replyToId  = $commentId;
+        $this->replyBody  = '';
+        $this->replyImage = null;
         $this->resetErrorBag();
     }
 
     public function cancelReply(): void
     {
-        $this->replyToId = null;
-        $this->replyBody = '';
+        $this->replyToId  = null;
+        $this->replyBody  = '';
+        $this->replyImage = null;
     }
 
     public function postReply(): void
@@ -397,6 +405,7 @@ new class extends Component {
         app(TradeCommentPoster::class)->post($trade, auth()->user(), [
             'body'              => $this->replyBody,
             'parent_comment_id' => $this->replyToId,
+            'image'             => $this->replyImage,
         ]);
 
         $this->cancelReply();
@@ -413,9 +422,12 @@ new class extends Component {
         foreach ($trade->screenshots as $shot) {
             Storage::disk($shot->disk)->delete($shot->path);
         }
+        foreach ($trade->comments()->whereNotNull('image_path')->get() as $comment) {
+            Storage::disk($comment->image_disk)->delete($comment->image_path);
+        }
 
-        // Executions, legs, screenshots, and notes all cascadeOnDelete at the
-        // DB level — only the screenshot files above need explicit cleanup,
+        // Executions, legs, screenshots, notes, invitations and comments all
+        // cascadeOnDelete at the DB level — only the files above need explicit cleanup,
         // everything else goes with the trade row.
         $trade->delete();
 
@@ -1211,6 +1223,9 @@ new class extends Component {
                                 <div wire:key="tc-{{ $c->id }}" id="comment-{{ $c->id }}">
                                     <div class="text-sm"><span class="font-semibold text-gray-900 dark:text-gray-100">{{ $c->author->name }}</span> <span class="text-xs text-gray-500 dark:text-gray-400">{{ $c->created_at->diffForHumans() }}</span></div>
                                     <p class="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap mt-0.5">{{ $c->body }}</p>
+                                    @if($c->hasImage())
+                                        <x-comment-image :id="$c->id" :url="route('trades.shared.comment-image', [$t, $c])" />
+                                    @endif
 
                                     @if($c->replies->isNotEmpty())
                                         <div class="mt-3 ml-4 pl-4 border-l-2 border-gray-200 dark:border-gray-700 space-y-3">
@@ -1218,6 +1233,9 @@ new class extends Component {
                                                 <div wire:key="tc-{{ $r->id }}" id="comment-{{ $r->id }}">
                                                     <div class="text-sm"><span class="font-semibold text-gray-900 dark:text-gray-100">{{ $r->author->name }}</span> <span class="text-xs text-gray-500 dark:text-gray-400">{{ $r->created_at->diffForHumans() }}</span></div>
                                                     <p class="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap mt-0.5">{{ $r->body }}</p>
+                                                    @if($r->hasImage())
+                                                        <x-comment-image :id="$r->id" :url="route('trades.shared.comment-image', [$t, $r])" />
+                                                    @endif
                                                 </div>
                                             @endforeach
                                         </div>
@@ -1228,6 +1246,10 @@ new class extends Component {
                                         <div class="mt-2 ml-4 space-y-2">
                                             <textarea wire:model="replyBody" rows="2" maxlength="5000" placeholder="Reply to {{ $c->author->name }}…"
                                                 class="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"></textarea>
+                                            <label class="block text-xs text-gray-600 dark:text-gray-400">Attach an image (optional, PNG/JPEG up to 10 MB)
+                                                <input type="file" wire:model="replyImage" accept="image/png,image/jpeg" class="block mt-1 text-xs text-gray-700 dark:text-gray-300">
+                                            </label>
+                                            @error('image') <p class="text-xs text-red-600 dark:text-red-400">{{ $message }}</p> @enderror
                                             @error('body') <p class="text-xs text-red-600 dark:text-red-400">{{ $message }}</p> @enderror
                                             <div class="flex gap-2">
                                                 <button wire:click="postReply" class="text-xs px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white transition-colors">Post reply</button>
@@ -1246,6 +1268,12 @@ new class extends Component {
                         <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 space-y-2">
                             <textarea wire:model="commentBody" rows="2" maxlength="5000" placeholder="Add a comment for your invited friends…"
                                 class="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"></textarea>
+                            <label class="block text-xs text-gray-600 dark:text-gray-400">Attach an image (optional, PNG/JPEG up to 10 MB)
+                                <input type="file" wire:model="commentImage" accept="image/png,image/jpeg" class="block mt-1 text-xs text-gray-700 dark:text-gray-300">
+                            </label>
+                            @if($replyToId === null)
+                                @error('image') <p class="text-xs text-red-600 dark:text-red-400">{{ $message }}</p> @enderror
+                            @endif
                             @if($replyToId === null)
                                 @error('body') <p class="text-xs text-red-600 dark:text-red-400">{{ $message }}</p> @enderror
                             @endif

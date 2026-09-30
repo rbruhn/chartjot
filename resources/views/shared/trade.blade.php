@@ -67,6 +67,9 @@
                 <article id="comment-{{ $c['id'] }}">
                     <div class="text-sm"><span class="font-semibold">{{ $c['author'] }}</span> <span class="text-xs text-gray-500 dark:text-gray-400">{{ $c['when'] }}</span></div>
                     <p class="text-sm whitespace-pre-line mt-0.5">{{ $c['body'] }}</p>
+                    @if ($c['image_url'])
+                        <x-comment-image :id="$c['id']" :url="$c['image_url']" />
+                    @endif
 
                     @if ($c['replies'])
                         <div class="mt-3 ml-4 pl-4 border-l-2 border-gray-200 dark:border-gray-700 space-y-3">
@@ -74,6 +77,9 @@
                                 <div id="comment-{{ $r['id'] }}">
                                     <div class="text-sm"><span class="font-semibold">{{ $r['author'] }}</span> <span class="text-xs text-gray-500 dark:text-gray-400">{{ $r['when'] }}</span></div>
                                     <p class="text-sm whitespace-pre-line mt-0.5">{{ $r['body'] }}</p>
+                                    @if ($r['image_url'])
+                                        <x-comment-image :id="$r['id']" :url="$r['image_url']" />
+                                    @endif
                                 </div>
                             @endforeach
                         </div>
@@ -82,10 +88,13 @@
                     {{-- Replies go one level deep: only top-level comments get a reply form. --}}
                     <details class="mt-2 ml-4">
                         <summary class="text-xs text-indigo-600 dark:text-indigo-400 cursor-pointer select-none">Reply</summary>
-                        <form method="POST" action="{{ route('trades.shared.comments.store', $trade['uuid']) }}" class="mt-2 space-y-2">
+                        <form method="POST" action="{{ route('trades.shared.comments.store', $trade['uuid']) }}" enctype="multipart/form-data" class="mt-2 space-y-2">
                             @csrf
                             <input type="hidden" name="parent_comment_id" value="{{ $c['id'] }}">
                             <textarea name="body" rows="2" maxlength="5000" required class="{{ $input }}" placeholder="Reply to {{ $c['author'] }}…"></textarea>
+                            <label class="block text-xs text-gray-600 dark:text-gray-400">Attach an image (optional, PNG/JPEG up to 10 MB)
+                                <input type="file" name="image" accept="image/png,image/jpeg" class="block mt-1 text-xs text-gray-700 dark:text-gray-300">
+                            </label>
                             <button type="submit" class="{{ $btn }}">Post reply</button>
                         </form>
                     </details>
@@ -95,10 +104,13 @@
             @endforelse
         </div>
 
-        <form method="POST" action="{{ route('trades.shared.comments.store', $trade['uuid']) }}" class="mt-6 space-y-2 border-t border-gray-200 dark:border-gray-700 pt-4">
+        <form method="POST" action="{{ route('trades.shared.comments.store', $trade['uuid']) }}" enctype="multipart/form-data" class="mt-6 space-y-2 border-t border-gray-200 dark:border-gray-700 pt-4">
             @csrf
             <label for="new-comment" class="{{ $label }}">Add a comment</label>
             <textarea id="new-comment" name="body" rows="3" maxlength="5000" required class="{{ $input }}">{{ old('parent_comment_id') ? '' : old('body') }}</textarea>
+            <label class="block text-xs text-gray-600 dark:text-gray-400">Attach an image (optional, PNG/JPEG up to 10 MB)
+                <input type="file" name="image" accept="image/png,image/jpeg" class="block mt-1 text-xs text-gray-700 dark:text-gray-300">
+            </label>
             <button type="submit" class="{{ $btn }}">Post comment</button>
         </form>
     </section>

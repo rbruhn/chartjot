@@ -53,6 +53,8 @@ Route::middleware(['auth', 'active'])->group(function () {
         ->name('trades.shared');
     Route::get('trades/{trade:uuid}/shared/screenshots/{screenshot}', [SharedTradeController::class, 'screenshot'])
         ->name('trades.shared.screenshot');
+    Route::get('trades/{trade:uuid}/shared/comments/{comment}/image', [SharedTradeController::class, 'commentImage'])
+        ->name('trades.shared.comment-image');
     // Rate limited inside TradeCommentPoster, shared with the journal page.
     Route::post('trades/{trade:uuid}/shared/comments', [TradeCommentController::class, 'store'])
         ->name('trades.shared.comments.store');
