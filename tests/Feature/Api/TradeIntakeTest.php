@@ -340,6 +340,27 @@ test('exit.occurred_at must be after entry.occurred_at', function () {
         ->assertJsonValidationErrors(['exit.occurred_at']);
 });
 
+test('non-positive prices, instrument specs and negative commissions return 422', function () {
+    [$journal, $token] = journalWithToken();
+
+    $payload = minimalPayload();
+    $payload['instrument']['tick_size']       = '0';
+    $payload['entry']['average_price']        = '-5000.00';
+    $payload['executions'][0]['price']        = '0';
+    $payload['performance']['commission']     = '-1.00';
+
+    postTrade($payload, $token)
+        ->assertStatus(422)
+        ->assertJsonValidationErrors([
+            'instrument.tick_size',
+            'entry.average_price',
+            'executions.0.price',
+            'performance.commission',
+        ]);
+
+    expect(Trade::count())->toBe(0);
+});
+
 test('an unknown master account is created from the payload', function () {
     [$journal, $token] = journalWithToken([]);
 

@@ -16,7 +16,7 @@ class TradeNoteRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'body'        => ['required', 'string'],
+            'body'        => ['required', 'string', 'max:10000'],
             'phase'       => ['required', Rule::in(array_column(NotePhase::cases(), 'value'))],
             'occurred_at' => ['required', 'date'],
         ];
