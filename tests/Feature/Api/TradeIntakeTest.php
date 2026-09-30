@@ -424,9 +424,9 @@ test('executions with a blank order name are stored', function () {
 test('copier data from an older AddOn is accepted but ignored', function () {
     [$journal, $token] = journalWithToken(['Sim101']);
 
-    // Until the AddOn reports each follower's trades on their own (#28), it still nests follower copies
-    // into the master's payload. The server no longer reconciles copies (#27), but a trade must not be
-    // rejected for carrying them — and they must not leak into the stored trade or create follower
+    // AddOn versions from before #28 nest follower copies into the master's payload, and installs in
+    // the field may still run one. The server no longer reconciles copies (#27), but a trade must not
+    // be rejected for carrying them — and they must not leak into the stored trade or create follower
     // accounts from a master's payload.
     $payload = minimalPayload([
         'copies_source'  => 'copier_live',

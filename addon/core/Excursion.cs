@@ -8,6 +8,22 @@ namespace ChartJot.Core
 
 		/// <summary>True once at least one live last-trade price was seen. Fill prices alone do not count.</summary>
 		public bool HadTicks;
+
+		/// <summary>
+		/// <paramref name="current"/> widened by a range observed earlier (see <see cref="ExcursionTracker.Merge"/>).
+		/// <paramref name="current"/> always holds at least its fill prices, so it is never the empty snapshot.
+		/// </summary>
+		internal static ExcursionSnapshot Combine(ExcursionSnapshot current, ExcursionSnapshot earlier)
+		{
+			if (!earlier.HadTicks)
+				return current;
+			return new ExcursionSnapshot
+			{
+				High = earlier.High > current.High ? earlier.High : current.High,
+				Low = earlier.Low < current.Low ? earlier.Low : current.Low,
+				HadTicks = true
+			};
+		}
 	}
 
 	/// <summary>
@@ -36,6 +52,20 @@ namespace ChartJot.Core
 				return;
 			HadTicks = true;
 			Include(price);
+		}
+
+		/// <summary>
+		/// Folds in a high/low range observed before this tracker existed (a persisted snapshot from before an
+		/// AddOn restart). Account.Executions can rebuild fills after a restart, but not the live tick history in
+		/// between; this is the only way that range survives. A no-op when the snapshot never saw a live tick.
+		/// </summary>
+		public void Merge(ExcursionSnapshot snapshot)
+		{
+			if (!snapshot.HadTicks)
+				return;
+			HadTicks = true;
+			Include(snapshot.High);
+			Include(snapshot.Low);
 		}
 
 		public ExcursionSnapshot Snapshot()
