@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -53,9 +54,15 @@ namespace ChartJot.Core
 	/// </summary>
 	public sealed class TradeDelivery
 	{
-		/// <summary>Server bodies kept for display are cut to this many characters, so a proxy's HTML error page
-		/// cannot bloat the state file.</summary>
+		/// <summary>Server bodies kept for display are cut to at most this many bytes once UTF-8 encoded, so a proxy's
+		/// HTML error page cannot bloat the state file. No more than this is ever read off the wire either: the rest
+		/// of a longer body is discarded unread, so a huge response cannot exhaust memory in the NT8 process.</summary>
 		public const int MaxServerBodyLength = 16 * 1024;
+
+		/// <summary>The longest timeout a <see cref="CancellationTokenSource"/> accepts (int.MaxValue ms, ~24.8 days).</summary>
+		public static readonly TimeSpan MaxTimeout = TimeSpan.FromMilliseconds(int.MaxValue);
+
+		private static readonly Encoding Utf8 = new UTF8Encoding(false);
 
 		private readonly HttpClient client;
 		private readonly Uri endpoint;
@@ -76,6 +83,8 @@ namespace ChartJot.Core
 				throw new ArgumentException("The AddOn version is required.", "addonVersion");
 			if (timeout <= TimeSpan.Zero || timeout == Timeout.InfiniteTimeSpan)
 				throw new ArgumentOutOfRangeException("timeout", "The timeout must be finite and positive.");
+			if (timeout > MaxTimeout)
+				throw new ArgumentOutOfRangeException("timeout", "The timeout must not exceed " + MaxTimeout.TotalDays.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " days.");
 
 			Uri uri;
 			if (!Uri.TryCreate(endpoint, UriKind.Absolute, out uri))
@@ -135,11 +144,12 @@ namespace ChartJot.Core
 			{
 				try
 				{
-					using (HttpResponseMessage response = await client.SendAsync(request, linked.Token).ConfigureAwait(false))
+					// ResponseHeadersRead: the default would buffer the whole body before returning, whatever its size.
+					using (HttpResponseMessage response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, linked.Token).ConfigureAwait(false))
 					{
-						string body = response.Content == null ? null : await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 						int status = (int)response.StatusCode;
-						return new DeliveryAttempt { Outcome = MapStatus(status), StatusCode = status, ServerBody = Truncate(body) };
+						string body = await ReadBodyAsync(response.Content, linked.Token).ConfigureAwait(false);
+						return new DeliveryAttempt { Outcome = MapStatus(status), StatusCode = status, ServerBody = body };
 					}
 				}
 				catch (OperationCanceledException)
@@ -152,6 +162,11 @@ namespace ChartJot.Core
 				catch (HttpRequestException ex)
 				{
 					return new DeliveryAttempt { Outcome = DeliveryOutcome.Retryable, ErrorMessage = Describe(ex) };
+				}
+				catch (IOException ex)
+				{
+					// The connection dropped while the body was being read.
+					return new DeliveryAttempt { Outcome = DeliveryOutcome.Retryable, ErrorMessage = ex.Message };
 				}
 			}
 		}
@@ -262,11 +277,73 @@ namespace ChartJot.Core
 			return MediaType(format) == "image/png" ? "png" : "jpeg";
 		}
 
-		private static string Truncate(string body)
+		/// <summary>
+		/// Reads at most <see cref="MaxServerBodyLength"/> bytes of the body and decodes them with the response's
+		/// charset (UTF-8 when absent or unknown). A multi-byte character cut off by the read limit is dropped, not
+		/// turned into a replacement character, and the result is trimmed to fit <see cref="MaxServerBodyLength"/>
+		/// UTF-8 bytes, since another charset can take more bytes than that once re-encoded.
+		/// </summary>
+		private static async Task<string> ReadBodyAsync(HttpContent content, CancellationToken cancellationToken)
 		{
-			if (body == null || body.Length <= MaxServerBodyLength)
-				return body;
-			return body.Substring(0, MaxServerBodyLength);
+			if (content == null)
+				return null;
+
+			byte[] buffer = new byte[MaxServerBodyLength];
+			int read = 0;
+			using (Stream stream = await content.ReadAsStreamAsync().ConfigureAwait(false))
+			{
+				while (read < buffer.Length)
+				{
+					int n = await stream.ReadAsync(buffer, read, buffer.Length - read, cancellationToken).ConfigureAwait(false);
+					if (n == 0)
+						break;
+					read += n;
+				}
+			}
+			// Anything past the limit is left unread; disposing the response abandons it.
+
+			Decoder decoder = ResponseEncoding(content).GetDecoder();
+			char[] chars = new char[decoder.GetCharCount(buffer, 0, read, false)];
+			int count = decoder.GetChars(buffer, 0, read, chars, 0, false);
+			return LimitUtf8Bytes(new string(chars, 0, count), MaxServerBodyLength);
+		}
+
+		private static Encoding ResponseEncoding(HttpContent content)
+		{
+			string charset = content.Headers.ContentType == null ? null : content.Headers.ContentType.CharSet;
+			if (!string.IsNullOrWhiteSpace(charset))
+			{
+				try
+				{
+					return Encoding.GetEncoding(charset.Trim().Trim('"'));
+				}
+				catch (ArgumentException)
+				{
+					// Unknown charset: fall back to UTF-8.
+				}
+			}
+			return Utf8;
+		}
+
+		/// <summary>Cuts <paramref name="text"/> to at most <paramref name="maxBytes"/> bytes of UTF-8, never
+		/// splitting a surrogate pair.</summary>
+		private static string LimitUtf8Bytes(string text, int maxBytes)
+		{
+			if (text == null || Utf8.GetByteCount(text) <= maxBytes)
+				return text;
+
+			int bytes = 0;
+			int i = 0;
+			while (i < text.Length)
+			{
+				int width = char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]) ? 2 : 1;
+				int size = Utf8.GetByteCount(text.ToCharArray(i, width));
+				if (bytes + size > maxBytes)
+					break;
+				bytes += size;
+				i += width;
+			}
+			return text.Substring(0, i);
 		}
 
 		private static string Describe(HttpRequestException ex)
