@@ -54,8 +54,8 @@ class TradeIntakeRequest extends FormRequest
             'instrument'              => ['required', 'array'],
             'instrument.symbol'       => ['required', 'string', 'max:16'],
             'instrument.contract'     => ['required', 'string', 'max:32'],
-            'instrument.tick_size'    => ['required', 'numeric'],
-            'instrument.point_value'  => ['required', 'numeric'],
+            'instrument.tick_size'    => ['required', 'numeric', 'gt:0'],
+            'instrument.point_value'  => ['required', 'numeric', 'gt:0'],
 
             // Direction and quantity
             'direction'            => ['required', Rule::in($directions)],
@@ -65,11 +65,11 @@ class TradeIntakeRequest extends FormRequest
             // Entry / exit
             'entry'               => ['required', 'array'],
             'entry.occurred_at'   => ['required', 'date'],
-            'entry.average_price' => ['required', 'numeric'],
+            'entry.average_price' => ['required', 'numeric', 'gt:0'],
             'entry.order_name'    => ['nullable', 'string', 'max:64'],
             'exit'                => ['required', 'array'],
             'exit.occurred_at'    => ['required', 'date', 'after_or_equal:entry.occurred_at'],
-            'exit.average_price'  => ['required', 'numeric'],
+            'exit.average_price'  => ['required', 'numeric', 'gt:0'],
             'exit.order_name'     => ['nullable', 'string', 'max:64'],
             'exit.reason'         => ['required', Rule::in($exitReasons)],
 
@@ -78,8 +78,8 @@ class TradeIntakeRequest extends FormRequest
             'performance.points'       => ['required', 'numeric'],
             'performance.ticks'        => ['required', 'integer'],
             'performance.gross_pnl'    => ['required', 'numeric'],
-            'performance.commission'   => ['required', 'numeric'],
-            'performance.fees'         => ['nullable', 'numeric'],
+            'performance.commission'   => ['required', 'numeric', 'min:0'],
+            'performance.fees'         => ['nullable', 'numeric', 'min:0'],
             'performance.net_pnl'      => ['required', 'numeric'],
 
             // Excursion
@@ -99,7 +99,7 @@ class TradeIntakeRequest extends FormRequest
             'legs.*.reason'              => ['required', Rule::in($exitReasons)],
             'legs.*.quantity'            => ['required', 'integer', 'min:1'],
             'legs.*.exited_at'           => ['required', 'date'],
-            'legs.*.average_exit_price'  => ['required', 'numeric'],
+            'legs.*.average_exit_price'  => ['required', 'numeric', 'gt:0'],
             'legs.*.points'              => ['required', 'numeric'],
             'legs.*.gross_pnl'           => ['required', 'numeric'],
             'legs.*.mae_points'          => ['nullable', 'numeric'],
@@ -114,15 +114,15 @@ class TradeIntakeRequest extends FormRequest
             'executions.*.role'                => ['required', 'in:entry,exit'],
             'executions.*.quantity'            => ['required', 'integer', 'min:1'],
             'executions.*.allocated_quantity'  => ['required', 'integer', 'min:1'],
-            'executions.*.price'               => ['required', 'numeric'],
-            'executions.*.commission'          => ['nullable', 'numeric'],
-            'executions.*.fee'                 => ['nullable', 'numeric'],
+            'executions.*.price'               => ['required', 'numeric', 'gt:0'],
+            'executions.*.commission'          => ['nullable', 'numeric', 'min:0'],
+            'executions.*.fee'                 => ['nullable', 'numeric', 'min:0'],
             'executions.*.order_name'          => ['nullable', 'string', 'max:64'],
             'executions.*.position_after'      => ['required', 'integer'],
 
             // Notes
             'notes'               => ['nullable', 'array'],
-            'notes.*.body'        => ['required', 'string'],
+            'notes.*.body'        => ['required', 'string', 'max:10000'],
             'notes.*.phase'       => ['required', Rule::in($notePhases)],
             'notes.*.occurred_at' => ['required', 'date'],
 
