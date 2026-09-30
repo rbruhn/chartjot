@@ -113,12 +113,17 @@ new class extends Component {
             ->find($invitationId) ?? abort(404);
     }
 
-    public function sendRequest(int $userId): void
+    /**
+     * Send a request to the current exact-email search result — never to a
+     * client-supplied user id, which would let anyone walk ids and read
+     * every active user's name (found in the #18 security review).
+     */
+    public function sendRequest(): void
     {
         $me     = $this->me();
-        $target = User::whereKeyNot($me->id)->find($userId);
+        $target = $this->searchResult;
 
-        if (! $target || ! $target->isActive()) {
+        if (! $target) {
             return;
         }
 
@@ -251,9 +256,9 @@ new class extends Component {
                     @elseif ($f?->isPending() && (int) $f->requester_id === auth()->id())
                         <span class="{{ $muted }}">Request sent</span>
                     @elseif ($f?->isPending())
-                        <button wire:click="sendRequest({{ $u->id }})" class="{{ $btnPri }}">Accept their request</button>
+                        <button wire:click="sendRequest" class="{{ $btnPri }}">Accept their request</button>
                     @else
-                        <button wire:click="sendRequest({{ $u->id }})" class="{{ $btnPri }}">Send friend request</button>
+                        <button wire:click="sendRequest" class="{{ $btnPri }}">Send friend request</button>
                     @endif
                 </div>
             @elseif (str_contains($searchEmail, '@'))
