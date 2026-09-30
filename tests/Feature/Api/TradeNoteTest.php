@@ -79,3 +79,18 @@ test('note requires body phase and occurred_at', function () {
         ->assertStatus(422)
         ->assertJsonValidationErrors(['body', 'phase', 'occurred_at']);
 });
+
+test('note body over 10,000 characters returns 422', function () {
+    [$journal, $token] = noteJournalAndToken();
+    $tradeUuid = createTradeViaApi($token);
+
+    test()->postJson("/api/v1/trades/{$tradeUuid}/notes", [
+        'body'        => str_repeat('a', 10001),
+        'phase'       => 'post_trade',
+        'occurred_at' => '2026-09-24T09:40:00-04:00',
+    ], ['Authorization' => "Bearer {$token}"])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['body']);
+
+    expect(TradeNote::count())->toBe(0);
+});
