@@ -33,6 +33,8 @@
 /*.WEBP
 /addon/core/bin/
 /addon/core/obj/
+/addon/nt8check/bin/
+/addon/nt8check/obj/
 /addon/tests/bin/
 /addon/tests/obj/
 /affordable_indicators_inc.txt

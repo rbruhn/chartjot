@@ -277,9 +277,9 @@ new class extends Component {
             Storage::disk($shot->disk)->delete($shot->path);
         }
 
-        // Executions, legs, copies (+ their executions), screenshots, and notes
-        // all cascadeOnDelete at the DB level — only the screenshot files above
-        // need explicit cleanup, everything else goes with the trade row.
+        // Executions, legs, screenshots, and notes all cascadeOnDelete at the
+        // DB level — only the screenshot files above need explicit cleanup,
+        // everything else goes with the trade row.
         $trade->delete();
 
         $this->selectedUuid  = '';
@@ -642,13 +642,15 @@ new class extends Component {
                                     </div>
                                 </div>
                                 <button wire:click="startEditTrade"
+                                    title="Edit" aria-label="Edit"
                                     class="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
-                                    Edit
+                                    <x-heroicon-o-pencil-square class="h-4 w-4" />
                                 </button>
                                 <button wire:click="deleteTrade('{{ $t->uuid }}')"
                                     wire:confirm="Delete this trade permanently? All notes, images, and trade data will be deleted. This cannot be undone."
+                                    title="Delete" aria-label="Delete"
                                     class="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:border-red-300 dark:hover:border-red-500 transition-colors">
-                                    Delete
+                                    <x-heroicon-o-trash class="h-4 w-4" />
                                 </button>
                             @else
                                 <button wire:click="saveTrade"
