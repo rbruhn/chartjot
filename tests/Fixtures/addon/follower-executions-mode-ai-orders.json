@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "source": "ninjatrader_8",
+  "addon_version": "1.0.0",
+  "trade_id": "NT8-TEST_ACCT_005-MES_12_26-6ec47dbad5d8d521",
+  "account_name": "TEST-ACCT-005",
+  "connection": "Rithmic",
+  "trade_type": "2ES",
+  "trade_type_other": null,
+  "instrument": {
+    "symbol": "MES",
+    "contract": "MES 12-26",
+    "tick_size": "0.25",
+    "point_value": "5"
+  },
+  "direction": "short",
+  "quantity": 4,
+  "total_entry_quantity": 4,
+  "entry": {
+    "occurred_at": "2026-09-24T09:30:01-04:00",
+    "average_price": "7800.00",
+    "order_name": "AI"
+  },
+  "exit": {
+    "occurred_at": "2026-09-24T09:34:00-04:00",
+    "average_price": "7798.75",
+    "order_name": "AI",
+    "reason": "other"
+  },
+  "performance": {
+    "points": "1.25",
+    "ticks": 5,
+    "gross_pnl": "25.00",
+    "commission": "3.00",
+    "fees": null,
+    "net_pnl": "22.00"
+  },
+  "excursion": {
+    "mae_points": null,
+    "mfe_points": null,
+    "max_adverse_price": null,
+    "max_favorable_price": null,
+    "complete": false
+  },
+  "legs": [
+    {
+      "sequence": 1,
+      "runner": false,
+      "exit_order_id": "so2",
+      "order_name": "AI",
+      "reason": "other",
+      "quantity": 2,
+      "exited_at": "2026-09-24T09:32:00-04:00",
+      "average_exit_price": "7799.00",
+      "points": "1.00",
+      "gross_pnl": "10.00",
+      "mae_points": null,
+      "mfe_points": null
+    },
+    {
+      "sequence": 2,
+      "runner": true,
+      "exit_order_id": "so3",
+      "order_name": "AI",
+      "reason": "other",
+      "quantity": 2,
+      "exited_at": "2026-09-24T09:34:00-04:00",
+      "average_exit_price": "7798.50",
+      "points": "1.50",
+      "gross_pnl": "15.00",
+      "mae_points": null,
+      "mfe_points": null
+    }
+  ],
+  "executions": [
+    {
+      "execution_id": "s1",
+      "order_id": "so1",
+      "occurred_at": "2026-09-24T09:30:01-04:00",
+      "action": "sell",
+      "role": "entry",
+      "quantity": 4,
+      "allocated_quantity": 4,
+      "price": "7800.00",
+      "commission": "1.00",
+      "fee": null,
+      "order_name": "AI",
+      "position_after": -4
+    },
+    {
+      "execution_id": "s2",
+      "order_id": "so2",
+      "occurred_at": "2026-09-24T09:32:00-04:00",
+      "action": "buy",
+      "role": "exit",
+      "quantity": 2,
+      "allocated_quantity": 2,
+      "price": "7799.00",
+      "commission": "1.00",
+      "fee": null,
+      "order_name": "AI",
+      "position_after": -2
+    },
+    {
+      "execution_id": "s3",
+      "order_id": "so3",
+      "occurred_at": "2026-09-24T09:34:00-04:00",
+      "action": "buy",
+      "role": "exit",
+      "quantity": 2,
+      "allocated_quantity": 2,
+      "price": "7798.50",
+      "commission": "1.00",
+      "fee": null,
+      "order_name": "AI",
+      "position_after": 0
+    }
+  ],
+  "notes": []
+}
