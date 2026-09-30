@@ -2,8 +2,6 @@
 
 namespace App\Http\Requests\Api\V1;
 
-use App\Enums\CopiesSource;
-use App\Enums\CopyStatus;
 use App\Enums\Direction;
 use App\Enums\ExitReason;
 use App\Enums\NotePhase;
@@ -36,8 +34,6 @@ class TradeIntakeRequest extends FormRequest
         $exitReasons = array_column(ExitReason::cases(), 'value');
         $tradeTypes  = array_column(TradeType::cases(), 'value');
         $notePhases  = array_column(NotePhase::cases(), 'value');
-        $copyStatuses = array_column(CopyStatus::cases(), 'value');
-        $copiesSources = array_column(CopiesSource::cases(), 'value');
 
         return [
             // Top-level identity
@@ -133,52 +129,6 @@ class TradeIntakeRequest extends FormRequest
 
             // Screenshot file (multipart)
             'screenshot_file' => ['nullable', 'file', 'mimes:png,jpeg,jpg', 'max:10240'],
-
-            // Copies
-            'copies_source'   => ['nullable', Rule::in($copiesSources)],
-            'copies_summary'  => ['nullable', 'array'],
-            'copies'          => ['nullable', 'array'],
-
-            'copies.*.account_name'              => ['required', 'string', 'max:128'],
-            'copies.*.status'                    => ['required', Rule::in($copyStatuses)],
-            'copies.*.instrument'                => ['nullable', 'array'],
-            'copies.*.instrument.symbol'         => ['nullable', 'string', 'max:16'],
-            'copies.*.instrument.contract'       => ['nullable', 'string', 'max:32'],
-            'copies.*.instrument.tick_size'      => ['nullable', 'numeric'],
-            'copies.*.instrument.point_value'    => ['nullable', 'numeric'],
-            'copies.*.expected'                  => ['nullable', 'array'],
-            'copies.*.expected.contract_size'    => ['nullable', 'string'],
-            'copies.*.expected.multiplier'       => ['nullable', 'numeric'],
-            'copies.*.expected.faded'            => ['nullable', 'boolean'],
-            'copies.*.expected.blown'            => ['nullable', 'boolean'],
-            'copies.*.expected.quantity'         => ['nullable', 'integer'],
-            'copies.*.warnings'                  => ['nullable', 'array'],
-            'copies.*.direction'                 => ['nullable', Rule::in($directions)],
-            'copies.*.quantity'                  => ['nullable', 'integer'],
-            'copies.*.entry_average_price'       => ['nullable', 'numeric'],
-            'copies.*.exit_average_price'        => ['nullable', 'numeric'],
-            'copies.*.entered_at'                => ['nullable', 'date'],
-            'copies.*.exited_at'                 => ['nullable', 'date'],
-            'copies.*.performance'               => ['nullable', 'array'],
-            'copies.*.performance.points'        => ['nullable', 'numeric'],
-            'copies.*.performance.ticks'         => ['nullable', 'integer'],
-            'copies.*.performance.gross_pnl'     => ['nullable', 'numeric'],
-            'copies.*.performance.commission'    => ['nullable', 'numeric'],
-            'copies.*.performance.fees'          => ['nullable', 'numeric'],
-            'copies.*.performance.net_pnl'       => ['nullable', 'numeric'],
-            'copies.*.executions'                => ['nullable', 'array'],
-            'copies.*.executions.*.execution_id'       => ['required', 'string', 'max:128'],
-            'copies.*.executions.*.order_id'           => ['nullable', 'string', 'max:128'],
-            'copies.*.executions.*.occurred_at'        => ['required', 'date'],
-            'copies.*.executions.*.action'             => ['required', 'in:buy,sell'],
-            'copies.*.executions.*.role'               => ['required', 'in:entry,exit'],
-            'copies.*.executions.*.quantity'           => ['required', 'integer', 'min:1'],
-            'copies.*.executions.*.allocated_quantity' => ['required', 'integer', 'min:1'],
-            'copies.*.executions.*.price'              => ['required', 'numeric'],
-            'copies.*.executions.*.commission'         => ['nullable', 'numeric'],
-            'copies.*.executions.*.fee'                => ['nullable', 'numeric'],
-            'copies.*.executions.*.order_name'         => ['nullable', 'string', 'max:64'],
-            'copies.*.executions.*.position_after'     => ['required', 'integer'],
         ];
     }
 }
