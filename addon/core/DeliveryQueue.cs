@@ -44,7 +44,8 @@ namespace ChartJot.Core
 		public DateTimeOffset? NextAttemptAt { get; internal set; }
 		public DateTimeOffset? SentAt { get; internal set; }
 
-		/// <summary>Set for a 5xx or a 422; null for a timeout or connection error.</summary>
+		/// <summary>The HTTP status of the last response, whatever it was (2xx included); null for a timeout,
+		/// connection error or cancellation, when no response arrived.</summary>
 		public int? LastStatusCode { get; internal set; }
 
 		public string LastServerBody { get; internal set; }
@@ -265,7 +266,9 @@ namespace ChartJot.Core
 
 		/// <summary>Rebuilds a queue from <see cref="Serialize"/>'s output. Backoff timing for any future
 		/// retries uses this queue's own <paramref name="initialBackoff"/>/<paramref name="maxBackoff"/>, not
-		/// whatever produced the file.</summary>
+		/// whatever produced the file. A delivery saved while <see cref="DeliveryState.Sending"/> never had its answer
+		/// recorded (NT8 closed mid-request), so it comes back <see cref="DeliveryState.Pending"/> to be sent again;
+		/// the server's Idempotency-Key check makes that safe if the first request did arrive.</summary>
 		public static DeliveryQueue Deserialize(string json, TimeSpan? initialBackoff = null, TimeSpan? maxBackoff = null)
 		{
 			return FromJson(JsonValue.Parse(json), initialBackoff, maxBackoff);
@@ -290,6 +293,7 @@ namespace ChartJot.Core
 					LastErrorMessage = item["last_error_message"].AsString(),
 					IsConfigurationError = item["is_configuration_error"].AsBool()
 				};
+				Resume(d);
 				queue.byTradeId[d.TradeId] = d;
 				queue.order.Add(d);
 			}
@@ -306,6 +310,15 @@ namespace ChartJot.Core
 		private static DateTimeOffset? ParseTimestamp(JsonValue value)
 		{
 			return value.IsNull ? (DateTimeOffset?)null : DateTimeOffset.Parse(value.AsString(), CultureInfo.InvariantCulture, DateTimeStyles.None);
+		}
+
+		// A delivery saved mid-request goes back to Pending with no scheduled retry, like a fresh one.
+		private static void Resume(QueuedDelivery d)
+		{
+			if (d.State != DeliveryState.Sending)
+				return;
+			d.State = DeliveryState.Pending;
+			d.NextAttemptAt = null;
 		}
 
 		private static DeliveryState ParseState(string value)
