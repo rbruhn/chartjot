@@ -53,23 +53,28 @@
             'days'  => $days,
         ];
     }
+    // Scale cells to the span shown, so a two-week range reads as a calendar
+    // rather than a speck in a wide card; long ranges stay compact.
+    $cellPx = count($weeks) <= 8 ? 28 : (count($weeks) <= 26 ? 18 : 12);
+    $gap    = $cellPx >= 18 ? 3 : 2;
 @endphp
 
 <div x-data="{ tip: '' }">
     <div class="overflow-x-auto pb-1">
         <div class="inline-flex gap-1.5">
-            <div class="flex flex-col gap-[2px] pt-4 text-[10px] leading-3 text-gray-500 dark:text-gray-400">
+            <div class="flex flex-col text-[10px] leading-3 text-gray-500 dark:text-gray-400" style="gap:{{ $gap }}px;padding-top:calc(0.875rem + {{ $gap }}px)">
                 @foreach (['Mon', '', 'Wed', '', 'Fri', '', ''] as $dayLabel)
-                    <span class="h-3">{{ $dayLabel }}</span>
+                    <span class="flex items-center" style="height:{{ $cellPx }}px">{{ $dayLabel }}</span>
                 @endforeach
             </div>
-            <div class="flex gap-[2px]" role="img" aria-label="Calendar of daily P&amp;L; the same values are in the daily table below.">
+            <div class="flex" style="gap:{{ $gap }}px" role="img" aria-label="Calendar of daily P&amp;L; the same values are in the daily table below.">
                 @foreach ($weeks as $week)
-                    <div class="flex flex-col gap-[2px]">
-                        {{-- Absolutely positioned so a label can't widen its 12px week column --}}
+                    <div class="flex flex-col" style="gap:{{ $gap }}px">
+                        {{-- Absolutely positioned so a label can't widen its week column --}}
                         <span class="relative h-3.5"><span class="absolute left-0 top-0 text-[10px] leading-3 text-gray-500 dark:text-gray-400 whitespace-nowrap">{{ $week['month'] }}</span></span>
                         @foreach ($week['days'] as $cell)
-                            <span class="block w-3 h-3 rounded-sm {{ $cell['class'] }} {{ $cell['tip'] ? 'hover:ring-2 hover:ring-indigo-500' : '' }}"
+                            <span class="block rounded-sm {{ $cell['class'] }} {{ $cell['tip'] ? 'hover:ring-2 hover:ring-indigo-500' : '' }}"
+                                style="width:{{ $cellPx }}px;height:{{ $cellPx }}px"
                                 @if ($cell['tip']) data-tip="{{ $cell['tip'] }}" @pointerenter="tip = $el.dataset.tip" @pointerleave="tip = ''" @endif></span>
                         @endforeach
                     </div>
