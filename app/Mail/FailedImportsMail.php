@@ -14,10 +14,20 @@ class FailedImportsMail extends Mailable
 {
     use Queueable, SerializesModels;
 
-    /** @param array<array{account_name:string,source_trade_id:string|null,reason:string,occurred_at:string}> $failures */
+    /** Trades from the AddOn or an Executions CSV that couldn't be imported (the original use). */
+    public const KIND_TRADES = 'trades';
+
+    /** Trades-export rows that couldn't be matched to a trade to add MAE/MFE to. */
+    public const KIND_MAE_MFE = 'mae_mfe';
+
+    /**
+     * @param array<array{account_name:string,source_trade_id:string|null,reason:string,occurred_at:string}> $failures
+     * @param string $kind  which import failed; only changes the wording, never adds row data to the body
+     */
     public function __construct(
         public readonly string $journalName,
         public readonly array  $failures,
+        public readonly string $kind = self::KIND_TRADES,
     ) {}
 
     public function envelope(): Envelope
@@ -25,7 +35,9 @@ class FailedImportsMail extends Mailable
         $count = count($this->failures);
 
         return new Envelope(
-            subject: "Failed Trade Imports — {$count} trade".($count === 1 ? '' : 's')." could not be imported",
+            subject: $this->kind === self::KIND_MAE_MFE
+                ? "MAE/MFE Import — {$count} row".($count === 1 ? '' : 's')." could not be matched to a trade"
+                : "Failed Trade Imports — {$count} trade".($count === 1 ? '' : 's')." could not be imported",
         );
     }
 
