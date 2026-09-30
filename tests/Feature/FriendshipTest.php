@@ -2,10 +2,12 @@
 
 use App\Enums\FriendshipStatus;
 use App\Enums\UserStatus;
+use App\Mail\FriendRequestMail;
 use App\Models\Friendship;
 use App\Models\User;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Mail;
 use Livewire\Livewire;
 
 uses(LazilyRefreshDatabase::class);
@@ -197,4 +199,50 @@ test('the page lists incoming, outgoing and accepted friends', function () {
     Friendship::factory()->accepted()->create(['requester_id' => $friend->id, 'recipient_id' => $me->id]);
 
     friendsPage($me)->assertSee('Asker Ann')->assertSee('Asked Al')->assertSee('Friend Fay');
+});
+
+// ---------------------------------------------------------------------------
+// Friend request email
+// ---------------------------------------------------------------------------
+
+test('sending a friend request emails the recipient, not the sender', function () {
+    [$me, $them] = User::factory()->count(2)->sequence(['name' => 'Sender Sam'], ['name' => 'Recipient Rae'])->create();
+    Mail::fake();
+
+    friendsPage($me)->set('searchEmail', $them->email)->call('sendRequest');
+
+    Mail::assertSent(FriendRequestMail::class, 1);
+    Mail::assertSent(FriendRequestMail::class, fn ($m) => $m->hasTo($them->email) && ! $m->hasTo($me->email));
+});
+
+test('the friend request email names the sender and links to the friends page', function () {
+    [$me, $them] = User::factory()->count(2)->sequence(['name' => 'Sender Sam'], ['name' => 'Recipient Rae'])->create();
+    $f = Friendship::factory()->create(['requester_id' => $me->id, 'recipient_id' => $them->id]);
+
+    $mail = new FriendRequestMail($f);
+
+    expect($mail->envelope()->subject)->toContain('Sender Sam');
+    expect($mail->render())->toContain('Recipient Rae')->toContain(route('friends.index'));
+});
+
+test('re-requesting after a decline emails again', function () {
+    [$me, $them] = User::factory()->count(2)->create();
+    Friendship::factory()->create(['requester_id' => $them->id, 'recipient_id' => $me->id, 'status' => FriendshipStatus::Declined]);
+    Mail::fake();
+
+    friendsPage($me)->set('searchEmail', $them->email)->call('sendRequest');
+
+    Mail::assertSent(FriendRequestMail::class, fn ($m) => $m->hasTo($them->email));
+});
+
+test('no request email when sending back accepts their request, or when already pending', function () {
+    [$me, $them, $other] = User::factory()->count(3)->create();
+    Friendship::factory()->create(['requester_id' => $them->id, 'recipient_id' => $me->id]);
+    Friendship::factory()->create(['requester_id' => $me->id, 'recipient_id' => $other->id]);
+    Mail::fake();
+
+    friendsPage($me)->set('searchEmail', $them->email)->call('sendRequest');
+    friendsPage($me)->set('searchEmail', $other->email)->call('sendRequest');
+
+    Mail::assertNotSent(FriendRequestMail::class);
 });
