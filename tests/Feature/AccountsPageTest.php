@@ -5,7 +5,6 @@ use App\Enums\ScreenshotSource;
 use App\Models\Account;
 use App\Models\Journal;
 use App\Models\Trade;
-use App\Models\TradeCopy;
 use App\Models\TradeExecution;
 use App\Models\TradeNote;
 use App\Models\TradeScreenshot;
@@ -253,7 +252,6 @@ test('clearTrades removes all trades, their data, and screenshot files but keeps
 
     TradeExecution::factory()->create(['trade_id' => $tradeA->id]);
     TradeNote::factory()->create(['trade_id' => $tradeA->id, 'created_by' => $user->id]);
-    TradeCopy::factory()->create(['trade_id' => $tradeB->id, 'account_id' => $account->id]);
 
     $path = "trade-screenshots/{$journal->id}/{$tradeA->uuid}.png";
     Storage::disk('local')->put($path, 'fake-image-data');
@@ -281,7 +279,6 @@ test('clearTrades removes all trades, their data, and screenshot files but keeps
         ->and(Trade::count())->toBe(0)
         ->and(TradeExecution::count())->toBe(0)
         ->and(TradeNote::count())->toBe(0)
-        ->and(TradeCopy::count())->toBe(0)
         ->and(TradeScreenshot::count())->toBe(0);
     Storage::disk('local')->assertMissing($path);
 });

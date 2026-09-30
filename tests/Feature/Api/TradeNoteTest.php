@@ -33,7 +33,7 @@ function createTradeViaApi(string $token): string
             ['execution_id' => uniqid(), 'order_id' => 'o1', 'occurred_at' => '2026-09-24T09:30:00-04:00', 'action' => 'buy', 'role' => 'entry', 'quantity' => 1, 'allocated_quantity' => 1, 'price' => '5000.00', 'commission' => '2.99', 'fee' => null, 'order_name' => 'Entry', 'position_after' => 1],
             ['execution_id' => uniqid(), 'order_id' => 'o2', 'occurred_at' => '2026-09-24T09:35:00-04:00', 'action' => 'sell', 'role' => 'exit', 'quantity' => 1, 'allocated_quantity' => 1, 'price' => '5002.00', 'commission' => '2.98', 'fee' => null, 'order_name' => 'Target1', 'position_after' => 0],
         ],
-        'notes' => [], 'screenshot' => null, 'copies_source' => null, 'copies' => [],
+        'notes' => [], 'screenshot' => null,
     ];
 
     $response = test()->postJson('/api/v1/trades', $payload, ['Authorization' => "Bearer {$token}"]);
