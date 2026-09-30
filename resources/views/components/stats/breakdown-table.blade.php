@@ -4,8 +4,9 @@
     The numbers are always printed, so the bars are reinforcement only.
 
     rows: Collection of ['label', 'count', 'wins', 'win_rate', 'net_pnl', 'avg_pnl']
+    tip:  optional explanation, shown in an info tip beside the title
 --}}
-@props(['title', 'rows'])
+@props(['title', 'rows', 'tip' => null])
 
 @php
     use App\Support\Format;
@@ -13,7 +14,12 @@
 @endphp
 
 <div class="border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 rounded-lg overflow-hidden">
-    <h3 class="px-4 py-2.5 text-xs font-semibold text-gray-600 dark:text-gray-500 uppercase tracking-wider border-b border-gray-200 dark:border-gray-700">{{ $title }}</h3>
+    <h3 class="flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold text-gray-600 dark:text-gray-500 uppercase tracking-wider border-b border-gray-200 dark:border-gray-700">
+        {{ $title }}
+        @if ($tip)
+            <x-stats.info-tip :label="'About '.$title"><span class="block">{{ $tip }}</span></x-stats.info-tip>
+        @endif
+    </h3>
     <div class="overflow-x-auto">
         <table class="w-full text-sm tabular-nums">
             <thead class="text-xs text-gray-500 dark:text-gray-400">
