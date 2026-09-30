@@ -139,10 +139,8 @@ new class extends Component
 
         $screenshots = TradeScreenshot::whereIn('trade_id', $account->trades()->select('id'))->get();
 
-        // Executions, legs, copies (+ their executions), screenshots, and notes
-        // all cascadeOnDelete at the DB level — only the screenshot files need
-        // explicit cleanup. Copies *into* this account that hang off another
-        // account's trade are left alone; they belong to that trade's record.
+        // Executions, legs, screenshots, and notes all cascadeOnDelete at the
+        // DB level — only the screenshot files need explicit cleanup.
         DB::transaction(fn () => $account->trades()->delete());
 
         foreach ($screenshots as $shot) {
