@@ -346,3 +346,109 @@ test('deleting a trade removes its invitations and comments', function () {
 
     expect(TradeInvitation::count())->toBe(0)->and(TradeComment::count())->toBe(0);
 });
+
+// ---------------------------------------------------------------------------
+// The owner's thread inside the journal trade page
+// ---------------------------------------------------------------------------
+
+function ownerJournal(object $f)
+{
+    return Livewire::actingAs($f->owner)
+        ->test('journal.trade-journal', ['journal' => $f->owner->journal])
+        ->set('selectedUuid', $f->trade->uuid);
+}
+
+test('the owner sees the comment thread on their trade in the journal', function () {
+    $f = sharedFixture();
+    $top = TradeComment::factory()->create(['trade_id' => $f->trade->id, 'user_id' => $f->friend->id, 'body' => 'Why size up here?']);
+    TradeComment::factory()->create(['trade_id' => $f->trade->id, 'user_id' => $f->owner->id, 'parent_comment_id' => $top->id, 'body' => 'Trend day.']);
+
+    ownerJournal($f)
+        ->assertSee('Conversation')
+        ->assertSeeInOrder(['Friend Finn', 'Why size up here?', 'Owner Olive', 'Trend day.']);
+});
+
+test('the owner can comment from the journal, and the invitee is emailed a link to the conversation page', function () {
+    $f = sharedFixture();
+    Mail::fake();
+
+    ownerJournal($f)->set('commentBody', 'What would you have done?')->call('postComment')->assertHasNoErrors();
+
+    $c = TradeComment::sole();
+    expect($c->user_id)->toBe($f->owner->id)->and($c->parent_comment_id)->toBeNull();
+
+    Mail::assertSent(NewTradeCommentMail::class, 1);
+    Mail::assertSent(NewTradeCommentMail::class, fn ($m) => $m->hasTo($f->friend->email)
+        && $m->url === route('trades.shared', $f->trade).'#comment-'.$c->id);
+});
+
+test('the owner can reply to a friend comment from the journal', function () {
+    $f = sharedFixture();
+    $top = TradeComment::factory()->create(['trade_id' => $f->trade->id, 'user_id' => $f->friend->id]);
+    Mail::fake();
+
+    ownerJournal($f)->call('startReply', $top->id)->set('replyBody', 'Good question.')->call('postReply')->assertHasNoErrors();
+
+    $reply = TradeComment::where('parent_comment_id', $top->id)->sole();
+    expect($reply->user_id)->toBe($f->owner->id)->and($reply->body)->toBe('Good question.');
+    Mail::assertSent(NewTradeCommentMail::class, fn ($m) => $m->hasTo($f->friend->email));
+});
+
+test('the journal enforces the same one-level nesting and same-trade parent rules', function () {
+    $f = sharedFixture();
+    $top   = TradeComment::factory()->create(['trade_id' => $f->trade->id, 'user_id' => $f->friend->id]);
+    $reply = TradeComment::factory()->create(['trade_id' => $f->trade->id, 'user_id' => $f->owner->id, 'parent_comment_id' => $top->id]);
+    $elsewhere = TradeComment::factory()->create(['trade_id' => $f->otherTrade->id, 'user_id' => $f->owner->id]);
+
+    ownerJournal($f)->call('startReply', $reply->id)->set('replyBody', 'nested')->call('postReply')
+        ->assertHasErrors('parent_comment_id');
+    ownerJournal($f)->call('startReply', $elsewhere->id)->set('replyBody', 'wrong trade')->call('postReply')
+        ->assertHasErrors('parent_comment_id');
+
+    expect(TradeComment::count())->toBe(3);
+});
+
+test('the journal thread is only for the owner own trades', function () {
+    $f = sharedFixture();
+    $intruder = User::factory()->create();
+
+    // Another user pointing their journal at this trade resolves nothing.
+    Livewire::actingAs($intruder)
+        ->test('journal.trade-journal', ['journal' => $intruder->journal])
+        ->set('selectedUuid', $f->trade->uuid)
+        ->set('commentBody', 'hi')
+        ->call('postComment')
+        ->assertNotFound();
+
+    expect(TradeComment::count())->toBe(0);
+});
+
+test('a trade with no invitations and no comments shows no conversation box', function () {
+    $f = sharedFixture();
+    $f->invitation->delete();
+
+    ownerJournal($f)->assertDontSee('Conversation');
+});
+
+test('a friend comment emails the owner a link back to the trade in their journal', function () {
+    $f = sharedFixture();
+    Mail::fake();
+
+    $this->actingAs($f->friend)->post(commentUrl($f->trade), ['body' => 'Nice']);
+
+    Mail::assertSent(NewTradeCommentMail::class, fn ($m) => $m->hasTo($f->owner->email)
+        && str_starts_with($m->url, route('journal.index', ['trade' => $f->trade->uuid])));
+});
+
+test('commenting is rate limited across the journal and the conversation page', function () {
+    $f = sharedFixture();
+    Mail::fake();
+
+    for ($i = 0; $i < 20; $i++) {
+        ownerJournal($f)->set('commentBody', "c{$i}")->call('postComment')->assertHasNoErrors();
+    }
+    ownerJournal($f)->set('commentBody', 'one too many')->call('postComment')->assertHasErrors('body');
+    $this->actingAs($f->owner)->postJson(commentUrl($f->trade), ['body' => 'also too many'])->assertStatus(422);
+
+    expect(TradeComment::count())->toBe(20);
+});
