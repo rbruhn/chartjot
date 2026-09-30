@@ -18,18 +18,6 @@ namespace ChartJot.Core.Tests
 			return tracker.Apply(Sell("e3", "ord-1003", "Stop1", 1, 7702.50m, 380, 1.29m, 0, isExit: true)).Closed[0];
 		}
 
-		private static CopyEvaluation SampleCopies()
-		{
-			CopierSnapshot setup = CopierSnapshotParser.Parse("APEX-24570-135", true, "All", "ES", "Round Up At 0.5", "Multiplier",
-				new[] { "PA-02|Slave|1|No|No|No|No|No|Default|No|Rithmic" }, CopierSnapshotParser.SourceLive);
-
-			TradeTracker followerTracker = new TradeTracker();
-			followerTracker.Apply(Buy("f1", "fo1", "Entry", 3, 7700.00m, 1, 0.5m, 3, "PA-02", isEntry: true));
-			CompletedTrade follower = followerTracker.Apply(Sell("f2", "fo2", "Close", 3, 7701.50m, 200, 0.5m, 0, "PA-02", isExit: true)).Closed[0];
-
-			return CopyMatcher.Evaluate(WorkedExample(), setup, new MatchOptions(), new[] { CopyCandidate.FromClosed(follower) });
-		}
-
 		private static StagedTrade FullExample()
 		{
 			return new StagedTrade
@@ -43,8 +31,7 @@ namespace ChartJot.Core.Tests
 				},
 				TradeType = null,
 				TradeTypeOther = null,
-				Screenshot = new ScreenshotMeta { CapturedAt = At(381), Caption = "ES 1m", Format = "png" },
-				Copies = SampleCopies()
+				Screenshot = new ScreenshotMeta { CapturedAt = At(381), Caption = "ES 1m", Format = "png" }
 			};
 		}
 
@@ -147,29 +134,7 @@ namespace ChartJot.Core.Tests
 		}
 
 		[Fact]
-		public void SerializeDeserialize_RoundTripsCopyEvaluation()
-		{
-			StagedTrade original = FullExample();
-			StagedTrades trades = new StagedTrades();
-			trades.Add(original);
-
-			CopyEvaluation reloaded = StagedTrades.Deserialize(trades.Serialize()).Find(original.Trade.TradeId).Copies;
-
-			Assert.Equal(original.Copies.Source, reloaded.Source);
-			Assert.Equal(original.Copies.Summary.Matched, reloaded.Summary.Matched);
-			Assert.Equal(original.Copies.Summary.NetPnl, reloaded.Summary.NetPnl);
-			CopyResult copy = Assert.Single(reloaded.Copies);
-			CopyResult expectedCopy = Assert.Single(original.Copies.Copies);
-			Assert.Equal(expectedCopy.Account, copy.Account);
-			Assert.Equal(expectedCopy.Outcome, copy.Outcome);
-			Assert.Equal(expectedCopy.Quantity, copy.Quantity);
-			Assert.Equal(expectedCopy.Performance.NetPnl, copy.Performance.NetPnl);
-			Assert.Equal(expectedCopy.Expected.Multiplier, copy.Expected.Multiplier);
-			Assert.Equal(expectedCopy.Fills.Count, copy.Fills.Count);
-		}
-
-		[Fact]
-		public void SerializeDeserialize_NullScreenshotAndCopies_RoundTripAsNull()
+		public void SerializeDeserialize_NullScreenshot_RoundTripsAsNull()
 		{
 			StagedTrade minimal = new StagedTrade
 			{
@@ -177,8 +142,7 @@ namespace ChartJot.Core.Tests
 				Notes = new List<NoteRecord>(),
 				TradeType = "2ES",
 				TradeTypeOther = null,
-				Screenshot = null,
-				Copies = null
+				Screenshot = null
 			};
 			StagedTrades trades = new StagedTrades();
 			trades.Add(minimal);
@@ -186,9 +150,24 @@ namespace ChartJot.Core.Tests
 			StagedTrade reloaded = StagedTrades.Deserialize(trades.Serialize()).Find(minimal.Trade.TradeId);
 
 			Assert.Null(reloaded.Screenshot);
-			Assert.Null(reloaded.Copies);
 			Assert.Equal("2ES", reloaded.TradeType);
 			Assert.Empty(reloaded.Notes);
+		}
+
+		[Fact]
+		public void Deserialize_AStateFileSavedWithCopierResults_StillLoads()
+		{
+			StagedTrade original = FullExample();
+			StagedTrades trades = new StagedTrades();
+			trades.Add(original);
+			// State files written before #28 carried a "copies" object per staged trade; it is now ignored.
+			string saved = trades.Serialize();
+			string legacy = saved.Substring(0, saved.Length - 2) + ",\"copies\":{\"source\":\"copier_live\",\"results\":[]}}]";
+
+			StagedTrade reloaded = StagedTrades.Deserialize(legacy).Find(original.Trade.TradeId);
+
+			Assert.Equal(original.Trade.TradeId, reloaded.Trade.TradeId);
+			Assert.Equal(3, reloaded.Notes.Count);
 		}
 
 		[Fact]

@@ -87,7 +87,7 @@ namespace ChartJot.Core
 
 		/// <summary>
 		/// True when this trade was opened by the fill that also closed the previous trade (a reversal), rather than
-		/// from flat. The copier's Select Trade Direction filter only ever blocks an entry from flat.
+		/// from flat.
 		/// </summary>
 		public bool OpenedByReversal { get; set; }
 
