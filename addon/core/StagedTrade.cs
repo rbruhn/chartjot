@@ -21,9 +21,6 @@ namespace ChartJot.Core
 
 		/// <summary>Null when capture failed or is disabled; that must never block submission.</summary>
 		public ScreenshotMeta Screenshot { get; set; }
-
-		/// <summary>Null when the copier is off or this account is not a journaled master.</summary>
-		public CopyEvaluation Copies { get; set; }
 	}
 
 	/// <summary>Trades awaiting review, keyed by trade_id, with the same save/load round trip as
@@ -108,11 +105,6 @@ namespace ChartJot.Core
 			else
 				WriteScreenshot(w, s.Screenshot);
 
-			if (s.Copies == null)
-				w.Name("copies").Null();
-			else
-				WriteCopyEvaluation(w, s.Copies);
-
 			w.EndObject();
 		}
 
@@ -124,8 +116,7 @@ namespace ChartJot.Core
 				Notes = v["notes"].Items.Select(ReadNote).ToList(),
 				TradeType = v["trade_type"].AsString(),
 				TradeTypeOther = v["trade_type_other"].AsString(),
-				Screenshot = v["screenshot"].IsNull ? null : ReadScreenshot(v["screenshot"]),
-				Copies = v["copies"].IsNull ? null : ReadCopyEvaluation(v["copies"])
+				Screenshot = v["screenshot"].IsNull ? null : ReadScreenshot(v["screenshot"])
 			};
 		}
 
@@ -414,164 +405,6 @@ namespace ChartJot.Core
 				CapturedAt = ParseTimestamp(v["captured_at"]).Value,
 				Caption = v["caption"].AsString(),
 				Format = v["format"].AsString()
-			};
-		}
-
-		// ---- CopyEvaluation ----
-
-		private static void WriteCopyEvaluation(JsonWriter w, CopyEvaluation c)
-		{
-			w.Name("copies").BeginObject();
-			w.Property("source", c.Source);
-
-			w.Name("results").BeginArray();
-			foreach (CopyResult copy in c.Copies ?? new List<CopyResult>())
-				WriteCopyResult(w, copy);
-			w.EndArray();
-
-			if (c.Summary == null)
-			{
-				w.Name("summary").Null();
-			}
-			else
-			{
-				w.Name("summary").BeginObject();
-				w.Property("accounts", c.Summary.Accounts);
-				w.Property("matched", c.Summary.Matched);
-				w.Property("missed", c.Summary.Missed);
-				w.Property("still_open", c.Summary.StillOpen);
-				w.Property("net_pnl", c.Summary.NetPnl);
-				w.EndObject();
-			}
-
-			w.Name("diagnostics").BeginArray();
-			foreach (string d in c.Diagnostics ?? new List<string>())
-				w.String(d);
-			w.EndArray();
-
-			w.EndObject();
-		}
-
-		private static CopyEvaluation ReadCopyEvaluation(JsonValue v)
-		{
-			return new CopyEvaluation
-			{
-				Source = v["source"].AsString(),
-				Copies = v["results"].Items.Select(ReadCopyResult).ToList(),
-				Summary = v["summary"].IsNull ? null : new CopySummary
-				{
-					Accounts = v["summary"]["accounts"].AsInt32(),
-					Matched = v["summary"]["matched"].AsInt32(),
-					Missed = v["summary"]["missed"].AsInt32(),
-					StillOpen = v["summary"]["still_open"].AsInt32(),
-					NetPnl = v["summary"]["net_pnl"].AsDecimal()
-				},
-				Diagnostics = v["diagnostics"].Items.Select(d => d.AsString()).ToList()
-			};
-		}
-
-		private static void WriteCopyResult(JsonWriter w, CopyResult copy)
-		{
-			w.BeginObject();
-			w.Property("account", copy.Account);
-			w.Property("outcome", copy.Outcome.ToString());
-
-			if (copy.Instrument == null)
-				w.Name("instrument").Null();
-			else
-			{
-				w.Name("instrument");
-				WriteInstrument(w, copy.Instrument);
-			}
-
-			if (copy.Expected == null)
-			{
-				w.Name("expected").Null();
-			}
-			else
-			{
-				w.Name("expected").BeginObject();
-				w.Property("contract_size", copy.Expected.ContractSize);
-				w.Property("multiplier", copy.Expected.Multiplier);
-				w.Property("faded", copy.Expected.Faded);
-				w.Property("blown", copy.Expected.Blown);
-				w.Name("quantity");
-				if (copy.Expected.Quantity.HasValue) w.Int(copy.Expected.Quantity.Value); else w.Null();
-				w.EndObject();
-			}
-
-			w.Name("warnings").BeginArray();
-			foreach (string warning in copy.Warnings ?? new List<string>())
-				w.String(warning);
-			w.EndArray();
-
-			w.Name("direction");
-			if (copy.Direction.HasValue) w.String(copy.Direction.Value.ToString()); else w.Null();
-			w.Property("quantity", copy.Quantity);
-			w.Name("entry_average_price");
-			if (copy.EntryAveragePrice.HasValue) w.Decimal(copy.EntryAveragePrice.Value); else w.Null();
-			w.Name("exit_average_price");
-			if (copy.ExitAveragePrice.HasValue) w.Decimal(copy.ExitAveragePrice.Value); else w.Null();
-			w.Property("entered_at", copy.EnteredAt.HasValue ? Timestamp(copy.EnteredAt.Value) : null);
-			w.Property("exited_at", copy.ExitedAt.HasValue ? Timestamp(copy.ExitedAt.Value) : null);
-
-			if (copy.Performance == null)
-			{
-				w.Name("performance").Null();
-			}
-			else
-			{
-				w.Name("performance").BeginObject();
-				w.Property("points", copy.Performance.Points);
-				w.Property("ticks", copy.Performance.Ticks);
-				w.Property("gross_pnl", copy.Performance.GrossPnl);
-				w.Property("commission", copy.Performance.Commission);
-				w.Name("fees");
-				if (copy.Performance.Fees.HasValue) w.Decimal(copy.Performance.Fees.Value); else w.Null();
-				w.Property("net_pnl", copy.Performance.NetPnl);
-				w.EndObject();
-			}
-
-			w.Name("fills").BeginArray();
-			foreach (TradeFill fill in copy.Fills ?? new List<TradeFill>())
-				WriteTradeFill(w, fill);
-			w.EndArray();
-
-			w.EndObject();
-		}
-
-		private static CopyResult ReadCopyResult(JsonValue v)
-		{
-			return new CopyResult
-			{
-				Account = v["account"].AsString(),
-				Outcome = ParseEnum<CopyOutcome>(v["outcome"].AsString()),
-				Instrument = v["instrument"].IsNull ? null : ReadInstrument(v["instrument"]),
-				Expected = v["expected"].IsNull ? null : new ExpectedCopy
-				{
-					ContractSize = v["expected"]["contract_size"].AsString(),
-					Multiplier = v["expected"]["multiplier"].AsDecimal(),
-					Faded = v["expected"]["faded"].AsBool(),
-					Blown = v["expected"]["blown"].AsBool(),
-					Quantity = v["expected"]["quantity"].IsNull ? (int?)null : v["expected"]["quantity"].AsInt32()
-				},
-				Warnings = v["warnings"].Items.Select(w => w.AsString()).ToList(),
-				Direction = v["direction"].IsNull ? (Direction?)null : ParseEnum<Direction>(v["direction"].AsString()),
-				Quantity = v["quantity"].AsInt32(),
-				EntryAveragePrice = v["entry_average_price"].IsNull ? (decimal?)null : v["entry_average_price"].AsDecimal(),
-				ExitAveragePrice = v["exit_average_price"].IsNull ? (decimal?)null : v["exit_average_price"].AsDecimal(),
-				EnteredAt = ParseTimestamp(v["entered_at"]),
-				ExitedAt = ParseTimestamp(v["exited_at"]),
-				Performance = v["performance"].IsNull ? null : new CopyPerformance
-				{
-					Points = v["performance"]["points"].AsDecimal(),
-					Ticks = v["performance"]["ticks"].AsInt32(),
-					GrossPnl = v["performance"]["gross_pnl"].AsDecimal(),
-					Commission = v["performance"]["commission"].AsDecimal(),
-					Fees = v["performance"]["fees"].IsNull ? (decimal?)null : v["performance"]["fees"].AsDecimal(),
-					NetPnl = v["performance"]["net_pnl"].AsDecimal()
-				},
-				Fills = v["fills"].Items.Select(ReadTradeFill).ToList()
 			};
 		}
 

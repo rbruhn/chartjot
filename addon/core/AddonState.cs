@@ -78,7 +78,7 @@ namespace ChartJot.Core
 		public StagedTrades Staged { get; private set; }
 		public DeliveryQueue Deliveries { get; private set; }
 
-		/// <summary>Closed trades not yet staged (waiting on commission settle, the screenshot, or copies to close).</summary>
+		/// <summary>Closed trades not yet staged (waiting on commission settle or the screenshot).</summary>
 		public IList<CompletedTrade> AwaitingStage
 		{
 			get { return awaitingOrder.Select(id => awaiting[id]).ToList(); }
@@ -137,20 +137,19 @@ namespace ChartJot.Core
 		}
 
 		/// <summary>Moves a closed trade and its notes into the review list.</summary>
-		public StagedTrade Stage(string tradeId, CopyEvaluation copies = null)
+		public StagedTrade Stage(string tradeId)
 		{
 			CompletedTrade trade;
 			if (!awaiting.TryGetValue(tradeId, out trade))
 				throw new InvalidOperationException("Trade " + tradeId + " is not waiting to be staged.");
 
-			StagedTrade staged = new StagedTrade { Trade = trade, Notes = NotesFor(tradeId), Copies = copies };
+			StagedTrade staged = new StagedTrade { Trade = trade, Notes = NotesFor(tradeId) };
 			Staged.Add(staged);
 			Forget(tradeId);
 			return staged;
 		}
 
-		/// <summary>Drops a closed trade that will not be journaled (for example a copy account's round turn), and
-		/// anything held for it.</summary>
+		/// <summary>Drops a closed trade that will not be journaled, and anything held for it.</summary>
 		public void Discard(string tradeId)
 		{
 			Forget(tradeId);
