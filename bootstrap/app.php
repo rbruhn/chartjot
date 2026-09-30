@@ -7,6 +7,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Middleware\SubstituteBindings;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -21,6 +22,15 @@ return Application::configure(basePath: dirname(__DIR__))
             'admin'          => EnsureUserIsAdmin::class,
             'journal.token'  => AuthenticateJournalToken::class,
         ]);
+
+        // Resolve the journal token before route-model binding, so an
+        // unauthenticated request never touches the {trade} lookup. Throttle
+        // already sorts ahead of SubstituteBindings, so the API runs
+        // throttle -> journal.token -> bindings.
+        $middleware->prependToPriorityList(
+            before: SubstituteBindings::class,
+            prepend: AuthenticateJournalToken::class,
+        );
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
