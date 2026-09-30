@@ -32,8 +32,14 @@ new class extends Component
                     <x-nav-link :href="route('journal.index')" :active="request()->routeIs('journal.index')" wire:navigate>
                         {{ __('Journal') }}
                     </x-nav-link>
+                    <x-nav-link :href="route('journal.statistics')" :active="request()->routeIs('journal.statistics')" wire:navigate>
+                        {{ __('Statistics') }}
+                    </x-nav-link>
                     <x-nav-link :href="route('journal.accounts')" :active="request()->routeIs('journal.accounts')" wire:navigate>
                         {{ __('Accounts') }}
+                    </x-nav-link>
+                    <x-nav-link :href="route('friends.index')" :active="request()->routeIs('friends.index')" wire:navigate>
+                        {{ __('Friends') }}
                     </x-nav-link>
                     @if (auth()->user()?->isAdmin())
                         <x-nav-link :href="route('admin.users')" :active="request()->routeIs('admin.*')" wire:navigate>
@@ -117,8 +123,14 @@ new class extends Component
             <x-responsive-nav-link :href="route('journal.index')" :active="request()->routeIs('journal.index')" wire:navigate>
                 {{ __('Journal') }}
             </x-responsive-nav-link>
+            <x-responsive-nav-link :href="route('journal.statistics')" :active="request()->routeIs('journal.statistics')" wire:navigate>
+                {{ __('Statistics') }}
+            </x-responsive-nav-link>
             <x-responsive-nav-link :href="route('journal.accounts')" :active="request()->routeIs('journal.accounts')" wire:navigate>
                 {{ __('Accounts') }}
+            </x-responsive-nav-link>
+            <x-responsive-nav-link :href="route('friends.index')" :active="request()->routeIs('friends.index')" wire:navigate>
+                {{ __('Friends') }}
             </x-responsive-nav-link>
             @if (auth()->user()?->isAdmin())
                 <x-responsive-nav-link :href="route('admin.users')" :active="request()->routeIs('admin.*')" wire:navigate>
