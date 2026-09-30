@@ -8,8 +8,8 @@ use Illuminate\Mail\Mailables\Attachment;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
-use League\Csv\Writer;
 
+/** Trades the AddOn sent that couldn't be imported. CSV uploads report through ImportFinishedMail. */
 class FailedImportsMail extends Mailable
 {
     use Queueable, SerializesModels;
@@ -37,21 +37,6 @@ class FailedImportsMail extends Mailable
     /** @return array<Attachment> */
     public function attachments(): array
     {
-        $csv = Writer::createFromString();
-        $csv->insertOne(['Account Name', 'Trade ID', 'Reason', 'Occurred At']);
-
-        foreach ($this->failures as $f) {
-            $csv->insertOne([
-                $f['account_name'],
-                $f['source_trade_id'] ?? '—',
-                $f['reason'],
-                $f['occurred_at'],
-            ]);
-        }
-
-        return [
-            Attachment::fromData(fn () => $csv->toString(), 'failed-imports.csv')
-                ->withMime('text/csv'),
-        ];
+        return [FailuresCsv::attachment($this->failures)];
     }
 }
