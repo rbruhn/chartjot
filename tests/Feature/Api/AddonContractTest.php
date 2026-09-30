@@ -2,8 +2,6 @@
 
 use App\Models\Account;
 use App\Models\Trade;
-use App\Models\TradeCopy;
-use App\Models\TradeCopyExecution;
 use App\Models\TradeExecution;
 use App\Models\TradeLeg;
 use App\Models\User;
@@ -61,34 +59,21 @@ it('accepts the payload the AddOn produces', function (string $file) {
         ->and((int) $trade->quantity)->toBe($payload['quantity'])
         ->and($trade->excursion_complete)->toBe($payload['excursion']['complete'])
         ->and(TradeExecution::where('trade_id', $trade->id)->count())->toBe(count($payload['executions']))
-        ->and(TradeLeg::where('trade_id', $trade->id)->count())->toBe(count($payload['legs']))
-        ->and(TradeCopy::where('trade_id', $trade->id)->count())->toBe(count($payload['copies']));
+        ->and(TradeLeg::where('trade_id', $trade->id)->count())->toBe(count($payload['legs']));
 })->with(addonFixtures());
 
-it('stores every copy with its own fills', function (string $file) {
+it('ignores the copier data the AddOn still sends', function (string $file) {
     [$journal, $token] = addonJournalToken();
     $payload = json_decode(file_get_contents($file), true);
 
+    // The AddOn still nests follower copies into the master's payload until #28 reworks it; the server
+    // dropped copier reconciliation (#27), so only the master account and its own trade are recorded.
     test()->postJson('/api/v1/trades', $payload, ['Authorization' => "Bearer {$token}"])->assertStatus(201);
 
     $trade = Trade::where('source_trade_id', $payload['trade_id'])->firstOrFail();
 
-    foreach ($payload['copies'] as $copyData) {
-        $copy = TradeCopy::where('trade_id', $trade->id)
-            ->whereHas('account', fn ($q) => $q->where('name', $copyData['account_name']))
-            ->firstOrFail();
-
-        expect($copy->status->value)->toBe($copyData['status'])
-            ->and($copy->warnings)->toBe($copyData['warnings'])
-            ->and((int) $copy->quantity)->toBe($copyData['quantity'])
-            ->and(TradeCopyExecution::where('trade_copy_id', $copy->id)->count())->toBe(count($copyData['executions']));
-
-        if ($copyData['performance'] !== null) {
-            expect((float) $copy->net_pnl)->toBe((float) $copyData['performance']['net_pnl']);
-        }
-    }
-
-    expect(Account::where('journal_id', $journal->id)->count())->toBe(1 + count($payload['copies']));
+    expect(Account::where('journal_id', $journal->id)->pluck('name')->all())->toBe([$payload['account_name']])
+        ->and($trade->raw_payload)->not->toHaveKeys(['copies', 'copies_source', 'copies_summary']);
 })->with(addonFixtures());
 
 it('treats a re-sent AddOn payload as the same trade', function (string $file) {
