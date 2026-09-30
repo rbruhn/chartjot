@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\FriendsController;
 use App\Http\Controllers\JournalAccountsController;
 use App\Http\Controllers\JournalController;
 use App\Http\Controllers\JournalSettingsController;
@@ -21,6 +22,10 @@ Route::get('journal/statistics', [JournalStatisticsController::class, 'index'])
 Route::get('accounts', [JournalAccountsController::class, 'index'])
     ->middleware(['auth', 'active'])
     ->name('journal.accounts');
+
+Route::get('friends', [FriendsController::class, 'index'])
+    ->middleware(['auth', 'active'])
+    ->name('friends.index');
 
 Route::get('journal/settings', [JournalSettingsController::class, 'edit'])
     ->middleware(['auth', 'active'])
