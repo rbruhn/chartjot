@@ -1,7 +1,6 @@
 <?php
 
 use App\Enums\ExitReason;
-use App\Mail\FailedImportsMail;
 use App\Models\Account;
 use App\Models\FailedTradeImport;
 use App\Models\Journal;
@@ -252,7 +251,7 @@ test('an AddOn-reported trade keeps its own legs and excursion', function () {
 // Failures
 // ---------------------------------------------------------------------------
 
-test('a row with no matching trade is recorded as a failure with its raw row, and emailed', function () {
+test('a row with no matching trade is recorded as a failure with its raw row, and returned for the completion email', function () {
     $journal = maeJournal();
     threeContractTrade($journal);
     Mail::fake();
@@ -274,7 +273,11 @@ test('a row with no matching trade is recorded as a failure with its raw row, an
         ->and($failure->payload['Instrument'])->toBe('NQ 12-26');
 
     expect(Trade::count())->toBe(1);
-    Mail::assertSent(FailedImportsMail::class, fn ($m) => count($m->failures) === 1 && $m->kind === 'mae_mfe');
+    // Returned without the raw row, for the job's completion email; the importer itself sends nothing.
+    expect($result['failures'])->toHaveCount(1)
+        ->and($result['failures'][0])->toHaveKeys(['account_name', 'source_trade_id', 'reason', 'occurred_at'])
+        ->and($result['failures'][0])->not->toHaveKey('payload');
+    Mail::assertNothingSent();
 });
 
 test('a matched trade whose rows do not cover all its contracts is a distinct failure and gets no legs', function () {
