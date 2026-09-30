@@ -3,6 +3,7 @@
 use App\Enums\AccountType;
 use App\Enums\TransactionType;
 use App\Models\Account;
+use App\Models\AccountTransaction;
 use App\Models\Journal;
 use App\Models\TradeScreenshot;
 use Illuminate\Support\Facades\DB;
@@ -28,6 +29,11 @@ new class extends Component
     public string $txType          = 'deposit';
     public string $txAmount        = '';
     public string $txDate          = '';
+
+    public ?int $editingTransactionId = null;
+    public string $editTxType         = '';
+    public string $editTxAmount       = '';
+    public string $editTxDate         = '';
 
     #[Computed]
     public function accounts()
@@ -188,6 +194,7 @@ new class extends Component
 
         $this->expandedAccountId = $id;
         $this->resetTransactionForm();
+        $this->cancelEditTransaction();
         unset($this->expandedTransactions);
     }
 
@@ -204,17 +211,8 @@ new class extends Component
         $type   = TransactionType::from($this->txType);
         $amount = round((float) $this->txAmount, 2);
 
-        if ($type === TransactionType::Withdrawal) {
-            // Re-read the balance at save time rather than trusting the rendered
-            // table, which may be stale (e.g. an import landed trades since the
-            // page loaded).
-            $current = $this->withBalanceSums($this->journal->accounts())->findOrFail($account->id);
-            $balance = round($this->balanceFor($current) ?? 0, 2);
-
-            if ($amount > $balance) {
-                $this->addError('txAmount', 'Withdrawal cannot exceed the current balance of $'.number_format($balance, 2).'.');
-                return;
-            }
+        if (!$this->withdrawalFits($account, $type, $amount, null, 'txAmount')) {
+            return;
         }
 
         $account->transactions()->create([
@@ -226,6 +224,106 @@ new class extends Component
         // Leave the ledger row open so several entries can be added in a row.
         $this->resetTransactionForm();
         unset($this->accounts, $this->expandedTransactions);
+    }
+
+    public function startEditTransaction(int $id): void
+    {
+        $tx = $this->expandedTransaction($id);
+
+        $this->editingTransactionId = $tx->id;
+        $this->editTxType           = $tx->type->value;
+        $this->editTxAmount         = number_format((float) $tx->amount, 2, '.', '');
+        $this->editTxDate           = $tx->occurred_at->toDateString();
+        $this->resetErrorBag(['editTxType', 'editTxAmount', 'editTxDate']);
+    }
+
+    public function cancelEditTransaction(): void
+    {
+        $this->editingTransactionId = null;
+        $this->editTxType           = '';
+        $this->editTxAmount         = '';
+        $this->editTxDate           = '';
+        $this->resetErrorBag(['editTxType', 'editTxAmount', 'editTxDate']);
+    }
+
+    public function saveTransaction(): void
+    {
+        $tx = $this->expandedTransaction((int) $this->editingTransactionId);
+
+        $this->validate([
+            'editTxType'   => ['required', Rule::in(array_column(TransactionType::cases(), 'value'))],
+            'editTxAmount' => ['required', 'numeric', 'gt:0', 'max:9999999999.99'],
+            'editTxDate'   => ['required', 'date'],
+        ]);
+
+        $type   = TransactionType::from($this->editTxType);
+        $amount = round((float) $this->editTxAmount, 2);
+
+        if (!$this->withdrawalFits($tx->account, $type, $amount, $tx, 'editTxAmount')) {
+            return;
+        }
+
+        $tx->update([
+            'type'        => $type,
+            'amount'      => $amount,
+            'occurred_at' => $this->editTxDate,
+        ]);
+
+        $this->cancelEditTransaction();
+        unset($this->accounts, $this->expandedTransactions);
+    }
+
+    public function deleteTransaction(int $id): void
+    {
+        $tx = $this->expandedTransaction($id);
+
+        if ($this->editingTransactionId === $tx->id) {
+            $this->cancelEditTransaction();
+        }
+
+        $tx->delete();
+        unset($this->accounts, $this->expandedTransactions);
+    }
+
+    /**
+     * A withdrawal may not exceed the account's current balance. When editing,
+     * the entry being replaced is backed out of the balance first, so e.g.
+     * bumping a $500 withdrawal to $600 only needs $100 more headroom.
+     * The balance is re-read at save time rather than trusted from the
+     * rendered table, which may be stale (e.g. an import landed trades since
+     * the page loaded).
+     */
+    private function withdrawalFits(Account $account, TransactionType $type, float $amount, ?AccountTransaction $replacing, string $errorKey): bool
+    {
+        if ($type !== TransactionType::Withdrawal) {
+            return true;
+        }
+
+        $current = $this->withBalanceSums($this->journal->accounts())->findOrFail($account->id);
+        $balance = $this->balanceFor($current) ?? 0;
+
+        if ($replacing !== null) {
+            $balance += $replacing->type === TransactionType::Withdrawal
+                ? (float) $replacing->amount
+                : -(float) $replacing->amount;
+        }
+
+        $balance = round($balance, 2);
+
+        if ($amount > $balance) {
+            $this->addError($errorKey, 'Withdrawal cannot exceed the current balance of $'.number_format($balance, 2).'.');
+            return false;
+        }
+
+        return true;
+    }
+
+    /** A transaction on the currently expanded (funded, in-journal) account. */
+    private function expandedTransaction(int $id): AccountTransaction
+    {
+        return $this->fundedAccount((int) $this->expandedAccountId)
+            ->transactions()
+            ->findOrFail($id);
     }
 
     private function fundedAccount(int $id): Account
@@ -457,12 +555,13 @@ new class extends Component
                             @if($this->expandedTransactions->isEmpty())
                             <p class="text-gray-500 dark:text-gray-400" style="font-size:0.8125rem;margin-bottom:1rem">No deposits or withdrawals yet.</p>
                             @else
-                            <table style="width:100%;max-width:32rem;border-collapse:collapse;font-size:0.8125rem;margin-bottom:1rem">
+                            <table style="width:100%;max-width:40rem;border-collapse:collapse;font-size:0.8125rem;margin-bottom:1rem">
                                 <thead>
                                     <tr class="border-b border-gray-200 dark:border-gray-700">
                                         <th class="text-gray-500 dark:text-gray-400" style="text-align:left;padding:0.375rem 0.5rem;font-weight:500;font-size:0.6875rem;text-transform:uppercase;letter-spacing:0.05em">Date</th>
                                         <th class="text-gray-500 dark:text-gray-400" style="text-align:left;padding:0.375rem 0.5rem;font-weight:500;font-size:0.6875rem;text-transform:uppercase;letter-spacing:0.05em">Type</th>
                                         <th class="text-gray-500 dark:text-gray-400" style="text-align:right;padding:0.375rem 0.5rem;font-weight:500;font-size:0.6875rem;text-transform:uppercase;letter-spacing:0.05em">Amount</th>
+                                        <th style="padding:0.375rem 0.5rem"></th>
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
@@ -473,6 +572,44 @@ new class extends Component
                                             ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
                                             : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400';
                                     @endphp
+                                    @if($editingTransactionId === $tx->id)
+                                    <tr wire:key="tx-{{ $tx->id }}-edit">
+                                        <td style="padding:0.25rem 0.5rem">
+                                            <input wire:model="editTxDate" type="date" aria-label="Date"
+                                                class="rounded-md border border-gray-300 bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                                                style="padding:0.25rem 0.5rem;font-size:0.8125rem;box-sizing:border-box">
+                                        </td>
+                                        <td style="padding:0.25rem 0.5rem">
+                                            <select wire:model="editTxType" aria-label="Type"
+                                                class="rounded-md border border-gray-300 bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                                                style="padding:0.25rem 2rem 0.25rem 0.5rem;font-size:0.8125rem;box-sizing:border-box">
+                                                @foreach($this->transactionTypes as $type)
+                                                <option value="{{ $type->value }}">{{ $type->label() }}</option>
+                                                @endforeach
+                                            </select>
+                                        </td>
+                                        <td style="padding:0.25rem 0.5rem;text-align:right">
+                                            <div style="position:relative;display:inline-block">
+                                                <span class="text-gray-500 dark:text-gray-400" style="position:absolute;left:0.5rem;top:50%;transform:translateY(-50%);font-size:0.8125rem">$</span>
+                                                <input wire:model="editTxAmount" type="number" min="0.01" step="0.01" aria-label="Amount"
+                                                    class="rounded-md border border-gray-300 bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                                                    style="width:8rem;padding:0.25rem 0.5rem 0.25rem 1.25rem;font-size:0.8125rem;box-sizing:border-box;text-align:right">
+                                            </div>
+                                        </td>
+                                        <td style="padding:0.25rem 0.5rem;text-align:right;white-space:nowrap">
+                                            <button wire:click="saveTransaction"
+                                                class="rounded bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500"
+                                                style="padding:0.25rem 0.625rem;font-size:0.75rem;font-weight:500;cursor:pointer;margin-right:0.25rem">
+                                                Save
+                                            </button>
+                                            <button wire:click="cancelEditTransaction"
+                                                class="rounded bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                                                style="padding:0.25rem 0.625rem;font-size:0.75rem;cursor:pointer">
+                                                Cancel
+                                            </button>
+                                        </td>
+                                    </tr>
+                                    @else
                                     <tr wire:key="tx-{{ $tx->id }}">
                                         <td class="text-gray-700 dark:text-gray-300" style="padding:0.375rem 0.5rem">{{ $tx->occurred_at->format('M j, Y') }}</td>
                                         <td style="padding:0.375rem 0.5rem">
@@ -483,10 +620,29 @@ new class extends Component
                                         <td class="text-gray-900 dark:text-gray-50" style="padding:0.375rem 0.5rem;text-align:right;font-weight:500">
                                             {{ $isDeposit ? '+' : '−' }}${{ number_format((float) $tx->amount, 2) }}
                                         </td>
+                                        <td style="padding:0.375rem 0.5rem;text-align:right;white-space:nowrap">
+                                            <button wire:click="startEditTransaction({{ $tx->id }})"
+                                                title="Edit" aria-label="Edit"
+                                                class="rounded border border-gray-300 bg-white text-gray-600 hover:text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
+                                                style="display:inline-flex;align-items:center;vertical-align:middle;padding:0.25rem;cursor:pointer;margin-right:0.25rem">
+                                                <x-heroicon-o-pencil-square class="h-3.5 w-3.5" />
+                                            </button>
+                                            <button wire:click="deleteTransaction({{ $tx->id }})"
+                                                wire:confirm="Delete this {{ strtolower($tx->type->label()) }} of ${{ number_format((float) $tx->amount, 2) }} on {{ $tx->occurred_at->format('M j, Y') }}? This cannot be undone."
+                                                title="Delete" aria-label="Delete"
+                                                class="rounded border border-gray-300 bg-white text-gray-600 hover:text-red-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:text-red-400"
+                                                style="display:inline-flex;align-items:center;vertical-align:middle;padding:0.25rem;cursor:pointer">
+                                                <x-heroicon-o-trash class="h-3.5 w-3.5" />
+                                            </button>
+                                        </td>
                                     </tr>
+                                    @endif
                                     @endforeach
                                 </tbody>
                             </table>
+                            @foreach(['editTxDate', 'editTxType', 'editTxAmount'] as $field)
+                            @error($field)<p class="text-xs text-red-500 dark:text-red-400" style="margin-top:-0.75rem;margin-bottom:0.75rem">{{ $message }}</p>@enderror
+                            @endforeach
                             @endif
 
                             {{-- Add entry --}}

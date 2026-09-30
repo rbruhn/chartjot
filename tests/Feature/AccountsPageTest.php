@@ -546,3 +546,118 @@ test('deleting an account removes its transactions', function () {
 
     expect(AccountTransaction::count())->toBe(0);
 });
+
+test('a transaction can be edited and saved', function () {
+    [$user, $journal] = accountsUser();
+    $account = fundedAccountWithPnl($journal);
+    $tx = AccountTransaction::factory()->create([
+        'account_id'  => $account->id,
+        'type'        => TransactionType::Deposit,
+        'amount'      => '1000.00',
+        'occurred_at' => '2026-09-10',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal])
+        ->call('toggleTransactions', $account->id)
+        ->call('startEditTransaction', $tx->id)
+        ->assertSet('editingTransactionId', $tx->id)
+        ->assertSet('editTxAmount', '1000.00')
+        ->assertSet('editTxDate', '2026-09-10')
+        ->set('editTxType', TransactionType::Withdrawal->value)
+        ->set('editTxAmount', '400')
+        ->set('editTxDate', '2026-09-12')
+        ->call('saveTransaction')
+        ->assertHasNoErrors()
+        ->assertSet('editingTransactionId', null)
+        ->assertSet('expandedAccountId', $account->id);
+
+    $fresh = $tx->fresh();
+    expect($fresh->type)->toBe(TransactionType::Withdrawal)
+        ->and((float) $fresh->amount)->toBe(400.0)
+        ->and($fresh->occurred_at->toDateString())->toBe('2026-09-12');
+});
+
+test('editing a withdrawal checks the balance without the entry being replaced', function () {
+    [$user, $journal] = accountsUser();
+    $account = fundedAccountWithPnl($journal, '1000.00', '0.00');
+    $tx = AccountTransaction::factory()->create(['account_id' => $account->id, 'type' => TransactionType::Withdrawal, 'amount' => '600.00']);
+
+    // Balance is 400 with the withdrawal applied, 1000 without it — so
+    // raising it to 1000 fits, 1000.01 doesn't.
+    $component = Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal])
+        ->call('toggleTransactions', $account->id)
+        ->call('startEditTransaction', $tx->id)
+        ->set('editTxAmount', '1000.01')
+        ->call('saveTransaction')
+        ->assertHasErrors(['editTxAmount']);
+
+    expect((float) $tx->fresh()->amount)->toBe(600.0);
+
+    $component->set('editTxAmount', '1000.00')
+        ->call('saveTransaction')
+        ->assertHasNoErrors();
+
+    expect((float) $tx->fresh()->amount)->toBe(1000.0);
+});
+
+test('turning a deposit into a withdrawal is checked against the balance', function () {
+    [$user, $journal] = accountsUser();
+    $account = fundedAccountWithPnl($journal, '100.00', '0.00');
+    $tx = AccountTransaction::factory()->create(['account_id' => $account->id, 'type' => TransactionType::Deposit, 'amount' => '500.00']);
+
+    // Without the deposit the balance is 100, so a 500 withdrawal can't fit.
+    Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal])
+        ->call('toggleTransactions', $account->id)
+        ->call('startEditTransaction', $tx->id)
+        ->set('editTxType', TransactionType::Withdrawal->value)
+        ->call('saveTransaction')
+        ->assertHasErrors(['editTxAmount']);
+
+    expect($tx->fresh()->type)->toBe(TransactionType::Deposit);
+});
+
+test('a transaction can be deleted and the balance updates', function () {
+    [$user, $journal] = accountsUser();
+    $account = fundedAccountWithPnl($journal);
+    $keep = AccountTransaction::factory()->create(['account_id' => $account->id, 'type' => TransactionType::Deposit, 'amount' => '1000.00']);
+    $gone = AccountTransaction::factory()->create(['account_id' => $account->id, 'type' => TransactionType::Deposit, 'amount' => '250.00']);
+
+    $component = Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal])
+        ->call('toggleTransactions', $account->id)
+        ->assertSeeHtml("wire:click=\"deleteTransaction({$gone->id})\"")
+        ->call('deleteTransaction', $gone->id)
+        ->assertSet('expandedAccountId', $account->id);
+
+    expect(AccountTransaction::find($gone->id))->toBeNull()
+        ->and(AccountTransaction::find($keep->id))->not->toBeNull()
+        ->and($component->instance()->balanceFor($component->get('accounts')->first()))->toBe(51300.0);
+});
+
+test('cannot edit or delete a transaction belonging to another account', function () {
+    [$user, $journal] = accountsUser();
+    [, $otherJournal] = accountsUser();
+    $account = fundedAccountWithPnl($journal);
+    $sibling = fundedAccountWithPnl($journal);
+    $foreign = fundedAccountWithPnl($otherJournal);
+    $siblingTx = AccountTransaction::factory()->create(['account_id' => $sibling->id, 'amount' => '100.00']);
+    $foreignTx = AccountTransaction::factory()->create(['account_id' => $foreign->id, 'amount' => '100.00']);
+
+    $component = Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal])
+        ->call('toggleTransactions', $account->id);
+
+    foreach ([$siblingTx, $foreignTx] as $tx) {
+        expect(fn () => $component->call('deleteTransaction', $tx->id))->toThrow(ModelNotFoundException::class);
+        expect(fn () => $component->call('startEditTransaction', $tx->id))->toThrow(ModelNotFoundException::class);
+        expect(fn () => $component->set('editingTransactionId', $tx->id)
+            ->set('editTxType', TransactionType::Deposit->value)
+            ->set('editTxAmount', '5')
+            ->set('editTxDate', '2026-01-01')
+            ->call('saveTransaction'))->toThrow(ModelNotFoundException::class);
+        expect((float) $tx->fresh()->amount)->toBe(100.0);
+    }
+});
