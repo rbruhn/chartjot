@@ -1027,9 +1027,21 @@ new class extends Component {
                                         >
                                         <button
                                             x-show="hover"
+                                            type="button"
+                                            onclick="document.getElementById('chart-image-{{ $shot->id }}').showModal()"
+                                            title="Expand image" aria-label="Expand image"
+                                            class="text-gray-500 dark:text-gray-400 hover:text-gray-100" style="position:absolute;top:0.5rem;right:2.75rem;padding:0.375rem;border-radius:0.25rem;background:rgba(0,0,0,0.65);border:none;cursor:pointer;line-height:0"
+                                        >
+                                            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
+                                            </svg>
+                                        </button>
+                                        <x-image-dialog :id="'chart-image-'.$shot->id" :url="route('journal.screenshot', [$t, $shot])" alt="Trade chart" />
+                                        <button
+                                            x-show="hover"
                                             wire:click="deleteScreenshot({{ $shot->id }})"
                                             wire:confirm="Delete this image?"
-                                            title="Delete image"
+                                            title="Delete image" aria-label="Delete image"
                                             class="text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400" style="position:absolute;top:0.5rem;right:0.5rem;padding:0.375rem;border-radius:0.25rem;background:rgba(0,0,0,0.65);border:none;cursor:pointer;line-height:0"
                                         >
                                             <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
