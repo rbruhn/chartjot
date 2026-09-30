@@ -2,10 +2,16 @@
 
 use App\Enums\Direction;
 use App\Enums\ExitReason;
+use App\Enums\InvitationStatus;
 use App\Enums\NotePhase;
 use App\Enums\ScreenshotSource;
+use App\Mail\TradeInvitationMail;
+use App\Models\Friendship;
 use App\Models\Journal;
 use App\Models\Trade;
+use App\Models\TradeInvitation;
+use App\Models\User;
+use App\Services\TradeCommentPoster;
 use App\Models\TradeNote;
 use App\Models\TradeScreenshot;
 use Illuminate\Support\Carbon;
@@ -15,6 +21,7 @@ use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
 use Livewire\Volt\Component;
 use Livewire\WithFileUploads;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 
 new class extends Component {
@@ -53,6 +60,15 @@ new class extends Component {
     public mixed $screenshotUpload = null;
 
     public bool  $editingTrade    = false;
+
+    public bool  $showInvite      = false;
+
+    // Owner's side of the trade's comment thread (issue #18).
+    public string $commentBody  = '';
+    public mixed  $commentImage = null;
+    public ?int   $replyToId    = null;
+    public string $replyBody    = '';
+    public mixed  $replyImage   = null;
     public array $tradeEditForm   = [];
 
     public function mount(Journal $journal): void
@@ -78,6 +94,10 @@ new class extends Component {
     {
         return $this->journal->trades()
             ->with(['account.journal', 'notes', 'screenshot'])
+            ->withCount([
+                'comments',
+                'invitations as active_invitations_count' => fn ($q) => $q->active(),
+            ])
             ->when($this->dateFrom, fn ($q) => $q->where('entry_at', '>=', Carbon::parse($this->dateFrom)->startOfDay()))
             ->when($this->dateTo,   fn ($q) => $q->where('entry_at', '<=', Carbon::parse($this->dateTo)->endOfDay()))
             ->when($this->search,   function ($q) {
@@ -150,7 +170,11 @@ new class extends Component {
         $this->confirmDeleteNoteId = null;
         $this->editingTrade        = false;
         $this->tradeEditForm       = [];
-        unset($this->selectedTrade);
+        $this->showInvite          = false;
+        $this->commentBody         = '';
+        $this->replyToId           = null;
+        $this->replyBody           = '';
+        unset($this->selectedTrade, $this->threadComments, $this->hasConversation);
     }
 
     public function addNote(): void
@@ -266,6 +290,128 @@ new class extends Component {
         unset($this->selectedTrade);
     }
 
+    // ── Invite a friend to comment (issue #18) ─────────────────────────────
+    // Everything here goes through selectedTrade, which only resolves trades
+    // in this journal, and is re-authorized against TradePolicy::invite.
+
+    /** Accepted friends, each with their invitation (if any) to the selected trade. */
+    #[Computed]
+    public function inviteCandidates(): Collection
+    {
+        $trade = $this->selectedTrade;
+        if (! $trade) {
+            return collect();
+        }
+
+        $me = auth()->user();
+        $invitations = TradeInvitation::where('trade_id', $trade->id)->get()->keyBy('invited_user_id');
+
+        return Friendship::with(['requester', 'recipient'])
+            ->involving($me)
+            ->accepted()
+            ->get()
+            ->map(fn (Friendship $f) => $f->otherUser($me))
+            ->sortBy(fn ($u) => strtolower($u->name))
+            ->map(fn ($u) => ['user' => $u, 'invitation' => $invitations->get($u->id)])
+            ->values();
+    }
+
+    public function inviteFriend(int $userId): void
+    {
+        $trade = $this->selectedTrade;
+        if (! $trade) return;
+        $this->authorize('invite', $trade);
+
+        $me     = auth()->user();
+        $friend = User::find($userId);
+        if (! $friend || ! $friend->isActive() || ! $me->isFriendsWith($friend)) return;
+
+        $invitation = TradeInvitation::firstOrNew(['trade_id' => $trade->id, 'invited_user_id' => $friend->id]);
+        if ($invitation->exists && $invitation->isActive()) return;
+
+        $invitation->fill(['invited_by_user_id' => $me->id, 'status' => InvitationStatus::Pending])->save();
+
+        Mail::to($friend->email)->send(new TradeInvitationMail($invitation->load(['trade', 'invitedUser', 'invitedBy'])));
+        unset($this->inviteCandidates, $this->trades, $this->hasConversation);
+    }
+
+    public function revokeInvitation(int $invitationId): void
+    {
+        $trade = $this->selectedTrade ?? abort(404);
+        $this->authorize('invite', $trade);
+
+        $invitation = TradeInvitation::where('trade_id', $trade->id)->find($invitationId) ?? abort(404);
+        $invitation->update(['status' => InvitationStatus::Revoked]);
+        unset($this->inviteCandidates, $this->trades, $this->hasConversation);
+    }
+
+    // ── Comment thread (owner) ──────────────────────────────────────────────
+    // Same thread friends see on the conversation page. Posting goes through
+    // TradeCommentPoster (authorization, nesting rule, rate limit, email).
+
+    /** Top-level comments on the selected trade, oldest first, with replies. */
+    #[Computed]
+    public function threadComments(): Collection
+    {
+        $trade = $this->selectedTrade;
+
+        return $trade
+            ? $trade->comments()->whereNull('parent_comment_id')->with(['author', 'replies.author'])->oldest()->get()
+            : collect();
+    }
+
+    /** Show the thread once there is one, or once someone has been invited to start it. */
+    #[Computed]
+    public function hasConversation(): bool
+    {
+        $trade = $this->selectedTrade;
+
+        return $trade && ($this->threadComments->isNotEmpty() || $trade->invitations()->active()->exists());
+    }
+
+    public function postComment(): void
+    {
+        $trade = $this->selectedTrade ?? abort(404);
+
+        app(TradeCommentPoster::class)->post($trade, auth()->user(), [
+            'body'  => $this->commentBody,
+            'image' => $this->commentImage,
+        ]);
+
+        $this->commentBody  = '';
+        $this->commentImage = null;
+        unset($this->threadComments, $this->hasConversation, $this->trades);
+    }
+
+    public function startReply(int $commentId): void
+    {
+        $this->replyToId  = $commentId;
+        $this->replyBody  = '';
+        $this->replyImage = null;
+        $this->resetErrorBag();
+    }
+
+    public function cancelReply(): void
+    {
+        $this->replyToId  = null;
+        $this->replyBody  = '';
+        $this->replyImage = null;
+    }
+
+    public function postReply(): void
+    {
+        $trade = $this->selectedTrade ?? abort(404);
+
+        app(TradeCommentPoster::class)->post($trade, auth()->user(), [
+            'body'              => $this->replyBody,
+            'parent_comment_id' => $this->replyToId,
+            'image'             => $this->replyImage,
+        ]);
+
+        $this->cancelReply();
+        unset($this->threadComments, $this->hasConversation, $this->trades);
+    }
+
     public function deleteTrade(string $uuid): void
     {
         $trade = $this->journal->trades()
@@ -276,10 +422,13 @@ new class extends Component {
         foreach ($trade->screenshots as $shot) {
             Storage::disk($shot->disk)->delete($shot->path);
         }
+        foreach ($trade->comments()->whereNotNull('image_path')->get() as $comment) {
+            Storage::disk($comment->image_disk)->delete($comment->image_path);
+        }
 
-        // Executions, legs, copies (+ their executions), screenshots, and notes
-        // all cascadeOnDelete at the DB level — only the screenshot files above
-        // need explicit cleanup, everything else goes with the trade row.
+        // Executions, legs, screenshots, notes, invitations and comments all
+        // cascadeOnDelete at the DB level — only the files above need explicit cleanup,
+        // everything else goes with the trade row.
         $trade->delete();
 
         $this->selectedUuid  = '';
@@ -405,59 +554,7 @@ new class extends Component {
                 placeholder="Setup, tag, instrument…"
                 class="bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 text-sm rounded px-3 py-1 w-48 focus:outline-none focus:ring-1 focus:ring-indigo-500 placeholder-gray-400 dark:placeholder-gray-500">
         </div>
-        <div class="flex flex-col gap-1" x-data="{
-            open: false,
-            accounts: {{ $this->accounts->map(fn($a) => ['id' => $a->id, 'name' => $a->name])->toJson() }},
-            checkedIds: [],
-            init() { this.checkedIds = this.accounts.map(a => a.id); },
-            get allChecked() { return this.checkedIds.length === this.accounts.length; },
-            get label() {
-                if (this.allChecked) return 'All accounts';
-                const c = this.checkedIds.length;
-                return c === 0 ? 'No accounts' : c + ' of ' + this.accounts.length + ' accounts';
-            },
-            isChecked(id) { return this.checkedIds.includes(Number(id)); },
-            toggleAll() {
-                this.checkedIds = this.allChecked ? [] : this.accounts.map(a => a.id);
-                this.sync();
-            },
-            toggle(id) {
-                id = Number(id);
-                const idx = this.checkedIds.indexOf(id);
-                if (idx === -1) this.checkedIds.push(id);
-                else this.checkedIds.splice(idx, 1);
-                this.sync();
-            },
-            sync() {
-                if (this.allChecked) $wire.set('selectedAccountIds', null);
-                else $wire.set('selectedAccountIds', [...this.checkedIds]);
-            }
-        }" @click.outside="open = false">
-            <label class="text-xs font-semibold text-gray-600 dark:text-gray-500 uppercase tracking-wider">Accounts</label>
-            <div class="relative">
-                <button type="button" @click="open = !open"
-                    class="bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 text-sm rounded px-2 py-1 w-48 text-left flex items-center justify-between gap-2 focus:outline-none focus:ring-1 focus:ring-indigo-500">
-                    <span x-text="label" class="truncate"></span>
-                    <svg class="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-                    </svg>
-                </button>
-                <div x-show="open" x-cloak class="bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600" style="position:absolute;z-index:50;top:calc(100% + 4px);left:0;width:12rem;border-radius:0.375rem;box-shadow:0 10px 15px -3px rgba(0,0,0,.4);padding:0.25rem 0;max-height:16rem;overflow-y:auto">
-                    <label class="flex items-center gap-2 px-3 py-1.5 cursor-pointer select-none border-b border-gray-300 dark:border-gray-600 hover:bg-gray-300 dark:hover:bg-gray-600">
-                        <input type="checkbox" :checked="allChecked" @change="toggleAll()"
-                            class="rounded border-gray-300 dark:border-gray-500 bg-white dark:bg-gray-600 text-indigo-500 focus:ring-indigo-500">
-                        <span class="text-sm font-medium text-gray-800 dark:text-gray-200">All accounts</span>
-                    </label>
-                    <template x-for="acct in accounts" :key="acct.id">
-                        <label class="flex items-center gap-2 px-3 py-1.5 cursor-pointer select-none hover:bg-gray-300 dark:hover:bg-gray-600">
-                            <input type="checkbox" :checked="isChecked(acct.id)" @change="toggle(acct.id)"
-                                class="rounded border-gray-300 dark:border-gray-500 bg-white dark:bg-gray-600 text-indigo-500 focus:ring-indigo-500">
-                            <span class="text-sm text-gray-700 dark:text-gray-300 truncate" x-text="acct.name"></span>
-                        </label>
-                    </template>
-                </div>
-            </div>
-        </div>
+        <x-account-filter :accounts="$this->accounts" />
         <div class="flex flex-col gap-1">
             <span class="text-xs opacity-0 leading-none select-none">&nbsp;</span>
             <label class="flex items-center gap-2 cursor-pointer select-none text-sm text-gray-700 dark:text-gray-300 py-1">
@@ -593,12 +690,31 @@ new class extends Component {
                                             {{ $this->pnlDisplay($netPnl) }}
                                         </div>
                                     </div>
-                                    @if($trade->notes->isNotEmpty())
-                                        <div class="mt-1 flex items-center gap-1 text-[11px] text-indigo-600 dark:text-indigo-400">
-                                            <svg class="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                                                <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/>
-                                            </svg>
-                                            Noted
+                                    @if($trade->notes->isNotEmpty() || $trade->comments_count > 0 || $trade->active_invitations_count > 0)
+                                        <div class="mt-1 flex items-center gap-3">
+                                            @if($trade->notes->isNotEmpty())
+                                                <div class="flex items-center gap-1 text-[11px] text-indigo-600 dark:text-indigo-400">
+                                                    <svg class="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/>
+                                                    </svg>
+                                                    Noted
+                                                </div>
+                                            @endif
+                                            @if($trade->comments_count > 0)
+                                                <div class="flex items-center gap-1 text-[11px] text-indigo-600 dark:text-indigo-400">
+                                                    <svg class="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path fill-rule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.84 8.84 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7z" clip-rule="evenodd"/>
+                                                    </svg>
+                                                    {{ $trade->comments_count }} {{ Str::plural('comment', $trade->comments_count) }}
+                                                </div>
+                                            @elseif($trade->active_invitations_count > 0)
+                                                <div class="flex items-center gap-1 text-[11px] text-indigo-600 dark:text-indigo-400">
+                                                    <svg class="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path d="M8 9a3 3 0 100-6 3 3 0 000 6zM8 11a6 6 0 016 6H2a6 6 0 016-6zM16 7a1 1 0 10-2 0v1h-1a1 1 0 100 2h1v1a1 1 0 102 0v-1h1a1 1 0 100-2h-1V7z"/>
+                                                    </svg>
+                                                    Shared
+                                                </div>
+                                            @endif
                                         </div>
                                     @endif
                                 </div>
@@ -641,14 +757,21 @@ new class extends Component {
                                         {{ $this->ptsDisplay($t) }}
                                     </div>
                                 </div>
+                                <button wire:click="$toggle('showInvite')"
+                                    title="Invite a friend to comment" aria-label="Invite a friend to comment"
+                                    class="text-xs px-3 py-1.5 rounded border transition-colors {{ $showInvite ? 'border-indigo-400 dark:border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-500' }}">
+                                    <x-heroicon-o-user-plus class="h-4 w-4" />
+                                </button>
                                 <button wire:click="startEditTrade"
+                                    title="Edit" aria-label="Edit"
                                     class="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
-                                    Edit
+                                    <x-heroicon-o-pencil-square class="h-4 w-4" />
                                 </button>
                                 <button wire:click="deleteTrade('{{ $t->uuid }}')"
                                     wire:confirm="Delete this trade permanently? All notes, images, and trade data will be deleted. This cannot be undone."
+                                    title="Delete" aria-label="Delete"
                                     class="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:border-red-300 dark:hover:border-red-500 transition-colors">
-                                    Delete
+                                    <x-heroicon-o-trash class="h-4 w-4" />
                                 </button>
                             @else
                                 <button wire:click="saveTrade"
@@ -675,6 +798,44 @@ new class extends Component {
                             &middot; from NinjaTrader 8
                         @endif
                     </p>
+
+                    @if($showInvite && !$editingTrade)
+                    {{-- Invite a friend to comment --}}
+                    <div class="mb-6 rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3">
+                        <div class="flex items-center justify-between gap-3 mb-2">
+                            <h3 class="text-xs font-semibold text-gray-600 dark:text-gray-500 uppercase tracking-wider">Invite a friend to comment</h3>
+                            <a href="{{ route('trades.shared', $t) }}" target="_blank" rel="noopener"
+                                class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Open shared page ↗</a>
+                        </div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                            They'll see this trade's screenshot, prices, P&amp;L and notes on a separate page — never your account or other trades.
+                        </p>
+                        @forelse($this->inviteCandidates as $c)
+                            @php $inv = $c['invitation']; @endphp
+                            <div class="flex items-center justify-between gap-3 py-1.5 border-t border-gray-100 dark:border-gray-800 first:border-t-0" wire:key="inv-{{ $c['user']->id }}">
+                                <span class="text-sm text-gray-800 dark:text-gray-200">{{ $c['user']->name }}</span>
+                                <span class="flex items-center gap-2">
+                                    @if($inv?->isActive())
+                                        <span class="text-xs {{ $inv->isAccepted() ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400' }}">{{ $inv->status->label() }}</span>
+                                        <button wire:click="revokeInvitation({{ $inv->id }})"
+                                            wire:confirm="Revoke {{ $c['user']->name }}'s access to this trade?"
+                                            class="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors">Revoke</button>
+                                    @else
+                                        @if($inv)
+                                            <span class="text-xs text-gray-500 dark:text-gray-400">{{ $inv->status->label() }}</span>
+                                        @endif
+                                        <button wire:click="inviteFriend({{ $c['user']->id }})"
+                                            class="text-xs px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white transition-colors">{{ $inv ? 'Invite again' : 'Invite' }}</button>
+                                    @endif
+                                </span>
+                            </div>
+                        @empty
+                            <p class="text-sm text-gray-500 dark:text-gray-400">
+                                No friends yet — add some on the <a href="{{ route('friends.index') }}" wire:navigate class="underline">Friends</a> page.
+                            </p>
+                        @endforelse
+                    </div>
+                    @endif
 
                     @if(!$editingTrade)
                     {{-- Timeline (view mode) --}}
@@ -866,9 +1027,21 @@ new class extends Component {
                                         >
                                         <button
                                             x-show="hover"
+                                            type="button"
+                                            onclick="document.getElementById('chart-image-{{ $shot->id }}').showModal()"
+                                            title="Expand image" aria-label="Expand image"
+                                            class="text-gray-500 dark:text-gray-400 hover:text-gray-100" style="position:absolute;top:0.5rem;right:2.75rem;padding:0.375rem;border-radius:0.25rem;background:rgba(0,0,0,0.65);border:none;cursor:pointer;line-height:0"
+                                        >
+                                            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
+                                            </svg>
+                                        </button>
+                                        <x-image-dialog :id="'chart-image-'.$shot->id" :url="route('journal.screenshot', [$t, $shot])" alt="Trade chart" />
+                                        <button
+                                            x-show="hover"
                                             wire:click="deleteScreenshot({{ $shot->id }})"
                                             wire:confirm="Delete this image?"
-                                            title="Delete image"
+                                            title="Delete image" aria-label="Delete image"
                                             class="text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400" style="position:absolute;top:0.5rem;right:0.5rem;padding:0.375rem;border-radius:0.25rem;background:rgba(0,0,0,0.65);border:none;cursor:pointer;line-height:0"
                                         >
                                             <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1043,6 +1216,83 @@ new class extends Component {
                             <p class="text-sm text-gray-600 dark:text-gray-500 italic">No notes yet.</p>
                         @endforelse
                     </div>
+
+                    {{-- Conversation with invited friends (the same thread as the shared page) --}}
+                    @if($this->hasConversation)
+                    <div class="mb-6" id="conversation">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Conversation</h3>
+                            <a href="{{ route('trades.shared', $t) }}" target="_blank" rel="noopener"
+                                class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Open conversation page ↗</a>
+                        </div>
+
+                        @error('parent_comment_id')
+                            <p class="text-xs text-red-600 dark:text-red-400 mb-2">{{ $message }}</p>
+                        @enderror
+
+                        <div class="space-y-4">
+                            @forelse($this->threadComments as $c)
+                                <div wire:key="tc-{{ $c->id }}" id="comment-{{ $c->id }}">
+                                    <div class="text-sm"><span class="font-semibold text-gray-900 dark:text-gray-100">{{ $c->author->name }}</span> <span class="text-xs text-gray-500 dark:text-gray-400">{{ $c->created_at->diffForHumans() }}</span></div>
+                                    <p class="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap mt-0.5">{{ $c->body }}</p>
+                                    @if($c->hasImage())
+                                        <x-comment-image :id="$c->id" :url="route('trades.shared.comment-image', [$t, $c])" />
+                                    @endif
+
+                                    @if($c->replies->isNotEmpty())
+                                        <div class="mt-3 ml-4 pl-4 border-l-2 border-gray-200 dark:border-gray-700 space-y-3">
+                                            @foreach($c->replies as $r)
+                                                <div wire:key="tc-{{ $r->id }}" id="comment-{{ $r->id }}">
+                                                    <div class="text-sm"><span class="font-semibold text-gray-900 dark:text-gray-100">{{ $r->author->name }}</span> <span class="text-xs text-gray-500 dark:text-gray-400">{{ $r->created_at->diffForHumans() }}</span></div>
+                                                    <p class="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap mt-0.5">{{ $r->body }}</p>
+                                                    @if($r->hasImage())
+                                                        <x-comment-image :id="$r->id" :url="route('trades.shared.comment-image', [$t, $r])" />
+                                                    @endif
+                                                </div>
+                                            @endforeach
+                                        </div>
+                                    @endif
+
+                                    {{-- Replies go one level deep: only top-level comments get a reply box. --}}
+                                    @if($replyToId === $c->id)
+                                        <div class="mt-2 ml-4 space-y-2">
+                                            <textarea wire:model="replyBody" rows="2" maxlength="5000" placeholder="Reply to {{ $c->author->name }}…"
+                                                class="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"></textarea>
+                                            <label class="block text-xs text-gray-600 dark:text-gray-400">Attach an image (optional, PNG/JPEG up to 10 MB)
+                                                <input type="file" wire:model="replyImage" accept="image/png,image/jpeg" class="block mt-1 text-xs text-gray-700 dark:text-gray-300">
+                                            </label>
+                                            @error('image') <p class="text-xs text-red-600 dark:text-red-400">{{ $message }}</p> @enderror
+                                            @error('body') <p class="text-xs text-red-600 dark:text-red-400">{{ $message }}</p> @enderror
+                                            <div class="flex gap-2">
+                                                <button wire:click="postReply" class="text-xs px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white transition-colors">Post reply</button>
+                                                <button wire:click="cancelReply" class="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors">Cancel</button>
+                                            </div>
+                                        </div>
+                                    @else
+                                        <button wire:click="startReply({{ $c->id }})" class="mt-1 ml-4 text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Reply</button>
+                                    @endif
+                                </div>
+                            @empty
+                                <p class="text-sm text-gray-600 dark:text-gray-500 italic">No comments yet — start the conversation.</p>
+                            @endforelse
+                        </div>
+
+                        <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 space-y-2">
+                            <textarea wire:model="commentBody" rows="2" maxlength="5000" placeholder="Add a comment for your invited friends…"
+                                class="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"></textarea>
+                            <label class="block text-xs text-gray-600 dark:text-gray-400">Attach an image (optional, PNG/JPEG up to 10 MB)
+                                <input type="file" wire:model="commentImage" accept="image/png,image/jpeg" class="block mt-1 text-xs text-gray-700 dark:text-gray-300">
+                            </label>
+                            @if($replyToId === null)
+                                @error('image') <p class="text-xs text-red-600 dark:text-red-400">{{ $message }}</p> @enderror
+                            @endif
+                            @if($replyToId === null)
+                                @error('body') <p class="text-xs text-red-600 dark:text-red-400">{{ $message }}</p> @enderror
+                            @endif
+                            <button wire:click="postComment" class="text-xs px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white transition-colors">Post comment</button>
+                        </div>
+                    </div>
+                    @endif
 
                 </div>
 
