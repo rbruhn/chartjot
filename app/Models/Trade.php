@@ -105,4 +105,24 @@ class Trade extends BaseModel
     {
         return $this->hasMany(TradeNote::class)->orderBy('occurred_at');
     }
+
+    public function invitations(): HasMany
+    {
+        return $this->hasMany(TradeInvitation::class);
+    }
+
+    /**
+     * The id of the user who owns this trade (via its journal). Always a
+     * fresh query, never a loaded relation, so access checks built on it
+     * can't be fed a stale or pre-set model.
+     */
+    public function ownerId(): ?int
+    {
+        return Journal::whereKey($this->journal_id)->value('user_id');
+    }
+
+    public function isOwnedBy(User $user): bool
+    {
+        return $this->ownerId() === $user->id;
+    }
 }

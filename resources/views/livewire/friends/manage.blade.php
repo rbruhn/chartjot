@@ -1,7 +1,10 @@
 <?php
 
 use App\Enums\FriendshipStatus;
+use App\Enums\InvitationStatus;
 use App\Models\Friendship;
+use App\Models\Journal;
+use App\Models\TradeInvitation;
 use App\Models\User;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
@@ -78,6 +81,36 @@ new class extends Component {
             ->values();
     }
 
+    /** Trade invitations addressed to me that are still live. */
+    #[Computed]
+    public function invitations(): Collection
+    {
+        return TradeInvitation::with(['trade', 'invitedBy'])
+            ->where('invited_user_id', $this->me()->id)
+            ->active()
+            ->latest()
+            ->get();
+    }
+
+    public function acceptInvitation(int $invitationId): void
+    {
+        $this->pendingInvitationForMe($invitationId)->update(['status' => InvitationStatus::Accepted]);
+        $this->resetComputed();
+    }
+
+    public function declineInvitation(int $invitationId): void
+    {
+        $this->pendingInvitationForMe($invitationId)->update(['status' => InvitationStatus::Declined]);
+        $this->resetComputed();
+    }
+
+    private function pendingInvitationForMe(int $invitationId): TradeInvitation
+    {
+        return TradeInvitation::where('invited_user_id', $this->me()->id)
+            ->where('status', InvitationStatus::Pending)
+            ->find($invitationId) ?? abort(404);
+    }
+
     public function sendRequest(int $userId): void
     {
         $me     = $this->me();
@@ -141,7 +174,24 @@ new class extends Component {
 
     public function remove(int $friendshipId): void
     {
-        $friendship = Friendship::involving($this->me())->accepted()->find($friendshipId) ?? abort(404);
+        $me         = $this->me();
+        $friendship = Friendship::involving($me)->accepted()->find($friendshipId) ?? abort(404);
+        $other      = $friendship->otherUser($me);
+
+        // Ending the friendship also ends any live invitations between the
+        // two, in both directions (the access policy requires friendship
+        // too, but the invitation rows should say what's actually true).
+        $pairs = [
+            [$me->id, Journal::where('user_id', $other->id)->value('id')],
+            [$other->id, Journal::where('user_id', $me->id)->value('id')],
+        ];
+        foreach ($pairs as [$invitee, $ownerJournalId]) {
+            TradeInvitation::where('invited_user_id', $invitee)
+                ->whereIn('trade_id', fn ($q) => $q->select('id')->from('trades')->where('journal_id', $ownerJournalId))
+                ->active()
+                ->update(['status' => InvitationStatus::Revoked]);
+        }
+
         $friendship->delete();
         $this->resetComputed();
     }
@@ -156,7 +206,7 @@ new class extends Component {
 
     private function resetComputed(): void
     {
-        unset($this->searchResult, $this->searchFriendship, $this->incoming, $this->outgoing, $this->friends);
+        unset($this->searchResult, $this->searchFriendship, $this->incoming, $this->outgoing, $this->friends, $this->invitations);
     }
 }; ?>
 
@@ -219,6 +269,30 @@ new class extends Component {
                         <span class="flex gap-2">
                             <button wire:click="accept({{ $f->id }})" class="{{ $btnPri }}">Accept</button>
                             <button wire:click="decline({{ $f->id }})" class="{{ $btn }}">Decline</button>
+                        </span>
+                    </div>
+                @endforeach
+            </section>
+        @endif
+
+        {{-- ── Trade invitations ── --}}
+        @if ($this->invitations->isNotEmpty())
+            <section class="{{ $card }} p-6">
+                <h3 class="{{ $h3 }} mb-2">Trade invitations</h3>
+                @foreach ($this->invitations as $inv)
+                    @php $t = $inv->trade; @endphp
+                    <div class="{{ $row }}" wire:key="ti-{{ $inv->id }}">
+                        <span class="text-sm text-gray-900 dark:text-gray-100">
+                            {{ $inv->invitedBy->name }}
+                            <span class="text-gray-500 dark:text-gray-400">·</span>
+                            {{ ucfirst($t->direction->value) }} {{ $t->quantity }} {{ $t->instrument }}
+                            <span class="text-gray-500 dark:text-gray-400">· {{ $t->entry_at->format('M j, Y') }}</span>
+                        </span>
+                        <span class="flex gap-2">
+                            @if ($inv->isPending())
+                                <button wire:click="acceptInvitation({{ $inv->id }})" class="{{ $btnPri }}">Accept</button>
+                                <button wire:click="declineInvitation({{ $inv->id }})" class="{{ $btn }}">Decline</button>
+                            @endif
                         </span>
                     </div>
                 @endforeach
