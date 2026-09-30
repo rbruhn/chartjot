@@ -6,7 +6,6 @@ use App\Enums\Direction;
 use App\Enums\ExecutionAction;
 use App\Enums\ExecutionRole;
 use App\Enums\TradeType;
-use App\Mail\FailedImportsMail;
 use App\Models\Account;
 use App\Models\FailedTradeImport;
 use App\Models\Journal;
@@ -14,7 +13,6 @@ use App\Models\Trade;
 use App\Models\TradeExecution;
 use App\Support\NinjaTraderCsv;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 
 class ExecutionsCsvImporter
@@ -41,6 +39,7 @@ class ExecutionsCsvImporter
                 'trades_created' => 0,
                 'trades_skipped' => 0,
                 'errors' => ['Journal timezone is not set. Configure it in Journal Settings before importing.'],
+                'failures' => [],
             ];
         }
 
@@ -102,15 +101,19 @@ class ExecutionsCsvImporter
 
                 DB::transaction(fn () => $this->insertTrade($journal, $group));
                 $created++;
-            } catch (\App\Exceptions\UnknownAccountException $e) {
-                $accountName = $e->accountName;
-                $tradeId     = $this->sourceTradeId($group);
+            } catch (\Throwable $e) {
+                // Any trade that can't be inserted (an unknown account, or anything
+                // unexpected) is recorded, so it reaches the completion email's CSV.
+                $accountName = $e instanceof \App\Exceptions\UnknownAccountException
+                    ? $e->accountName
+                    : ($group[0]['account_name'] ?? 'Unknown');
+                $tradeId = $this->sourceTradeId($group);
 
                 FailedTradeImport::create([
                     'journal_id'      => $journal->id,
                     'account_name'    => $accountName,
                     'source_trade_id' => $tradeId,
-                    'reason'          => $e->getMessage(),
+                    'reason'          => mb_strimwidth($e->getMessage(), 0, 255, '…'),
                     'occurred_at'     => now(),
                 ]);
 
@@ -122,20 +125,15 @@ class ExecutionsCsvImporter
                 ];
 
                 $errors[] = $e->getMessage();
-            } catch (\Throwable $e) {
-                $errors[] = $e->getMessage();
             }
         }
 
-        if ($failures) {
-            Mail::to($journal->user()->value('email'))
-                ->send(new FailedImportsMail($journal->name, $failures));
-        }
-
+        // Reported to the user by ImportExecutionsCsv's completion email.
         return [
             'trades_created' => $created,
             'trades_skipped' => $skipped,
             'errors'         => $errors,
+            'failures'       => $failures,
         ];
     }
 
