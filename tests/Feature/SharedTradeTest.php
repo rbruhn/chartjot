@@ -14,6 +14,7 @@ use App\Models\TradeScreenshot;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
@@ -451,4 +452,141 @@ test('commenting is rate limited across the journal and the conversation page', 
     $this->actingAs($f->owner)->postJson(commentUrl($f->trade), ['body' => 'also too many'])->assertStatus(422);
 
     expect(TradeComment::count())->toBe(20);
+});
+
+// ---------------------------------------------------------------------------
+// Images on comments & replies
+// ---------------------------------------------------------------------------
+
+function imageUrl(Trade $trade, TradeComment $comment): string
+{
+    return route('trades.shared.comment-image', [$trade, $comment]);
+}
+
+test('an invitee can attach an image to a reply; the thread shows a link, not the image', function () {
+    Storage::fake('local');
+    $f = sharedFixture();
+    $top = TradeComment::factory()->create(['trade_id' => $f->trade->id, 'user_id' => $f->owner->id]);
+
+    $this->actingAs($f->friend)->post(commentUrl($f->trade), [
+        'body' => 'See my chart', 'parent_comment_id' => $top->id,
+        'image' => UploadedFile::fake()->image('my-chart.png', 800, 600),
+    ])->assertRedirect();
+
+    $reply = TradeComment::where('parent_comment_id', $top->id)->sole();
+    expect($reply->hasImage())->toBeTrue()
+        ->and($reply->image_mime_type)->toBe('image/png')
+        // Server-generated name, never the client's filename.
+        ->and($reply->image_path)->not->toContain('my-chart');
+    Storage::disk('local')->assertExists($reply->image_path);
+
+    $html = $this->actingAs($f->friend)->get(sharedUrl($f->trade))->assertOk()->assertSee('View image')->getContent();
+    // The only reference to the image is inside the (closed) modal dialog.
+    expect(substr_count($html, imageUrl($f->trade, $reply)))->toBe(1)
+        ->and($html)->toMatch('#<dialog[^>]*>(?:(?!</dialog>).)*'.preg_quote(e(imageUrl($f->trade, $reply)), '#').'#s');
+});
+
+test('a top-level comment can carry an image too', function () {
+    Storage::fake('local');
+    $f = sharedFixture();
+
+    $this->actingAs($f->friend)->post(commentUrl($f->trade), [
+        'body' => 'Here is mine', 'image' => UploadedFile::fake()->image('x.jpg'),
+    ]);
+
+    expect(TradeComment::sole()->hasImage())->toBeTrue();
+});
+
+test('only images are accepted, SVG included in the rejects, and size is capped', function (UploadedFile $file) {
+    Storage::fake('local');
+    $f = sharedFixture();
+
+    $this->actingAs($f->friend)
+        ->postJson(commentUrl($f->trade), ['body' => 'x', 'image' => $file])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('image');
+
+    expect(TradeComment::count())->toBe(0);
+    expect(Storage::disk('local')->allFiles())->toBeEmpty();
+})->with([
+    'pdf'      => fn () => UploadedFile::fake()->create('doc.pdf', 10, 'application/pdf'),
+    'svg'      => fn () => UploadedFile::fake()->createWithContent('x.svg', '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'),
+    'too big'  => fn () => UploadedFile::fake()->image('big.png')->size(10241),
+]);
+
+test('comment images are served only to people who can view the trade', function () {
+    Storage::fake('local');
+    $f = sharedFixture();
+    $this->actingAs($f->friend)->post(commentUrl($f->trade), ['body' => 'x', 'image' => UploadedFile::fake()->image('a.png')]);
+    $comment = TradeComment::sole();
+    $outsider = User::factory()->create();
+
+    $this->actingAs($f->friend)->get(imageUrl($f->trade, $comment))
+        ->assertOk()
+        ->assertHeader('Content-Type', 'image/png')
+        ->assertHeader('X-Content-Type-Options', 'nosniff');
+    $this->actingAs($f->owner)->get(imageUrl($f->trade, $comment))->assertOk();
+    $this->actingAs($outsider)->get(imageUrl($f->trade, $comment))->assertNotFound();
+
+    // Revoked mid-session: the image goes with everything else.
+    $f->invitation->update(['status' => InvitationStatus::Revoked]);
+    $this->actingAs($f->friend)->get(imageUrl($f->trade, $comment))->assertNotFound();
+});
+
+test('a comment image cannot be fetched through another trade URL', function () {
+    Storage::fake('local');
+    $f = sharedFixture();
+    // Friend is also invited to a second trade of the owner's.
+    TradeInvitation::factory()->create(['trade_id' => $f->otherTrade->id, 'invited_user_id' => $f->friend->id, 'invited_by_user_id' => $f->owner->id, 'status' => InvitationStatus::Accepted]);
+    $this->actingAs($f->owner)->post(commentUrl($f->trade), ['body' => 'x', 'image' => UploadedFile::fake()->image('a.png')]);
+    $comment = TradeComment::sole();
+    $plain = TradeComment::factory()->create(['trade_id' => $f->trade->id, 'user_id' => $f->owner->id]);
+
+    $this->actingAs($f->friend)->get(imageUrl($f->otherTrade, $comment))->assertNotFound();
+    $this->actingAs($f->friend)->get(imageUrl($f->trade, $plain))->assertNotFound();
+});
+
+test('the owner can attach an image to a reply from the journal', function () {
+    Storage::fake('local');
+    $f = sharedFixture();
+    $top = TradeComment::factory()->create(['trade_id' => $f->trade->id, 'user_id' => $f->friend->id]);
+
+    ownerJournal($f)
+        ->call('startReply', $top->id)
+        ->set('replyBody', 'Annotated')
+        ->set('replyImage', UploadedFile::fake()->image('mine.png'))
+        ->call('postReply')
+        ->assertHasNoErrors();
+
+    $reply = TradeComment::where('parent_comment_id', $top->id)->sole();
+    expect($reply->hasImage())->toBeTrue();
+    Storage::disk('local')->assertExists($reply->image_path);
+
+    ownerJournal($f)->assertSee('View image')->assertSee(imageUrl($f->trade, $reply));
+});
+
+test('the journal rejects a non-image attachment', function () {
+    Storage::fake('local');
+    $f = sharedFixture();
+
+    ownerJournal($f)
+        ->set('commentBody', 'x')
+        ->set('commentImage', UploadedFile::fake()->create('doc.pdf', 10, 'application/pdf'))
+        ->call('postComment')
+        ->assertHasErrors('image');
+
+    expect(TradeComment::count())->toBe(0);
+});
+
+test('deleting a trade also deletes its comment image files', function () {
+    Storage::fake('local');
+    $f = sharedFixture();
+    $this->actingAs($f->friend)->post(commentUrl($f->trade), ['body' => 'x', 'image' => UploadedFile::fake()->image('a.png')]);
+    $path = TradeComment::sole()->image_path;
+
+    Livewire::actingAs($f->owner)
+        ->test('journal.trade-journal', ['journal' => $f->owner->journal])
+        ->call('deleteTrade', $f->trade->uuid);
+
+    Storage::disk('local')->assertMissing($path);
 });

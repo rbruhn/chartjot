@@ -9,6 +9,8 @@ use App\Models\TradeComment;
 use App\Models\User;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -25,7 +27,7 @@ class TradeCommentPoster
     public const PER_MINUTE = 20;
 
     /**
-     * @param  array{body?: mixed, parent_comment_id?: mixed}  $input
+     * @param  array{body?: mixed, parent_comment_id?: mixed, image?: mixed}  $input
      */
     public function post(Trade $trade, User $author, array $input): TradeComment
     {
@@ -42,6 +44,9 @@ class TradeCommentPoster
                     ->where('trade_id', $trade->id)
                     ->whereNull('parent_comment_id'),
             ],
+            // Same rule as trade screenshots: raster images only (no SVG,
+            // which could carry script), 10 MB max.
+            'image'             => ['nullable', 'file', 'mimes:png,jpeg,jpg', 'max:10240'],
         ], [
             'parent_comment_id.exists' => 'You can only reply to a top-level comment on this trade.',
         ])->validate();
@@ -54,16 +59,40 @@ class TradeCommentPoster
         }
         RateLimiter::hit($key, 60);
 
+        $image = $this->storeImage($trade, $data['image'] ?? null);
+
         $comment = TradeComment::create([
             'trade_id'          => $trade->id,
             'user_id'           => $author->id,
             'parent_comment_id' => $data['parent_comment_id'] ?? null,
             'body'              => trim($data['body']),
+            ...$image,
         ]);
 
         $this->notifyParticipants($comment, $trade, $author);
 
         return $comment;
+    }
+
+    /**
+     * Store an attached image on the private disk under a server-generated
+     * name (the client's filename is never used) and return the columns to
+     * save. The MIME type is the one detected from the file's contents.
+     */
+    private function storeImage(Trade $trade, mixed $file): array
+    {
+        if (! $file) {
+            return [];
+        }
+
+        $name = Str::ulid().'.'.$file->extension();
+        $path = Storage::disk('local')->putFileAs("trade-comment-images/{$trade->id}", $file, $name);
+
+        return [
+            'image_disk'      => 'local',
+            'image_path'      => $path,
+            'image_mime_type' => $file->getMimeType(),
+        ];
     }
 
     /**
