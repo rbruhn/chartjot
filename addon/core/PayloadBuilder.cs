@@ -33,6 +33,10 @@ namespace ChartJot.Core
 	{
 		public DateTimeOffset CapturedAt { get; set; }
 		public string Caption { get; set; }
+
+		/// <summary>"png" or "jpeg", whatever the format setting was at capture time. Settings can change later,
+		/// so this is what locates the file on disk by trade_id, not the current setting.</summary>
+		public string Format { get; set; }
 	}
 
 	/// <summary>What the trader chose or the AddOn knows at submission time.</summary>
@@ -46,9 +50,6 @@ namespace ChartJot.Core
 
 		/// <summary>Null when no screenshot file is attached.</summary>
 		public ScreenshotMeta Screenshot { get; set; }
-
-		/// <summary>Null when the trade copier is off; then no copies are attached.</summary>
-		public CopyEvaluation Copies { get; set; }
 	}
 
 	/// <summary>Builds the JSON `trade` part of the intake request (NT8.md, Provisional Payload Contract).</summary>
@@ -152,97 +153,8 @@ namespace ChartJot.Core
 				w.EndObject();
 			}
 
-			WriteCopies(w, info.Copies);
-
 			w.EndObject();
 			return w.ToString();
-		}
-
-		private static void WriteCopies(JsonWriter w, CopyEvaluation copies)
-		{
-			w.Property("copies_source", copies == null ? null : copies.Source);
-
-			if (copies == null || copies.Summary == null)
-			{
-				w.Name("copies_summary").Null();
-			}
-			else
-			{
-				w.Name("copies_summary").BeginObject();
-				w.Property("accounts", copies.Summary.Accounts);
-				w.Property("matched", copies.Summary.Matched);
-				w.Property("missed", copies.Summary.Missed);
-				w.Property("still_open", copies.Summary.StillOpen);
-				w.Property("net_pnl", DecimalFormat.Money(copies.Summary.NetPnl));
-				w.EndObject();
-			}
-
-			w.Name("copies").BeginArray();
-			if (copies != null)
-			{
-				foreach (CopyResult copy in copies.Copies)
-					WriteCopy(w, copy);
-			}
-			w.EndArray();
-		}
-
-		private static void WriteCopy(JsonWriter w, CopyResult copy)
-		{
-			InstrumentSpec instrument = copy.Instrument;
-			decimal tick = instrument == null ? 0.01m : instrument.TickSize;
-
-			w.BeginObject();
-			w.Property("account_name", copy.Account);
-			w.Property("status", copy.Outcome == CopyOutcome.Matched ? "matched" : copy.Outcome == CopyOutcome.Missed ? "missed" : "still_open");
-
-			if (instrument == null)
-				w.Name("instrument").Null();
-			else
-				WriteInstrument(w, "instrument", instrument);
-
-			if (copy.Expected == null)
-			{
-				w.Name("expected").Null();
-			}
-			else
-			{
-				w.Name("expected").BeginObject();
-				w.Property("contract_size", copy.Expected.ContractSize);
-				w.Property("multiplier", DecimalFormat.Format(copy.Expected.Multiplier, 0));
-				w.Property("faded", copy.Expected.Faded);
-				w.Property("blown", copy.Expected.Blown);
-				w.Name("quantity");
-				if (copy.Expected.Quantity.HasValue)
-					w.Int(copy.Expected.Quantity.Value);
-				else
-					w.Null();
-				w.EndObject();
-			}
-
-			w.Name("warnings").BeginArray();
-			foreach (string warning in copy.Warnings)
-				w.String(warning);
-			w.EndArray();
-
-			w.Property("direction", copy.Direction.HasValue ? DirectionName(copy.Direction.Value) : null);
-			w.Property("quantity", copy.Quantity);
-			w.Property("entry_average_price", copy.EntryAveragePrice.HasValue ? DecimalFormat.Price(copy.EntryAveragePrice.Value, tick) : null);
-			w.Property("exit_average_price", copy.ExitAveragePrice.HasValue ? DecimalFormat.Price(copy.ExitAveragePrice.Value, tick) : null);
-			w.Property("entered_at", copy.EnteredAt.HasValue ? Timestamp(copy.EnteredAt.Value) : null);
-			w.Property("exited_at", copy.ExitedAt.HasValue ? Timestamp(copy.ExitedAt.Value) : null);
-
-			if (copy.Performance == null)
-			{
-				w.Name("performance").Null();
-			}
-			else
-			{
-				CopyPerformance p = copy.Performance;
-				WritePerformance(w, "performance", tick, p.Points, p.Ticks, p.GrossPnl, p.Commission, p.Fees, p.NetPnl);
-			}
-
-			WriteExecutions(w, "executions", copy.Fills, tick);
-			w.EndObject();
 		}
 
 		public static void WriteInstrument(JsonWriter w, string name, InstrumentSpec instrument)

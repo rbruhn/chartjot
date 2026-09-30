@@ -144,58 +144,29 @@ namespace ChartJot.Core.Tests
 		}
 
 		[Fact]
-		public void NoCopies_MeansNullSourceNullSummaryAndAnEmptyList()
+		public void CarriesNoTradeCopierFields()
 		{
 			JsonElement root = Parse(PayloadBuilder.Build(WorkedExample(), Info()));
 
-			Assert.Equal(JsonValueKind.Null, root.GetProperty("copies_source").ValueKind);
-			Assert.Equal(JsonValueKind.Null, root.GetProperty("copies_summary").ValueKind);
-			Assert.Equal(0, root.GetProperty("copies").GetArrayLength());
+			Assert.False(root.TryGetProperty("copies_source", out _));
+			Assert.False(root.TryGetProperty("copies_summary", out _));
+			Assert.False(root.TryGetProperty("copies", out _));
 		}
 
 		[Fact]
-		public void ACopierSetupWithNoFollowers_KeepsTheSourceButHasNoSummaryOrCopies()
+		public void AFollowerAccountsTradeIsBuiltLikeAnyOther()
 		{
-			CompletedTrade master = WorkedExample();
-			CopierSnapshot setup = CopierSnapshotParser.Parse("APEX-24570-135", true, "All", "ES", "Round Up At 0.5", "Multiplier", new string[0], "copier_live");
-			SubmissionInfo info = Info();
-			info.Copies = CopyMatcher.Evaluate(master, setup, new MatchOptions(), new CopyCandidate[0]);
+			TradeTracker tracker = new TradeTracker();
+			tracker.Apply(Buy("f1", "fo1", "AI", 3, 7700.25m, 1, 1.17m, 3, "PA-APEX-24570-02", Mes, isEntry: true));
+			CompletedTrade follower = tracker.Apply(Sell("f2", "fo2", "AI", 3, 7701.50m, 380, 1.17m, 0, "PA-APEX-24570-02", Mes, isExit: true)).Closed[0];
 
-			JsonElement root = Parse(PayloadBuilder.Build(master, info));
+			JsonElement root = Parse(PayloadBuilder.Build(follower, Info()));
 
-			Assert.Equal("copier_live", root.GetProperty("copies_source").GetString());
-			Assert.Equal(JsonValueKind.Null, root.GetProperty("copies_summary").ValueKind);
-			Assert.Equal(0, root.GetProperty("copies").GetArrayLength());
-		}
-
-		[Fact]
-		public void AMissedCopyHasTheDocumentedShape()
-		{
-			CompletedTrade master = WorkedExample();
-			CopierSnapshot setup = CopierSnapshotParser.Parse("APEX-24570-135", true, "All", "ES", "Round Up At 0.5", "Multiplier",
-				new[] { "PA-APEX-24570-03|Slave|1|No|No|No|No|No|Executions|No|Rithmic" }, "copier_live");
-			SubmissionInfo info = Info();
-			info.Copies = CopyMatcher.Evaluate(master, setup, new MatchOptions(), new CopyCandidate[0]);
-
-			JsonElement root = Parse(PayloadBuilder.Build(master, info));
-			JsonElement copy = root.GetProperty("copies")[0];
-
-			Assert.Equal("PA-APEX-24570-03", copy.GetProperty("account_name").GetString());
-			Assert.Equal("missed", copy.GetProperty("status").GetString());
-			Assert.Equal(JsonValueKind.Null, copy.GetProperty("instrument").ValueKind);
-			Assert.Equal("micro", copy.GetProperty("expected").GetProperty("contract_size").GetString());
-			Assert.Equal("1", copy.GetProperty("expected").GetProperty("multiplier").GetString());
-			Assert.Equal(3, copy.GetProperty("expected").GetProperty("quantity").GetInt32());
-			Assert.Equal("expected 3 MES, no entry within 5 seconds", copy.GetProperty("warnings")[0].GetString());
-			Assert.Equal(JsonValueKind.Null, copy.GetProperty("direction").ValueKind);
-			Assert.Equal(0, copy.GetProperty("quantity").GetInt32());
-			Assert.Equal(JsonValueKind.Null, copy.GetProperty("performance").ValueKind);
-			Assert.Equal(0, copy.GetProperty("executions").GetArrayLength());
-
-			JsonElement summary = root.GetProperty("copies_summary");
-			Assert.Equal(1, summary.GetProperty("accounts").GetInt32());
-			Assert.Equal(1, summary.GetProperty("missed").GetInt32());
-			Assert.Equal("0.00", summary.GetProperty("net_pnl").GetString());
+			Assert.Equal("PA-APEX-24570-02", root.GetProperty("account_name").GetString());
+			Assert.Equal("MES", root.GetProperty("instrument").GetProperty("symbol").GetString());
+			Assert.Equal("5", root.GetProperty("instrument").GetProperty("point_value").GetString());
+			Assert.Equal("18.75", root.GetProperty("performance").GetProperty("gross_pnl").GetString());
+			Assert.Equal("other", root.GetProperty("exit").GetProperty("reason").GetString());
 		}
 
 		[Fact]

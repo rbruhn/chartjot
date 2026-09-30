@@ -34,7 +34,14 @@ namespace ChartJot.Core
 		public int MaxQuantity { get; set; }
 		public bool FeedInterrupted { get; set; }
 
-		/// <summary>The fills recorded so far, for copies that are still open.</summary>
+		/// <summary>True when the fill that opened this trade also closed the previous one (a reversal).</summary>
+		public bool OpenedByReversal { get; set; }
+
+		/// <summary>The running high/low observed so far. Save this: after a restart, only this snapshot (not
+		/// <c>Account.Executions</c>) can tell you the tick range seen before the restart.</summary>
+		public ExcursionSnapshot Excursion { get; set; }
+
+		/// <summary>The fills recorded so far.</summary>
 		public IList<TradeFill> Fills { get; set; }
 	}
 
@@ -87,6 +94,7 @@ namespace ChartJot.Core
 			public int Signed;
 			public int MaxQuantity;
 			public string TradeId;
+			public bool OpenedByReversal;
 		}
 
 		private sealed class PositionState
@@ -190,14 +198,14 @@ namespace ChartJot.Core
 			{
 				OpenTrade finished = state.Trade;
 				result.Closed.Add(TradeCalculator.Complete(state.Account, state.Instrument, finished.Direction,
-					finished.MaxQuantity, finished.Fills, finished.Excursion.Interrupted));
+					finished.MaxQuantity, finished.Fills, finished.Excursion.Interrupted, finished.OpenedByReversal));
 				state.Trade = null;
 			}
 
 			if (remainder > 0)
 			{
 				// The flipping fill also opens the new trade with the quantity left over.
-				state.Trade = new OpenTrade { Direction = delta > 0 ? Direction.Long : Direction.Short };
+				state.Trade = new OpenTrade { Direction = delta > 0 ? Direction.Long : Direction.Short, OpenedByReversal = true };
 				AddFill(state.Trade, fill, FillRole.Entry, remainder, sign * remainder);
 				result.Opened = Describe(state);
 			}
@@ -286,6 +294,49 @@ namespace ChartJot.Core
 			return result;
 		}
 
+		/// <summary>
+		/// After <see cref="Rebuild"/> reconstructs an open trade from <c>Account.Executions</c>, folds in the
+		/// live tick range that was observed before an AddOn restart (only the persisted state file has that; it
+		/// is not in NT8's own records). Also flags the trade's feed as interrupted, since the gap itself was not
+		/// observed either way. A no-op if there is no open trade for the account/instrument, or a different
+		/// trade opened while the state file was stale.
+		/// <para>
+		/// <paramref name="fillExcursions"/>, when given, holds each persisted fill's own running high/low by
+		/// ExecutionId. Leg MAE/MFE is measured up to that leg's final fill, so a leg that exited before the restart
+		/// gets its own persisted range back; a fill not in the map happened after the save and gets the whole
+		/// persisted range, which was all observed before it.
+		/// </para>
+		/// </summary>
+		public void RestoreExcursion(string account, string instrumentFullName, string tradeId, ExcursionSnapshot snapshot,
+			IDictionary<string, ExcursionSnapshot> fillExcursions = null)
+		{
+			PositionState state;
+			if (!states.TryGetValue(Key(account, instrumentFullName), out state) || state.Trade == null)
+				return;
+			if (state.Trade.TradeId != tradeId)
+				return;
+
+			state.Trade.Excursion.Merge(snapshot);
+			state.Trade.Excursion.Interrupted = true;
+
+			if (fillExcursions != null)
+				RestoreFillExcursions(state.Trade.Fills, snapshot, fillExcursions);
+		}
+
+		/// <summary>The per-fill half of <see cref="RestoreExcursion"/>, also used for a trade that closed while its
+		/// ticks were not being observed.</summary>
+		internal static void RestoreFillExcursions(IList<TradeFill> fills, ExcursionSnapshot snapshot,
+			IDictionary<string, ExcursionSnapshot> fillExcursions)
+		{
+			foreach (TradeFill fill in fills)
+			{
+				ExcursionSnapshot persisted;
+				if (!fillExcursions.TryGetValue(fill.Fill.ExecutionId, out persisted))
+					persisted = snapshot;
+				fill.Excursion = ExcursionSnapshot.Combine(fill.Excursion, persisted);
+			}
+		}
+
 		private static void AddFill(OpenTrade trade, Fill fill, FillRole role, int allocated, int signedAfter)
 		{
 			decimal share = (decimal)allocated / fill.Quantity;
@@ -320,6 +371,8 @@ namespace ChartJot.Core
 				SignedPosition = trade.Signed,
 				MaxQuantity = trade.MaxQuantity,
 				FeedInterrupted = trade.Excursion.Interrupted,
+				OpenedByReversal = trade.OpenedByReversal,
+				Excursion = trade.Excursion.Snapshot(),
 				Fills = new List<TradeFill>(trade.Fills)
 			};
 		}
