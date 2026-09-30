@@ -347,19 +347,19 @@ namespace ChartJot.Core.Tests
 		}
 
 		[Fact]
-		public void Stage_CarriesTheCopyEvaluation()
+		public void Stage_MovesTheTradeIntoTheReviewList()
 		{
 			AddonState state = new AddonState();
 			state.Tracker.Apply(Entry);
 			state.Tracker.Apply(Target);
 			CompletedTrade closed = state.Tracker.Apply(Stop).Closed[0];
 			state.RecordClosed(closed);
-			CopyEvaluation copies = new CopyEvaluation { Source = MatchOptions.AutoDetect, Copies = new List<CopyResult>(), Diagnostics = new List<string>() };
 
-			StagedTrade staged = state.Stage(closed.TradeId, copies);
+			StagedTrade staged = state.Stage(closed.TradeId);
 
-			Assert.Same(copies, staged.Copies);
+			Assert.Same(closed, staged.Trade);
 			Assert.Same(staged, state.Staged.Find(closed.TradeId));
+			Assert.Empty(state.AwaitingStage);
 		}
 
 		[Fact]

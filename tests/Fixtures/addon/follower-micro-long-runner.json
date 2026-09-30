@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "source": "ninjatrader_8",
+  "addon_version": "1.0.0",
+  "trade_id": "NT8-TEST_ACCT_002-MES_12_26-8364791643378e4c",
+  "account_name": "TEST-ACCT-002",
+  "connection": "Rithmic",
+  "trade_type": "2EL",
+  "trade_type_other": null,
+  "instrument": {
+    "symbol": "MES",
+    "contract": "MES 12-26",
+    "tick_size": "0.25",
+    "point_value": "5"
+  },
+  "direction": "long",
+  "quantity": 3,
+  "total_entry_quantity": 3,
+  "entry": {
+    "occurred_at": "2026-09-24T09:30:01-04:00",
+    "average_price": "7700.25",
+    "order_name": "Entry"
+  },
+  "exit": {
+    "occurred_at": "2026-09-24T09:36:20-04:00",
+    "average_price": "7701.50",
+    "order_name": "Stop1",
+    "reason": "stop"
+  },
+  "performance": {
+    "points": "1.25",
+    "ticks": 5,
+    "gross_pnl": "18.75",
+    "commission": "2.34",
+    "fees": null,
+    "net_pnl": "16.41"
+  },
+  "excursion": {
+    "mae_points": "0.75",
+    "mfe_points": "3.00",
+    "max_adverse_price": "7699.50",
+    "max_favorable_price": "7703.25",
+    "complete": true
+  },
+  "legs": [
+    {
+      "sequence": 1,
+      "runner": false,
+      "exit_order_id": "ord-2002",
+      "order_name": "Target1",
+      "reason": "profit_target",
+      "quantity": 2,
+      "exited_at": "2026-09-24T09:31:10-04:00",
+      "average_exit_price": "7701.00",
+      "points": "0.75",
+      "gross_pnl": "7.50",
+      "mae_points": "0.75",
+      "mfe_points": "0.75"
+    },
+    {
+      "sequence": 2,
+      "runner": true,
+      "exit_order_id": "ord-2003",
+      "order_name": "Stop1",
+      "reason": "stop",
+      "quantity": 1,
+      "exited_at": "2026-09-24T09:36:20-04:00",
+      "average_exit_price": "7702.50",
+      "points": "2.25",
+      "gross_pnl": "11.25",
+      "mae_points": "0.75",
+      "mfe_points": "3.00"
+    }
+  ],
+  "executions": [
+    {
+      "execution_id": "b1c2d3e4f5a6",
+      "order_id": "ord-2001",
+      "occurred_at": "2026-09-24T09:30:01-04:00",
+      "action": "buy",
+      "role": "entry",
+      "quantity": 3,
+      "allocated_quantity": 3,
+      "price": "7700.25",
+      "commission": "1.17",
+      "fee": null,
+      "order_name": "Entry",
+      "position_after": 3
+    },
+    {
+      "execution_id": "b1c2d3e4f5a7",
+      "order_id": "ord-2002",
+      "occurred_at": "2026-09-24T09:31:10-04:00",
+      "action": "sell",
+      "role": "exit",
+      "quantity": 2,
+      "allocated_quantity": 2,
+      "price": "7701.00",
+      "commission": "0.78",
+      "fee": null,
+      "order_name": "Target1",
+      "position_after": 1
+    },
+    {
+      "execution_id": "b1c2d3e4f5a8",
+      "order_id": "ord-2003",
+      "occurred_at": "2026-09-24T09:36:20-04:00",
+      "action": "sell",
+      "role": "exit",
+      "quantity": 1,
+      "allocated_quantity": 1,
+      "price": "7702.50",
+      "commission": "0.39",
+      "fee": null,
+      "order_name": "Stop1",
+      "position_after": 0
+    }
+  ],
+  "notes": [
+    {
+      "body": "H2 at the EMA. Follow the plan.",
+      "phase": "pre_trade",
+      "occurred_at": "2026-09-24T09:29:40-04:00"
+    },
+    {
+      "body": "T1 filled. Letting the runner work.",
+      "phase": "in_trade",
+      "occurred_at": "2026-09-24T09:31:25-04:00"
+    },
+    {
+      "body": "Runner stopped. Good management.",
+      "phase": "post_trade",
+      "occurred_at": "2026-09-24T09:36:40-04:00"
+    }
+  ]
+}

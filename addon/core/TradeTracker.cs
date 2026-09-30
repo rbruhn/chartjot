@@ -41,7 +41,7 @@ namespace ChartJot.Core
 		/// <c>Account.Executions</c>) can tell you the tick range seen before the restart.</summary>
 		public ExcursionSnapshot Excursion { get; set; }
 
-		/// <summary>The fills recorded so far, for copies that are still open.</summary>
+		/// <summary>The fills recorded so far.</summary>
 		public IList<TradeFill> Fills { get; set; }
 	}
 
