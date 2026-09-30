@@ -1,9 +1,6 @@
 {{--
     "View image" link for an image attached to a trade comment. The image is
-    not shown in the thread: it sits in a closed native <dialog> (loaded
-    lazily, so it isn't fetched until opened) and opens as a modal. Plain
-    HTML + inline handlers, so it works on the Livewire-free conversation
-    page and in the journal alike. Click the backdrop or Close to dismiss.
+    not shown in the thread — only in the modal the link opens.
 --}}
 @props(['id', 'url'])
 
@@ -14,10 +11,4 @@
     </svg>
     View image
 </button>
-<dialog id="comment-image-{{ $id }}" onclick="if (event.target === this) this.close()"
-    class="p-0 rounded-lg bg-white dark:bg-gray-900 backdrop:bg-black/70" style="max-width:92vw;max-height:92vh">
-    <div class="flex justify-end px-2 pt-2">
-        <form method="dialog"><button class="text-xs px-3 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300">Close</button></form>
-    </div>
-    <img src="{{ $url }}" loading="lazy" alt="Image attached to a comment" class="block mx-auto p-2" style="max-width:90vw;max-height:84vh">
-</dialog>
+<x-image-dialog :id="'comment-image-'.$id" :url="$url" alt="Image attached to a comment" />

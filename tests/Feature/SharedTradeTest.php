@@ -590,3 +590,30 @@ test('deleting a trade also deletes its comment image files', function () {
 
     Storage::disk('local')->assertMissing($path);
 });
+
+// ---------------------------------------------------------------------------
+// Expanding the trade's chart screenshot in a modal
+// ---------------------------------------------------------------------------
+
+test('the journal chart has an expand icon that opens the screenshot in a modal', function () {
+    $f = sharedFixture();
+    $shot = TradeScreenshot::factory()->create(['trade_id' => $f->trade->id, 'mime_type' => 'image/png', 'source' => ScreenshotSource::Nt8]);
+    $url = e(route('journal.screenshot', [$f->trade, $shot]));
+
+    $html = ownerJournal($f)->assertSee('Expand image')->html();
+
+    // An icon button (not a link) opens a <dialog> holding the full image.
+    expect($html)->toMatch('#<button[^>]*title="Expand image"#')
+        ->and($html)->toMatch('#<dialog[^>]*>(?:(?!</dialog>).)*'.preg_quote($url, '#').'#s');
+});
+
+test('the conversation page chart can be expanded in a modal too', function () {
+    $f = sharedFixture();
+    $shot = TradeScreenshot::factory()->create(['trade_id' => $f->trade->id, 'mime_type' => 'image/png', 'source' => ScreenshotSource::Nt8]);
+    $url = e(route('trades.shared.screenshot', [$f->trade, $shot]));
+
+    $html = $this->actingAs($f->friend)->get(sharedUrl($f->trade))->assertOk()->getContent();
+
+    expect($html)->toMatch('#<button[^>]*title="Expand image"#')
+        ->and($html)->toMatch('#<dialog[^>]*>(?:(?!</dialog>).)*'.preg_quote($url, '#').'#s');
+});
