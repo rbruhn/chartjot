@@ -2,7 +2,6 @@
 
 use App\Enums\Direction;
 use App\Enums\ExitReason;
-use App\Mail\FailedImportsMail;
 use App\Models\Account;
 use App\Models\FailedTradeImport;
 use App\Models\Journal;
@@ -236,6 +235,11 @@ test('a trade group with no entry fills records an error and continues', functio
 
     expect($result['trades_created'])->toBe(1)
         ->and(count($result['errors']))->toBe(1);
+
+    // Recorded like any other failed trade, so it reaches the completion email's CSV.
+    expect($result['failures'])->toHaveCount(1)
+        ->and($result['failures'][0]['account_name'])->toBe('AccountB')
+        ->and(FailedTradeImport::sole()->account_name)->toBe('AccountB');
 });
 
 test('a malformed row is recorded as a failed import instead of aborting the import', function (string $badRow, string $reason) {
@@ -264,7 +268,10 @@ test('a malformed row is recorded as a failed import instead of aborting the imp
         ->and($failure->reason)->toContain('Row 5')
         ->and($failure->reason)->toContain($reason);
 
-    Mail::assertSent(FailedImportsMail::class);
+    // Returned for the job's completion email; the importer itself sends nothing.
+    expect($result['failures'])->toHaveCount(1)
+        ->and($result['failures'][0]['reason'])->toBe($failure->reason);
+    Mail::assertNothingSent();
 })->with([
     'bad date'         => ['ES 12-26,Sell,1,5002.00,not-a-date,exec-4,Exit,- ,ord-4,Exit,$5.97,1,AccountB,,', 'time'],
     'overflowing date' => ['ES 12-26,Sell,1,5002.00,13/45/2026 9:05:00 AM,exec-4,Exit,- ,ord-4,Exit,$5.97,1,AccountB,,', 'time'],

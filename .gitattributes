@@ -9,3 +9,6 @@
 /.github export-ignore
 CHANGELOG.md export-ignore
 .styleci.yml export-ignore
+
+# NinjaTrader-format CSV fixtures: keep their CRLF line endings byte-exact, as NT8 writes them.
+/tests/Fixtures/ninjatrader/*.csv -text
