@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\AccountType;
+use App\Enums\TransactionType;
 use App\Models\Account;
 use App\Models\Journal;
 use App\Models\TradeScreenshot;
@@ -22,14 +23,66 @@ new class extends Component
     public string $startingBalance = '';
     public string $connection      = '';
 
+    // Deposits/withdrawals ledger (funded accounts only)
+    public ?int $expandedAccountId = null;
+    public string $txType          = 'deposit';
+    public string $txAmount        = '';
+    public string $txDate          = '';
+
     #[Computed]
     public function accounts()
     {
-        return $this->journal->accounts()
-            ->withCount('trades')
-            ->withSum('trades', 'net_pnl')
+        return $this->withBalanceSums($this->journal->accounts()->withCount('trades'))
             ->orderBy('name')
             ->get();
+    }
+
+    #[Computed]
+    public function expandedTransactions()
+    {
+        if ($this->expandedAccountId === null) {
+            return collect();
+        }
+
+        return $this->journal->accounts()->findOrFail($this->expandedAccountId)
+            ->transactions()
+            ->orderByDesc('occurred_at')
+            ->orderByDesc('id')
+            ->get();
+    }
+
+    #[Computed]
+    public function transactionTypes(): array
+    {
+        return TransactionType::cases();
+    }
+
+    /**
+     * Starting balance + net P&L + deposits − withdrawals, from the aggregates
+     * loaded by withBalanceSums(). Null when the account has neither a starting
+     * balance nor any ledger entries — there's nothing to anchor it to.
+     */
+    public function balanceFor(Account $account): ?float
+    {
+        $deposits    = (float) ($account->deposits_total ?? 0);
+        $withdrawals = (float) ($account->withdrawals_total ?? 0);
+
+        if ($account->starting_balance === null && $deposits == 0 && $withdrawals == 0) {
+            return null;
+        }
+
+        return (float) ($account->starting_balance ?? 0)
+            + (float) ($account->trades_sum_net_pnl ?? 0)
+            + $deposits
+            - $withdrawals;
+    }
+
+    private function withBalanceSums($query)
+    {
+        return $query
+            ->withSum('trades', 'net_pnl')
+            ->withSum(['transactions as deposits_total' => fn ($q) => $q->where('type', TransactionType::Deposit->value)], 'amount')
+            ->withSum(['transactions as withdrawals_total' => fn ($q) => $q->where('type', TransactionType::Withdrawal->value)], 'amount');
     }
 
     #[Computed]
@@ -122,6 +175,72 @@ new class extends Component
         }
 
         unset($this->accounts);
+    }
+
+    public function toggleTransactions(int $id): void
+    {
+        if ($this->expandedAccountId === $id) {
+            $this->expandedAccountId = null;
+            return;
+        }
+
+        $this->fundedAccount($id);
+
+        $this->expandedAccountId = $id;
+        $this->resetTransactionForm();
+        unset($this->expandedTransactions);
+    }
+
+    public function addTransaction(): void
+    {
+        $account = $this->fundedAccount((int) $this->expandedAccountId);
+
+        $this->validate([
+            'txType'   => ['required', Rule::in(array_column(TransactionType::cases(), 'value'))],
+            'txAmount' => ['required', 'numeric', 'gt:0', 'max:9999999999.99'],
+            'txDate'   => ['required', 'date'],
+        ]);
+
+        $type   = TransactionType::from($this->txType);
+        $amount = round((float) $this->txAmount, 2);
+
+        if ($type === TransactionType::Withdrawal) {
+            // Re-read the balance at save time rather than trusting the rendered
+            // table, which may be stale (e.g. an import landed trades since the
+            // page loaded).
+            $current = $this->withBalanceSums($this->journal->accounts())->findOrFail($account->id);
+            $balance = round($this->balanceFor($current) ?? 0, 2);
+
+            if ($amount > $balance) {
+                $this->addError('txAmount', 'Withdrawal cannot exceed the current balance of $'.number_format($balance, 2).'.');
+                return;
+            }
+        }
+
+        $account->transactions()->create([
+            'type'        => $type,
+            'amount'      => $amount,
+            'occurred_at' => $this->txDate,
+        ]);
+
+        // Leave the ledger row open so several entries can be added in a row.
+        $this->resetTransactionForm();
+        unset($this->accounts, $this->expandedTransactions);
+    }
+
+    private function fundedAccount(int $id): Account
+    {
+        return $this->journal->accounts()
+            ->where('account_type', AccountType::Funded->value)
+            ->findOrFail($id);
+    }
+
+    private function resetTransactionForm(): void
+    {
+        $this->txType   = TransactionType::Deposit->value;
+        $this->txAmount = '';
+        $this->txDate   = now($this->journal->timezone ?? 'UTC')->toDateString();
+        $this->resetErrorBag(['txType', 'txAmount', 'txDate']);
     }
 
     public function cancel(): void
@@ -260,10 +379,10 @@ new class extends Component
                     @foreach($this->accounts as $account)
                     @php
                         $netPnl    = (float) ($account->trades_sum_net_pnl ?? 0);
-                        $balance   = $account->starting_balance !== null ? (float) $account->starting_balance + $netPnl : null;
+                        $balance   = $this->balanceFor($account);
                         $pnlClass  = $netPnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400';
                     @endphp
-                    <tr>
+                    <tr wire:key="account-{{ $account->id }}">
                         <td class="text-gray-900 dark:text-gray-50" style="padding:0.875rem 1rem;font-weight:500">
                             {{ $account->name }}
                             @if($account->connection)
@@ -296,27 +415,116 @@ new class extends Component
                             {{ number_format($account->trades_count) }}
                         </td>
                         <td style="padding:0.875rem 1rem;text-align:right;white-space:nowrap">
+                            @if($account->account_type === AccountType::Funded)
+                            <button wire:click="toggleTransactions({{ $account->id }})"
+                                title="Transactions" aria-label="Transactions"
+                                class="rounded border {{ $expandedAccountId === $account->id ? 'border-blue-400 bg-blue-50 text-blue-700 dark:border-blue-500 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-300 bg-white text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400' }} hover:text-gray-900 dark:hover:text-gray-100"
+                                style="display:inline-flex;align-items:center;vertical-align:middle;padding:0.3125rem;cursor:pointer;margin-right:0.25rem">
+                                <x-heroicon-o-banknotes class="h-4 w-4" />
+                            </button>
+                            @endif
                             <button wire:click="startEdit({{ $account->id }})"
+                                title="Edit" aria-label="Edit"
                                 class="rounded border border-gray-300 bg-white text-gray-600 hover:text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
-                                style="padding:0.25rem 0.625rem;font-size:0.75rem;cursor:pointer;margin-right:0.25rem">
-                                Edit
+                                style="display:inline-flex;align-items:center;vertical-align:middle;padding:0.3125rem;cursor:pointer;margin-right:0.25rem">
+                                <x-heroicon-o-pencil-square class="h-4 w-4" />
                             </button>
                             @if($account->trades_count > 0)
                             <button wire:click="clearTrades({{ $account->id }})"
                                 wire:confirm="Clear all {{ number_format($account->trades_count) }} trade(s) from &quot;{{ $account->name }}&quot;? All trades and images will be lost. This cannot be undone."
+                                title="Clear" aria-label="Clear"
                                 class="rounded border border-gray-300 bg-white text-gray-600 hover:text-red-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:text-red-400"
-                                style="padding:0.25rem 0.625rem;font-size:0.75rem;cursor:pointer;margin-right:0.25rem">
-                                Clear
+                                style="display:inline-flex;align-items:center;vertical-align:middle;padding:0.3125rem;cursor:pointer;margin-right:0.25rem">
+                                <x-heroicon-o-arrow-path class="h-4 w-4" />
                             </button>
                             @endif
                             <button wire:click="delete({{ $account->id }})"
                                 wire:confirm="Delete account &quot;{{ $account->name }}&quot;? This cannot be undone."
+                                title="Delete" aria-label="Delete"
                                 class="rounded border border-gray-300 bg-white text-gray-600 hover:text-red-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:text-red-400"
-                                style="padding:0.25rem 0.625rem;font-size:0.75rem;cursor:pointer">
-                                Delete
+                                style="display:inline-flex;align-items:center;vertical-align:middle;padding:0.3125rem;cursor:pointer">
+                                <x-heroicon-o-trash class="h-4 w-4" />
                             </button>
                         </td>
                     </tr>
+                    @if($expandedAccountId === $account->id && $account->account_type === AccountType::Funded)
+                    <tr wire:key="account-{{ $account->id }}-transactions">
+                        <td colspan="7" class="bg-gray-50 dark:bg-gray-800/50" style="padding:1rem 1.25rem">
+                            <h4 class="text-gray-700 dark:text-gray-300" style="font-size:0.75rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.75rem">
+                                Deposits &amp; Withdrawals
+                            </h4>
+
+                            @if($this->expandedTransactions->isEmpty())
+                            <p class="text-gray-500 dark:text-gray-400" style="font-size:0.8125rem;margin-bottom:1rem">No deposits or withdrawals yet.</p>
+                            @else
+                            <table style="width:100%;max-width:32rem;border-collapse:collapse;font-size:0.8125rem;margin-bottom:1rem">
+                                <thead>
+                                    <tr class="border-b border-gray-200 dark:border-gray-700">
+                                        <th class="text-gray-500 dark:text-gray-400" style="text-align:left;padding:0.375rem 0.5rem;font-weight:500;font-size:0.6875rem;text-transform:uppercase;letter-spacing:0.05em">Date</th>
+                                        <th class="text-gray-500 dark:text-gray-400" style="text-align:left;padding:0.375rem 0.5rem;font-weight:500;font-size:0.6875rem;text-transform:uppercase;letter-spacing:0.05em">Type</th>
+                                        <th class="text-gray-500 dark:text-gray-400" style="text-align:right;padding:0.375rem 0.5rem;font-weight:500;font-size:0.6875rem;text-transform:uppercase;letter-spacing:0.05em">Amount</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
+                                    @foreach($this->expandedTransactions as $tx)
+                                    @php
+                                        $isDeposit = $tx->type === TransactionType::Deposit;
+                                        $txc = $isDeposit
+                                            ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+                                            : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400';
+                                    @endphp
+                                    <tr wire:key="tx-{{ $tx->id }}">
+                                        <td class="text-gray-700 dark:text-gray-300" style="padding:0.375rem 0.5rem">{{ $tx->occurred_at->format('M j, Y') }}</td>
+                                        <td style="padding:0.375rem 0.5rem">
+                                            <span class="{{ $txc }}" style="display:inline-block;padding:0.125rem 0.5rem;border-radius:9999px;font-size:0.75rem;font-weight:500">
+                                                {{ $tx->type->label() }}
+                                            </span>
+                                        </td>
+                                        <td class="text-gray-900 dark:text-gray-50" style="padding:0.375rem 0.5rem;text-align:right;font-weight:500">
+                                            {{ $isDeposit ? '+' : '−' }}${{ number_format((float) $tx->amount, 2) }}
+                                        </td>
+                                    </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                            @endif
+
+                            {{-- Add entry --}}
+                            <div style="display:flex;flex-wrap:wrap;align-items:flex-start;gap:0.5rem">
+                                <div>
+                                    <input wire:model="txDate" type="date" aria-label="Date"
+                                        class="rounded-md border border-gray-300 bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                                        style="padding:0.375rem 0.625rem;font-size:0.8125rem;box-sizing:border-box">
+                                </div>
+                                <div>
+                                    <select wire:model="txType" aria-label="Type"
+                                        class="rounded-md border border-gray-300 bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                                        style="padding:0.375rem 2rem 0.375rem 0.625rem;font-size:0.8125rem;box-sizing:border-box">
+                                        @foreach($this->transactionTypes as $type)
+                                        <option value="{{ $type->value }}">{{ $type->label() }}</option>
+                                        @endforeach
+                                    </select>
+                                </div>
+                                <div>
+                                    <div style="position:relative">
+                                        <span class="text-gray-500 dark:text-gray-400" style="position:absolute;left:0.625rem;top:50%;transform:translateY(-50%);font-size:0.8125rem">$</span>
+                                        <input wire:model="txAmount" type="number" min="0.01" step="0.01" placeholder="1000.00" aria-label="Amount"
+                                            class="rounded-md border border-gray-300 bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                                            style="width:9rem;padding:0.375rem 0.625rem 0.375rem 1.375rem;font-size:0.8125rem;box-sizing:border-box">
+                                    </div>
+                                </div>
+                                <button wire:click="addTransaction"
+                                    class="rounded-md bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500"
+                                    style="padding:0.375rem 1rem;font-size:0.8125rem;font-weight:500;cursor:pointer">
+                                    Add
+                                </button>
+                            </div>
+                            @foreach(['txDate', 'txType', 'txAmount'] as $field)
+                            @error($field)<p class="mt-1 text-xs text-red-500 dark:text-red-400">{{ $message }}</p>@enderror
+                            @endforeach
+                        </td>
+                    </tr>
+                    @endif
                     @endforeach
                 </tbody>
             </table>
