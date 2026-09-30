@@ -229,6 +229,106 @@ namespace ChartJot.Core.Tests
 		}
 
 		[Fact]
+		public async Task SendAsync_MultiByteServerBody_IsCappedInUtf8BytesWithoutASplitCharacter()
+		{
+			// "é" is 2 bytes and "😀" 4 bytes in UTF-8; both would pass a character-count cap at twice the size or more.
+			string body = "x" + string.Concat(Enumerable.Repeat("é😀", TradeDelivery.MaxServerBodyLength));
+
+			DeliveryAttempt a = await Delivery(Answer(HttpStatusCode.UnprocessableEntity, body)).SendAsync(Queued(), null);
+
+			int bytes = Encoding.UTF8.GetByteCount(a.ServerBody);
+			Assert.True(bytes <= TradeDelivery.MaxServerBodyLength, bytes + " bytes");
+			Assert.True(bytes > TradeDelivery.MaxServerBodyLength - 4, bytes + " bytes");
+			Assert.StartsWith(a.ServerBody, body);
+			Assert.DoesNotContain('\uFFFD', a.ServerBody);
+		}
+
+		[Fact]
+		public async Task SendAsync_NonUtf8Charset_IsDecodedAndStillCappedInUtf8Bytes()
+		{
+			// UTF-16 takes 2 bytes per "ÿ", so the 16KB read yields half the characters, which are also 2 bytes each in UTF-8.
+			string body = new string('ÿ', TradeDelivery.MaxServerBodyLength);
+			StubHandler handler = new StubHandler((r, ct) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadGateway)
+			{
+				Content = new StringContent(body, Encoding.Unicode, "text/plain")
+			}));
+
+			DeliveryAttempt a = await Delivery(handler).SendAsync(Queued(), null);
+
+			Assert.Equal(new string('ÿ', TradeDelivery.MaxServerBodyLength / 2), a.ServerBody);
+		}
+
+		[Fact]
+		public async Task SendAsync_HugeServerBody_ReadsNoMoreThanTheCap()
+		{
+			CountingStream stream = new CountingStream(100L * 1024 * 1024);
+			StubHandler handler = new StubHandler((r, ct) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadGateway)
+			{
+				Content = new StreamContent(stream, 1024)
+			}));
+
+			DeliveryAttempt a = await Delivery(handler).SendAsync(Queued(), null);
+
+			Assert.Equal(DeliveryOutcome.Retryable, a.Outcome);
+			Assert.Equal(502, a.StatusCode);
+			Assert.Equal(TradeDelivery.MaxServerBodyLength, a.ServerBody.Length);
+			Assert.True(stream.BytesRead <= TradeDelivery.MaxServerBodyLength + 1024, stream.BytesRead + " bytes read");
+		}
+
+		[Fact]
+		public async Task SendAsync_ConnectionDropsMidBody_IsRetryableWithTheError()
+		{
+			StubHandler handler = new StubHandler((r, ct) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Created)
+			{
+				Content = new StreamContent(new CountingStream(10, failAfter: 5))
+			}));
+
+			DeliveryAttempt a = await Delivery(handler).SendAsync(Queued(), null);
+
+			Assert.Equal(DeliveryOutcome.Retryable, a.Outcome);
+			Assert.Null(a.StatusCode);
+			Assert.Contains("connection reset", a.ErrorMessage);
+		}
+
+		// A long body of 'x' that records how much of it was read, and can fail partway like a dropped connection.
+		private sealed class CountingStream : Stream
+		{
+			private readonly long length;
+			private readonly long failAfter;
+
+			public CountingStream(long length, long failAfter = -1)
+			{
+				this.length = length;
+				this.failAfter = failAfter;
+			}
+
+			public long BytesRead { get; private set; }
+
+			public override int Read(byte[] buffer, int offset, int count)
+			{
+				if (failAfter >= 0 && BytesRead >= failAfter)
+					throw new IOException("connection reset");
+				int n = (int)Math.Min(count, length - BytesRead);
+				if (failAfter >= 0)
+					n = (int)Math.Min(n, failAfter - BytesRead);
+				for (int i = 0; i < n; i++)
+					buffer[offset + i] = (byte)'x';
+				BytesRead += n;
+				return n;
+			}
+
+			public override bool CanRead { get { return true; } }
+			public override bool CanSeek { get { return false; } }
+			public override bool CanWrite { get { return false; } }
+			public override long Length { get { throw new NotSupportedException(); } }
+			public override long Position { get { throw new NotSupportedException(); } set { throw new NotSupportedException(); } }
+			public override void Flush() { }
+			public override long Seek(long offset, SeekOrigin origin) { throw new NotSupportedException(); }
+			public override void SetLength(long value) { throw new NotSupportedException(); }
+			public override void Write(byte[] buffer, int offset, int count) { throw new NotSupportedException(); }
+		}
+
+		[Fact]
 		public async Task SendAsync_Timeout_IsRetryableWithNoStatus()
 		{
 			StubHandler handler = new StubHandler(async (r, ct) =>
@@ -304,6 +404,14 @@ namespace ChartJot.Core.Tests
 		{
 			Assert.Throws<ArgumentOutOfRangeException>(() => new TradeDelivery(new HttpClient(), Endpoint, Token, "1.0.0", Timeout.InfiniteTimeSpan));
 			Assert.Throws<ArgumentOutOfRangeException>(() => new TradeDelivery(new HttpClient(), Endpoint, Token, "1.0.0", TimeSpan.Zero));
+		}
+
+		[Fact]
+		public void Constructor_RejectsATimeoutBeyondWhatCancellationTokenSourceAccepts()
+		{
+			Assert.Throws<ArgumentOutOfRangeException>(() => new TradeDelivery(new HttpClient(), Endpoint, Token, "1.0.0", TimeSpan.FromDays(30)));
+			Assert.Throws<ArgumentOutOfRangeException>(() => new TradeDelivery(new HttpClient(), Endpoint, Token, "1.0.0", TradeDelivery.MaxTimeout + TimeSpan.FromMilliseconds(1)));
+			new TradeDelivery(new HttpClient(), Endpoint, Token, "1.0.0", TradeDelivery.MaxTimeout);
 		}
 
 		// ---- the pump

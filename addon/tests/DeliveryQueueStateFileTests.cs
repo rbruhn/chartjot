@@ -114,6 +114,24 @@ namespace ChartJot.Core.Tests
 		}
 
 		[Fact]
+		public void Deserialize_ASendingDeliveryWithAStaleRetryTime_ComesBackPendingWithNoRetryTime()
+		{
+			DeliveryQueue queue = new DeliveryQueue(initialBackoff: TimeSpan.FromSeconds(5));
+			queue.Enqueue("t1", "{}");
+			queue.MarkSending("t1");
+			queue.RecordResult("t1", DeliveryOutcome.Retryable, Now, errorMessage: "timed out");
+			queue.MarkSending("t1");
+			string json = queue.Serialize();
+			Assert.Equal(DeliveryState.Sending, queue.Find("t1").State);
+
+			QueuedDelivery d = DeliveryQueue.Deserialize(json).Find("t1");
+
+			Assert.Equal(DeliveryState.Pending, d.State);
+			Assert.Null(d.NextAttemptAt);
+			Assert.Equal(1, d.Attempts);
+		}
+
+		[Fact]
 		public void Deserialize_UnrecognizedState_ThrowsFormatException()
 		{
 			string json = "{\"configuration_error_halted\":false,\"deliveries\":[{\"trade_id\":\"t1\",\"payload_json\":\"{}\"," +

@@ -44,7 +44,8 @@ namespace ChartJot.Core
 		public DateTimeOffset? NextAttemptAt { get; internal set; }
 		public DateTimeOffset? SentAt { get; internal set; }
 
-		/// <summary>Set for a 5xx or a 422; null for a timeout or connection error.</summary>
+		/// <summary>The HTTP status of the last response, whatever it was (2xx included); null for a timeout,
+		/// connection error or cancellation, when no response arrived.</summary>
 		public int? LastStatusCode { get; internal set; }
 
 		public string LastServerBody { get; internal set; }
@@ -283,7 +284,7 @@ namespace ChartJot.Core
 				{
 					TradeId = item["trade_id"].AsString(),
 					PayloadJson = item["payload_json"].AsString(),
-					State = Resumable(ParseState(item["state"].AsString())),
+					State = ParseState(item["state"].AsString()),
 					Attempts = item["attempts"].AsInt32(),
 					NextAttemptAt = ParseTimestamp(item["next_attempt_at"]),
 					SentAt = ParseTimestamp(item["sent_at"]),
@@ -292,6 +293,7 @@ namespace ChartJot.Core
 					LastErrorMessage = item["last_error_message"].AsString(),
 					IsConfigurationError = item["is_configuration_error"].AsBool()
 				};
+				Resume(d);
 				queue.byTradeId[d.TradeId] = d;
 				queue.order.Add(d);
 			}
@@ -310,9 +312,13 @@ namespace ChartJot.Core
 			return value.IsNull ? (DateTimeOffset?)null : DateTimeOffset.Parse(value.AsString(), CultureInfo.InvariantCulture, DateTimeStyles.None);
 		}
 
-		private static DeliveryState Resumable(DeliveryState state)
+		// A delivery saved mid-request goes back to Pending with no scheduled retry, like a fresh one.
+		private static void Resume(QueuedDelivery d)
 		{
-			return state == DeliveryState.Sending ? DeliveryState.Pending : state;
+			if (d.State != DeliveryState.Sending)
+				return;
+			d.State = DeliveryState.Pending;
+			d.NextAttemptAt = null;
 		}
 
 		private static DeliveryState ParseState(string value)
