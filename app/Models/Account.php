@@ -33,11 +33,6 @@ class Account extends BaseModel
         return $this->hasMany(Trade::class);
     }
 
-    public function copies(): HasMany
-    {
-        return $this->hasMany(TradeCopy::class);
-    }
-
     public function effectiveTimezone(): string
     {
         return $this->timezone ?? $this->journal->timezone ?? 'UTC';
