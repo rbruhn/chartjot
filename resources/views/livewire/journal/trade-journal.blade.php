@@ -2,10 +2,15 @@
 
 use App\Enums\Direction;
 use App\Enums\ExitReason;
+use App\Enums\InvitationStatus;
 use App\Enums\NotePhase;
 use App\Enums\ScreenshotSource;
+use App\Mail\TradeInvitationMail;
+use App\Models\Friendship;
 use App\Models\Journal;
 use App\Models\Trade;
+use App\Models\TradeInvitation;
+use App\Models\User;
 use App\Models\TradeNote;
 use App\Models\TradeScreenshot;
 use Illuminate\Support\Carbon;
@@ -15,6 +20,7 @@ use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
 use Livewire\Volt\Component;
 use Livewire\WithFileUploads;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 
 new class extends Component {
@@ -53,6 +59,8 @@ new class extends Component {
     public mixed $screenshotUpload = null;
 
     public bool  $editingTrade    = false;
+
+    public bool  $showInvite      = false;
     public array $tradeEditForm   = [];
 
     public function mount(Journal $journal): void
@@ -150,6 +158,7 @@ new class extends Component {
         $this->confirmDeleteNoteId = null;
         $this->editingTrade        = false;
         $this->tradeEditForm       = [];
+        $this->showInvite          = false;
         unset($this->selectedTrade);
     }
 
@@ -264,6 +273,61 @@ new class extends Component {
         Storage::disk($shot->disk)->delete($shot->path);
         $shot->delete();
         unset($this->selectedTrade);
+    }
+
+    // ── Invite a friend to comment (issue #18) ─────────────────────────────
+    // Everything here goes through selectedTrade, which only resolves trades
+    // in this journal, and is re-authorized against TradePolicy::invite.
+
+    /** Accepted friends, each with their invitation (if any) to the selected trade. */
+    #[Computed]
+    public function inviteCandidates(): Collection
+    {
+        $trade = $this->selectedTrade;
+        if (! $trade) {
+            return collect();
+        }
+
+        $me = auth()->user();
+        $invitations = TradeInvitation::where('trade_id', $trade->id)->get()->keyBy('invited_user_id');
+
+        return Friendship::with(['requester', 'recipient'])
+            ->involving($me)
+            ->accepted()
+            ->get()
+            ->map(fn (Friendship $f) => $f->otherUser($me))
+            ->sortBy(fn ($u) => strtolower($u->name))
+            ->map(fn ($u) => ['user' => $u, 'invitation' => $invitations->get($u->id)])
+            ->values();
+    }
+
+    public function inviteFriend(int $userId): void
+    {
+        $trade = $this->selectedTrade;
+        if (! $trade) return;
+        $this->authorize('invite', $trade);
+
+        $me     = auth()->user();
+        $friend = User::find($userId);
+        if (! $friend || ! $friend->isActive() || ! $me->isFriendsWith($friend)) return;
+
+        $invitation = TradeInvitation::firstOrNew(['trade_id' => $trade->id, 'invited_user_id' => $friend->id]);
+        if ($invitation->exists && $invitation->isActive()) return;
+
+        $invitation->fill(['invited_by_user_id' => $me->id, 'status' => InvitationStatus::Pending])->save();
+
+        Mail::to($friend->email)->send(new TradeInvitationMail($invitation->load(['trade', 'invitedUser', 'invitedBy'])));
+        unset($this->inviteCandidates, $this->trades);
+    }
+
+    public function revokeInvitation(int $invitationId): void
+    {
+        $trade = $this->selectedTrade ?? abort(404);
+        $this->authorize('invite', $trade);
+
+        $invitation = TradeInvitation::where('trade_id', $trade->id)->find($invitationId) ?? abort(404);
+        $invitation->update(['status' => InvitationStatus::Revoked]);
+        unset($this->inviteCandidates, $this->trades);
     }
 
     public function deleteTrade(string $uuid): void
@@ -589,6 +653,11 @@ new class extends Component {
                                         {{ $this->ptsDisplay($t) }}
                                     </div>
                                 </div>
+                                <button wire:click="$toggle('showInvite')"
+                                    title="Invite a friend to comment" aria-label="Invite a friend to comment"
+                                    class="text-xs px-3 py-1.5 rounded border transition-colors {{ $showInvite ? 'border-indigo-400 dark:border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-500' }}">
+                                    <x-heroicon-o-user-plus class="h-4 w-4" />
+                                </button>
                                 <button wire:click="startEditTrade"
                                     title="Edit" aria-label="Edit"
                                     class="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
@@ -625,6 +694,42 @@ new class extends Component {
                             &middot; from NinjaTrader 8
                         @endif
                     </p>
+
+                    @if($showInvite && !$editingTrade)
+                    {{-- Invite a friend to comment --}}
+                    <div class="mb-6 rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3">
+                        <div class="flex items-center justify-between gap-3 mb-2">
+                            <h3 class="text-xs font-semibold text-gray-600 dark:text-gray-500 uppercase tracking-wider">Invite a friend to comment</h3>
+                        </div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                            They'll see this trade's screenshot, prices, P&amp;L and notes on a separate page — never your account or other trades.
+                        </p>
+                        @forelse($this->inviteCandidates as $c)
+                            @php $inv = $c['invitation']; @endphp
+                            <div class="flex items-center justify-between gap-3 py-1.5 border-t border-gray-100 dark:border-gray-800 first:border-t-0" wire:key="inv-{{ $c['user']->id }}">
+                                <span class="text-sm text-gray-800 dark:text-gray-200">{{ $c['user']->name }}</span>
+                                <span class="flex items-center gap-2">
+                                    @if($inv?->isActive())
+                                        <span class="text-xs {{ $inv->isAccepted() ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400' }}">{{ $inv->status->label() }}</span>
+                                        <button wire:click="revokeInvitation({{ $inv->id }})"
+                                            wire:confirm="Revoke {{ $c['user']->name }}'s access to this trade?"
+                                            class="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors">Revoke</button>
+                                    @else
+                                        @if($inv)
+                                            <span class="text-xs text-gray-500 dark:text-gray-400">{{ $inv->status->label() }}</span>
+                                        @endif
+                                        <button wire:click="inviteFriend({{ $c['user']->id }})"
+                                            class="text-xs px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white transition-colors">{{ $inv ? 'Invite again' : 'Invite' }}</button>
+                                    @endif
+                                </span>
+                            </div>
+                        @empty
+                            <p class="text-sm text-gray-500 dark:text-gray-400">
+                                No friends yet — add some on the <a href="{{ route('friends.index') }}" wire:navigate class="underline">Friends</a> page.
+                            </p>
+                        @endforelse
+                    </div>
+                    @endif
 
                     @if(!$editingTrade)
                     {{-- Timeline (view mode) --}}
