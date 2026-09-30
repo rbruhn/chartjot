@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use App\Casts\UtcDatetime;
-use App\Enums\CopiesSource;
 use App\Enums\Direction;
 use App\Enums\ExitReason;
 use App\Enums\TradeType;
@@ -26,7 +25,7 @@ use Illuminate\Support\Str;
     'points', 'ticks', 'gross_pnl', 'commission', 'fees', 'net_pnl',
     'excursion_mae_points', 'excursion_mfe_points',
     'excursion_max_adverse_price', 'excursion_max_favorable_price',
-    'excursion_complete', 'copies_source', 'raw_payload',
+    'excursion_complete', 'raw_payload',
 ])]
 class Trade extends BaseModel
 {
@@ -39,7 +38,6 @@ class Trade extends BaseModel
             'trade_type'         => TradeType::class,
             'direction'          => Direction::class,
             'exit_reason'        => ExitReason::class,
-            'copies_source'      => CopiesSource::class,
             'entry_at'           => UtcDatetime::class,
             'exit_at'            => UtcDatetime::class,
             'excursion_complete' => 'boolean',
@@ -91,11 +89,6 @@ class Trade extends BaseModel
     public function legs(): HasMany
     {
         return $this->hasMany(TradeLeg::class)->orderBy('sequence');
-    }
-
-    public function copies(): HasMany
-    {
-        return $this->hasMany(TradeCopy::class);
     }
 
     public function screenshot(): HasOne

@@ -33,9 +33,9 @@ class Account extends BaseModel
         return $this->hasMany(Trade::class);
     }
 
-    public function copies(): HasMany
+    public function transactions(): HasMany
     {
-        return $this->hasMany(TradeCopy::class);
+        return $this->hasMany(AccountTransaction::class);
     }
 
     public function effectiveTimezone(): string

@@ -2,7 +2,6 @@
 
 namespace Database\Factories;
 
-use App\Enums\CopiesSource;
 use App\Enums\Direction;
 use App\Enums\ExitReason;
 use App\Enums\TradeType;
@@ -71,7 +70,6 @@ class TradeFactory extends Factory
             'excursion_max_adverse_price'   => null,
             'excursion_max_favorable_price' => null,
             'excursion_complete'            => true,
-            'copies_source'                 => null,
             'raw_payload'                   => [],
         ];
     }

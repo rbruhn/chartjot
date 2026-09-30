@@ -5,7 +5,6 @@ use App\Models\Journal;
 use App\Models\Trade;
 use App\Models\TradeExecution;
 use App\Models\TradeLeg;
-use App\Models\TradeCopy;
 use App\Models\TradeNote;
 use App\Models\TradeScreenshot;
 use App\Models\User;
@@ -118,8 +117,6 @@ function minimalPayload(array $overrides = []): array
         ],
         'notes'          => [],
         'screenshot'     => null,
-        'copies_source'  => null,
-        'copies'         => [],
     ], $overrides);
 }
 
@@ -217,42 +214,6 @@ test('notes from the addOn are stored', function () {
         ->and(TradeNote::first()->body)->toBe('H2 at the EMA.');
 });
 
-test('copies are stored with their executions', function () {
-    [$journal, $token] = journalWithToken(['Sim101', 'PA-APEX-24570-02']);
-
-    $payload = minimalPayload([
-        'copies_source' => 'copier_live',
-        'copies' => [[
-            'account_name' => 'PA-APEX-24570-02',
-            'status'       => 'matched',
-            'instrument'   => [
-                'symbol'      => 'MES',
-                'contract'    => 'MES 12-26',
-                'tick_size'   => '0.25',
-                'point_value' => '5',
-            ],
-            'expected'    => ['contract_size' => 'micro', 'multiplier' => '1', 'faded' => false, 'blown' => false, 'quantity' => 1],
-            'warnings'    => [],
-            'direction'   => 'long',
-            'quantity'    => 1,
-            'entry_average_price' => '5000.25',
-            'exit_average_price'  => '5002.00',
-            'entered_at'  => '2026-09-24T09:30:01-04:00',
-            'exited_at'   => '2026-09-24T09:35:00-04:00',
-            'performance' => ['points' => '1.75', 'ticks' => 7, 'gross_pnl' => '8.75', 'commission' => '0.78', 'fees' => null, 'net_pnl' => '7.97'],
-            'executions'  => [
-                ['execution_id' => 'copy-exec-1', 'order_id' => 'cord-1', 'occurred_at' => '2026-09-24T09:30:01-04:00', 'action' => 'buy', 'role' => 'entry', 'quantity' => 1, 'allocated_quantity' => 1, 'price' => '5000.25', 'commission' => '0.39', 'fee' => null, 'order_name' => 'Entry', 'position_after' => 1],
-                ['execution_id' => 'copy-exec-2', 'order_id' => 'cord-2', 'occurred_at' => '2026-09-24T09:35:00-04:00', 'action' => 'sell', 'role' => 'exit', 'quantity' => 1, 'allocated_quantity' => 1, 'price' => '5002.00', 'commission' => '0.39', 'fee' => null, 'order_name' => 'Target1', 'position_after' => 0],
-            ],
-        ]],
-    ]);
-
-    postTrade($payload, $token)->assertStatus(201);
-
-    expect(TradeCopy::count())->toBe(1)
-        ->and(\App\Models\TradeCopyExecution::count())->toBe(2);
-});
-
 test('screenshot file is stored and recorded', function () {
     Storage::fake('local');
     [$journal, $token] = journalWithToken();
@@ -340,7 +301,7 @@ test('exit.occurred_at must be after entry.occurred_at', function () {
         ->assertJsonValidationErrors(['exit.occurred_at']);
 });
 
-test('an unknown master account is created from the payload', function () {
+test('an unknown account is created from the payload', function () {
     [$journal, $token] = journalWithToken([]);
 
     $payload = minimalPayload(['account_name' => 'APEX-24570-135', 'connection' => 'Rithmic']);
@@ -381,27 +342,6 @@ test('an existing account is reused and left as the trader set it', function () 
         ->and(Trade::first()->account_id)->toBe($existing->id);
 });
 
-test('unknown copy accounts are created too, so one new follower never blocks a trade', function () {
-    [$journal, $token] = journalWithToken(['Sim101']);
-
-    $payload = minimalPayload([
-        'copies_source' => 'copier_live',
-        'copies' => [
-            [
-                'account_name' => 'PA-APEX-24570-11', 'status' => 'missed', 'instrument' => null,
-                'expected' => ['contract_size' => 'micro', 'multiplier' => '1', 'faded' => false, 'blown' => false, 'quantity' => 1],
-                'warnings' => ['expected 1 MES, no entry within 5 seconds'], 'direction' => null, 'quantity' => 0,
-                'executions' => [],
-            ],
-        ],
-    ]);
-
-    postTrade($payload, $token)->assertStatus(201);
-
-    expect(Account::where('journal_id', $journal->id)->where('name', 'PA-APEX-24570-11')->exists())->toBeTrue()
-        ->and(TradeCopy::count())->toBe(1);
-});
-
 test('the same account name in another journal is not shared', function () {
     [$journalA, $tokenA] = journalWithToken([]);
     [$journalB, $tokenB] = journalWithToken([]);
@@ -411,21 +351,6 @@ test('the same account name in another journal is not shared', function () {
 
     expect(Account::where('name', 'APEX-24570-135')->pluck('journal_id')->sort()->values()->all())
         ->toBe([$journalA->id, $journalB->id]);
-});
-
-test('a missed copy without warnings or quantity is stored with defaults', function () {
-    [$journal, $token] = journalWithToken(['Sim101']);
-
-    $payload = minimalPayload([
-        'copies_source' => 'copier_live',
-        'copies' => [['account_name' => 'PA-9', 'status' => 'missed']],
-    ]);
-
-    postTrade($payload, $token)->assertStatus(201);
-
-    $copy = TradeCopy::first();
-    expect($copy->warnings)->toBe([])
-        ->and((int) $copy->quantity)->toBe(0);
 });
 
 test('exit.occurred_at may equal entry.occurred_at because NT8 timestamps have one-second resolution', function () {
@@ -475,34 +400,30 @@ test('executions with a blank order name are stored', function () {
     expect(TradeExecution::pluck('order_name')->all())->toBe(['', '']);
 });
 
-test('copy executions with a blank order name are stored', function () {
-    [$journal, $token] = journalWithToken(['Sim101', 'PA-APEX-24570-02']);
+test('copier data from an older AddOn is accepted but ignored', function () {
+    [$journal, $token] = journalWithToken(['Sim101']);
 
+    // Until the AddOn reports each follower's trades on their own (#28), it still nests follower copies
+    // into the master's payload. The server no longer reconciles copies (#27), but a trade must not be
+    // rejected for carrying them — and they must not leak into the stored trade or create follower
+    // accounts from a master's payload.
     $payload = minimalPayload([
-        'copies_source' => 'copier_live',
-        'copies' => [[
-            'account_name' => 'PA-APEX-24570-02',
-            'status'       => 'matched',
-            'instrument'   => ['symbol' => 'MES', 'contract' => 'MES 12-26', 'tick_size' => '0.25', 'point_value' => '5'],
-            'expected'     => ['contract_size' => 'micro', 'multiplier' => '1', 'faded' => false, 'blown' => false, 'quantity' => 1],
-            'warnings'     => [],
-            'direction'    => 'long',
-            'quantity'     => 1,
-            'entry_average_price' => '5000.25',
-            'exit_average_price'  => '5002.00',
-            'entered_at'   => '2026-09-24T09:30:01-04:00',
-            'exited_at'    => '2026-09-24T09:35:00-04:00',
-            'performance'  => ['points' => '1.75', 'ticks' => 7, 'gross_pnl' => '8.75', 'commission' => '0.78', 'fees' => null, 'net_pnl' => '7.97'],
-            'executions'   => [
-                ['execution_id' => 'copy-exec-1', 'order_id' => 'cord-1', 'occurred_at' => '2026-09-24T09:30:01-04:00', 'action' => 'buy', 'role' => 'entry', 'quantity' => 1, 'allocated_quantity' => 1, 'price' => '5000.25', 'commission' => '0.39', 'fee' => null, 'order_name' => null, 'position_after' => 1],
-                ['execution_id' => 'copy-exec-2', 'order_id' => 'cord-2', 'occurred_at' => '2026-09-24T09:35:00-04:00', 'action' => 'sell', 'role' => 'exit', 'quantity' => 1, 'allocated_quantity' => 1, 'price' => '5002.00', 'commission' => '0.39', 'fee' => null, 'position_after' => 0],
-            ],
+        'copies_source'  => 'copier_live',
+        'copies_summary' => ['matched' => 0, 'missed' => 1],
+        'copies'         => [[
+            'account_name' => 'PA-APEX-24570-11',
+            'status'       => 'missed',
+            'warnings'     => ['expected 1 MES, no entry within 5 seconds'],
+            'quantity'     => 0,
+            'executions'   => [],
         ]],
     ]);
 
     postTrade($payload, $token)->assertStatus(201);
 
-    expect(\App\Models\TradeCopyExecution::pluck('order_name')->all())->toBe(['', '']);
+    $trade = Trade::sole();
+    expect(Account::where('journal_id', $journal->id)->pluck('name')->all())->toBe(['Sim101'])
+        ->and($trade->raw_payload)->not->toHaveKeys(['copies', 'copies_source', 'copies_summary']);
 });
 
 test('screenshot_file must be an image type', function () {
