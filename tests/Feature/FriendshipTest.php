@@ -74,7 +74,7 @@ test('search does not surface pending or suspended users', function () {
 test('sending a request creates a pending friendship with the sender as requester', function () {
     [$me, $them] = User::factory()->count(2)->create();
 
-    friendsPage($me)->call('sendRequest', $them->id);
+    friendsPage($me)->set('searchEmail', $them->email)->call('sendRequest');
 
     $f = Friendship::sole();
     expect($f->requester_id)->toBe($me->id)
@@ -86,7 +86,7 @@ test('sending a request to someone who already asked you accepts theirs', functi
     [$me, $them] = User::factory()->count(2)->create();
     Friendship::factory()->create(['requester_id' => $them->id, 'recipient_id' => $me->id]);
 
-    friendsPage($me)->call('sendRequest', $them->id);
+    friendsPage($me)->set('searchEmail', $them->email)->call('sendRequest');
 
     expect(Friendship::count())->toBe(1)
         ->and(Friendship::sole()->status)->toBe(FriendshipStatus::Accepted);
@@ -96,7 +96,7 @@ test('a declined request can be sent again', function () {
     [$me, $them] = User::factory()->count(2)->create();
     Friendship::factory()->create(['requester_id' => $them->id, 'recipient_id' => $me->id, 'status' => FriendshipStatus::Declined]);
 
-    friendsPage($me)->call('sendRequest', $them->id);
+    friendsPage($me)->set('searchEmail', $them->email)->call('sendRequest');
 
     $f = Friendship::sole();
     expect($f->status)->toBe(FriendshipStatus::Pending)
@@ -107,9 +107,21 @@ test('cannot send a request to an inactive user', function () {
     $me   = User::factory()->create();
     $them = User::factory()->create(['status' => UserStatus::Suspended]);
 
-    friendsPage($me)->call('sendRequest', $them->id);
+    friendsPage($me)->set('searchEmail', $them->email)->call('sendRequest');
 
     expect(Friendship::count())->toBe(0);
+});
+
+test('a request can only go to the exact-email search result, not an arbitrary user id', function () {
+    // Found in the security review: taking a user id from the client let a
+    // console loop over ids reveal every active user's name.
+    [$me, $target, $other] = User::factory()->count(3)->create();
+
+    friendsPage($me)->call('sendRequest', $target->id);
+    friendsPage($me)->set('searchEmail', $other->email)->call('sendRequest', $target->id);
+
+    expect(Friendship::count())->toBe(1)
+        ->and(Friendship::sole()->recipient_id)->toBe($other->id);
 });
 
 // ---------------------------------------------------------------------------
