@@ -18,7 +18,7 @@
         <blockquote style="margin: 0 0 24px; padding: 12px 16px; background: #f9fafb; border-left: 3px solid #4f46e5; color: #374151; white-space: pre-line;">{{ \Illuminate\Support\Str::limit($comment->body, 1000) }}</blockquote>
 
         <div style="margin-top: 8px;">
-            <a href="{{ route('trades.shared', $trade) }}#comment-{{ $comment->id }}"
+            <a href="{{ $url }}"
                style="display: inline-block; background: #4f46e5; color: #fff; text-decoration: none; padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: 500;">
                 View the Conversation
             </a>

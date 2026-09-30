@@ -11,6 +11,7 @@ use App\Models\Journal;
 use App\Models\Trade;
 use App\Models\TradeInvitation;
 use App\Models\User;
+use App\Services\TradeCommentPoster;
 use App\Models\TradeNote;
 use App\Models\TradeScreenshot;
 use Illuminate\Support\Carbon;
@@ -61,6 +62,11 @@ new class extends Component {
     public bool  $editingTrade    = false;
 
     public bool  $showInvite      = false;
+
+    // Owner's side of the trade's comment thread (issue #18).
+    public string $commentBody = '';
+    public ?int   $replyToId   = null;
+    public string $replyBody   = '';
     public array $tradeEditForm   = [];
 
     public function mount(Journal $journal): void
@@ -163,7 +169,10 @@ new class extends Component {
         $this->editingTrade        = false;
         $this->tradeEditForm       = [];
         $this->showInvite          = false;
-        unset($this->selectedTrade);
+        $this->commentBody         = '';
+        $this->replyToId           = null;
+        $this->replyBody           = '';
+        unset($this->selectedTrade, $this->threadComments, $this->hasConversation);
     }
 
     public function addNote(): void
@@ -321,7 +330,7 @@ new class extends Component {
         $invitation->fill(['invited_by_user_id' => $me->id, 'status' => InvitationStatus::Pending])->save();
 
         Mail::to($friend->email)->send(new TradeInvitationMail($invitation->load(['trade', 'invitedUser', 'invitedBy'])));
-        unset($this->inviteCandidates, $this->trades);
+        unset($this->inviteCandidates, $this->trades, $this->hasConversation);
     }
 
     public function revokeInvitation(int $invitationId): void
@@ -331,7 +340,67 @@ new class extends Component {
 
         $invitation = TradeInvitation::where('trade_id', $trade->id)->find($invitationId) ?? abort(404);
         $invitation->update(['status' => InvitationStatus::Revoked]);
-        unset($this->inviteCandidates, $this->trades);
+        unset($this->inviteCandidates, $this->trades, $this->hasConversation);
+    }
+
+    // ── Comment thread (owner) ──────────────────────────────────────────────
+    // Same thread friends see on the conversation page. Posting goes through
+    // TradeCommentPoster (authorization, nesting rule, rate limit, email).
+
+    /** Top-level comments on the selected trade, oldest first, with replies. */
+    #[Computed]
+    public function threadComments(): Collection
+    {
+        $trade = $this->selectedTrade;
+
+        return $trade
+            ? $trade->comments()->whereNull('parent_comment_id')->with(['author', 'replies.author'])->oldest()->get()
+            : collect();
+    }
+
+    /** Show the thread once there is one, or once someone has been invited to start it. */
+    #[Computed]
+    public function hasConversation(): bool
+    {
+        $trade = $this->selectedTrade;
+
+        return $trade && ($this->threadComments->isNotEmpty() || $trade->invitations()->active()->exists());
+    }
+
+    public function postComment(): void
+    {
+        $trade = $this->selectedTrade ?? abort(404);
+
+        app(TradeCommentPoster::class)->post($trade, auth()->user(), ['body' => $this->commentBody]);
+
+        $this->commentBody = '';
+        unset($this->threadComments, $this->hasConversation, $this->trades);
+    }
+
+    public function startReply(int $commentId): void
+    {
+        $this->replyToId = $commentId;
+        $this->replyBody = '';
+        $this->resetErrorBag();
+    }
+
+    public function cancelReply(): void
+    {
+        $this->replyToId = null;
+        $this->replyBody = '';
+    }
+
+    public function postReply(): void
+    {
+        $trade = $this->selectedTrade ?? abort(404);
+
+        app(TradeCommentPoster::class)->post($trade, auth()->user(), [
+            'body'              => $this->replyBody,
+            'parent_comment_id' => $this->replyToId,
+        ]);
+
+        $this->cancelReply();
+        unset($this->threadComments, $this->hasConversation, $this->trades);
     }
 
     public function deleteTrade(string $uuid): void
@@ -1123,6 +1192,67 @@ new class extends Component {
                             <p class="text-sm text-gray-600 dark:text-gray-500 italic">No notes yet.</p>
                         @endforelse
                     </div>
+
+                    {{-- Conversation with invited friends (the same thread as the shared page) --}}
+                    @if($this->hasConversation)
+                    <div class="mb-6" id="conversation">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Conversation</h3>
+                            <a href="{{ route('trades.shared', $t) }}" target="_blank" rel="noopener"
+                                class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Open conversation page ↗</a>
+                        </div>
+
+                        @error('parent_comment_id')
+                            <p class="text-xs text-red-600 dark:text-red-400 mb-2">{{ $message }}</p>
+                        @enderror
+
+                        <div class="space-y-4">
+                            @forelse($this->threadComments as $c)
+                                <div wire:key="tc-{{ $c->id }}" id="comment-{{ $c->id }}">
+                                    <div class="text-sm"><span class="font-semibold text-gray-900 dark:text-gray-100">{{ $c->author->name }}</span> <span class="text-xs text-gray-500 dark:text-gray-400">{{ $c->created_at->diffForHumans() }}</span></div>
+                                    <p class="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap mt-0.5">{{ $c->body }}</p>
+
+                                    @if($c->replies->isNotEmpty())
+                                        <div class="mt-3 ml-4 pl-4 border-l-2 border-gray-200 dark:border-gray-700 space-y-3">
+                                            @foreach($c->replies as $r)
+                                                <div wire:key="tc-{{ $r->id }}" id="comment-{{ $r->id }}">
+                                                    <div class="text-sm"><span class="font-semibold text-gray-900 dark:text-gray-100">{{ $r->author->name }}</span> <span class="text-xs text-gray-500 dark:text-gray-400">{{ $r->created_at->diffForHumans() }}</span></div>
+                                                    <p class="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap mt-0.5">{{ $r->body }}</p>
+                                                </div>
+                                            @endforeach
+                                        </div>
+                                    @endif
+
+                                    {{-- Replies go one level deep: only top-level comments get a reply box. --}}
+                                    @if($replyToId === $c->id)
+                                        <div class="mt-2 ml-4 space-y-2">
+                                            <textarea wire:model="replyBody" rows="2" maxlength="5000" placeholder="Reply to {{ $c->author->name }}…"
+                                                class="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"></textarea>
+                                            @error('body') <p class="text-xs text-red-600 dark:text-red-400">{{ $message }}</p> @enderror
+                                            <div class="flex gap-2">
+                                                <button wire:click="postReply" class="text-xs px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white transition-colors">Post reply</button>
+                                                <button wire:click="cancelReply" class="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors">Cancel</button>
+                                            </div>
+                                        </div>
+                                    @else
+                                        <button wire:click="startReply({{ $c->id }})" class="mt-1 ml-4 text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Reply</button>
+                                    @endif
+                                </div>
+                            @empty
+                                <p class="text-sm text-gray-600 dark:text-gray-500 italic">No comments yet — start the conversation.</p>
+                            @endforelse
+                        </div>
+
+                        <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 space-y-2">
+                            <textarea wire:model="commentBody" rows="2" maxlength="5000" placeholder="Add a comment for your invited friends…"
+                                class="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"></textarea>
+                            @if($replyToId === null)
+                                @error('body') <p class="text-xs text-red-600 dark:text-red-400">{{ $message }}</p> @enderror
+                            @endif
+                            <button wire:click="postComment" class="text-xs px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white transition-colors">Post comment</button>
+                        </div>
+                    </div>
+                    @endif
 
                 </div>
 

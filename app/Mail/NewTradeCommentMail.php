@@ -13,7 +13,11 @@ class NewTradeCommentMail extends Mailable
 {
     use Queueable, SerializesModels;
 
-    public function __construct(public readonly TradeComment $comment) {}
+    /** @param string $url  where this recipient reads the thread (journal for the owner, conversation page for invitees) */
+    public function __construct(
+        public readonly TradeComment $comment,
+        public readonly string $url,
+    ) {}
 
     public function envelope(): Envelope
     {

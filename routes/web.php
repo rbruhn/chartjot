@@ -53,9 +53,8 @@ Route::middleware(['auth', 'active'])->group(function () {
         ->name('trades.shared');
     Route::get('trades/{trade:uuid}/shared/screenshots/{screenshot}', [SharedTradeController::class, 'screenshot'])
         ->name('trades.shared.screenshot');
-    // Each comment emails every other participant, so cap the rate.
+    // Rate limited inside TradeCommentPoster, shared with the journal page.
     Route::post('trades/{trade:uuid}/shared/comments', [TradeCommentController::class, 'store'])
-        ->middleware('throttle:20,1')
         ->name('trades.shared.comments.store');
 });
 
