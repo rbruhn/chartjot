@@ -53,6 +53,8 @@ it('accepts the payload the AddOn produces', function (string $file) {
 
     expect($trade->journal_id)->toBe($journal->id)
         ->and($trade->account->name)->toBe($payload['account_name'])
+        // One payload, one account: nothing else in it creates accounts.
+        ->and(Account::where('journal_id', $journal->id)->pluck('name')->all())->toBe([$payload['account_name']])
         ->and($trade->trade_type->value)->toBe($payload['trade_type'])
         ->and((float) $trade->net_pnl)->toBe((float) $payload['performance']['net_pnl'])
         ->and((float) $trade->gross_pnl)->toBe((float) $payload['performance']['gross_pnl'])
@@ -62,18 +64,13 @@ it('accepts the payload the AddOn produces', function (string $file) {
         ->and(TradeLeg::where('trade_id', $trade->id)->count())->toBe(count($payload['legs']));
 })->with(addonFixtures());
 
-it('ignores the copier data the AddOn still sends', function (string $file) {
-    [$journal, $token] = addonJournalToken();
+it('carries no copier data now that every account reports its own trade', function (string $file) {
     $payload = json_decode(file_get_contents($file), true);
 
-    // The AddOn still nests follower copies into the master's payload until #28 reworks it; the server
-    // dropped copier reconciliation (#27), so only the master account and its own trade are recorded.
-    test()->postJson('/api/v1/trades', $payload, ['Authorization' => "Bearer {$token}"])->assertStatus(201);
-
-    $trade = Trade::where('source_trade_id', $payload['trade_id'])->firstOrFail();
-
-    expect(Account::where('journal_id', $journal->id)->pluck('name')->all())->toBe([$payload['account_name']])
-        ->and($trade->raw_payload)->not->toHaveKeys(['copies', 'copies_source', 'copies_summary']);
+    // Since #28 the AddOn reports each account's trade independently instead of nesting follower
+    // copies into a master's payload. Older AddOn installs may still send copier keys; the server
+    // accepting and ignoring those is covered in TradeIntakeTest.
+    expect($payload)->not->toHaveKeys(['copies', 'copies_source', 'copies_summary']);
 })->with(addonFixtures());
 
 it('treats a re-sent AddOn payload as the same trade', function (string $file) {
