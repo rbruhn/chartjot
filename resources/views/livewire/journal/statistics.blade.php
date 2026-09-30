@@ -122,9 +122,13 @@ new class extends Component {
     $tLabel = 'text-xs font-semibold text-gray-600 dark:text-gray-500 uppercase tracking-wider';
     $tValue = 'text-2xl font-bold mt-0.5';
     $card   = 'border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 rounded-lg';
-    $cardH  = 'px-4 py-2.5 text-xs font-semibold text-gray-600 dark:text-gray-500 uppercase tracking-wider border-b border-gray-200 dark:border-gray-700';
+    $cardH  = 'flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold text-gray-600 dark:text-gray-500 uppercase tracking-wider border-b border-gray-200 dark:border-gray-700';
     $dt     = 'text-gray-600 dark:text-gray-400';
     $dd     = 'text-right font-medium text-gray-900 dark:text-gray-100 tabular-nums';
+
+    // Info-tip wording is from issue #49; see StatsInfoTipTest before rewording.
+    $breakdownTip = "Uses net P&L (after commission and fees) — unlike the Runners panel's gross figures — "
+        .'and the same win/loss rule as the rest of the app: breakeven counts as a loss.';
 @endphp
 
 <div class="text-gray-900 dark:text-gray-100 pb-8">
@@ -186,7 +190,14 @@ new class extends Component {
                 <div class="text-xs text-gray-500 dark:text-gray-400">{{ $s['profit_factor'] === null ? 'no losing dollars' : 'gross win ÷ gross loss' }}</div>
             </div>
             <div class="{{ $tile }}">
-                <div class="{{ $tLabel }}">Max Drawdown</div>
+                <div class="{{ $tLabel }} flex items-center gap-1.5">
+                    Max Drawdown
+                    <x-stats.info-tip label="About Max Drawdown">
+                        <span class="block">Largest peak-to-trough drop in cumulative net trade P&amp;L, trade by trade, starting from $0.</span>
+                        <span class="block">It uses trade P&amp;L rather than the account balance on purpose: on the balance-based Equity Curve,
+                            a withdrawal or payout would register as a fake drawdown.</span>
+                    </x-stats.info-tip>
+                </div>
                 <div class="{{ $tValue }} {{ $s['max_drawdown'] > 0 ? 'text-red-600 dark:text-red-400' : '' }}">{{ Format::money($s['max_drawdown'] > 0 ? -$s['max_drawdown'] : 0.0) }}</div>
                 <div class="text-xs text-gray-500 dark:text-gray-400">peak to trough, trade P&amp;L</div>
             </div>
@@ -224,7 +235,13 @@ new class extends Component {
     {{-- ── Curves: two charts, never one dual-axis chart ── --}}
     <div class="mx-6 mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <section class="{{ $card }}">
-            <h3 class="{{ $cardH }}">P&amp;L Curve <span class="normal-case font-normal tracking-normal">— cumulative net P&amp;L by day</span></h3>
+            <h3 class="{{ $cardH }}">
+                <span>P&amp;L Curve <span class="normal-case font-normal tracking-normal">— cumulative net P&amp;L by day</span></span>
+                <x-stats.info-tip label="About P&L Curve">
+                    <span class="block">Cumulative net P&amp;L by day, using each trade's local entry time.</span>
+                    <span class="block">Reflects whichever accounts/date range are currently selected.</span>
+                </x-stats.info-tip>
+            </h3>
             <div class="p-4">
                 <x-stats.line-chart label="Cumulative net P&L"
                     :points="$stats->pnlCurve()->map(fn ($p) => ['date' => $p['date'], 'value' => $p['cumulative']])" />
@@ -233,7 +250,14 @@ new class extends Component {
 
         @php $equity = $this->equity; @endphp
         <section class="{{ $card }}">
-            <h3 class="{{ $cardH }}">Equity Curve <span class="normal-case font-normal tracking-normal">— balance incl. deposits &amp; withdrawals</span></h3>
+            <h3 class="{{ $cardH }}">
+                <span>Equity Curve <span class="normal-case font-normal tracking-normal">— balance incl. deposits &amp; withdrawals</span></span>
+                <x-stats.info-tip label="About Equity Curve">
+                    <span class="block">Account balance including deposits and withdrawals — not just trade P&amp;L.</span>
+                    <span class="block">If a start date is set, it opens at the real balance as of that date, not $0.</span>
+                    <span class="block">Accounts with no starting balance set are counted as $0 (already flagged separately below the chart).</span>
+                </x-stats.info-tip>
+            </h3>
             <div class="p-4">
                 @if ($equity['points']->isEmpty())
                     <p class="text-sm text-gray-500 dark:text-gray-400">No balance data for the selected accounts.</p>
@@ -253,7 +277,13 @@ new class extends Component {
 
     {{-- ── Calendar ── --}}
     <section class="mx-6 mt-4 {{ $card }}">
-        <h3 class="{{ $cardH }}">Daily P&amp;L</h3>
+        <h3 class="{{ $cardH }}">
+            Daily P&amp;L
+            <x-stats.info-tip label="About Daily P&L">
+                <span class="block">One cell per trading day, shaded relative to the largest single day's P&amp;L in the current selection, not a fixed scale.</span>
+                <span class="block">Hover/click a day for its exact P&amp;L and trade count.</span>
+            </x-stats.info-tip>
+        </h3>
         <div class="p-4">
             <x-stats.calendar-heatmap :daily="$stats->daily()" />
         </div>
@@ -261,12 +291,12 @@ new class extends Component {
 
     {{-- ── Breakdowns ── --}}
     <div class="mx-6 mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <x-stats.breakdown-table title="By Trade Type" :rows="$stats->byTradeType()" />
-        <x-stats.breakdown-table title="Long vs. Short" :rows="$stats->byDirection()" />
-        <x-stats.breakdown-table title="By Day of Week" :rows="$stats->byDayOfWeek()" />
-        <x-stats.breakdown-table title="By Time of Day (entry)" :rows="$stats->byHour()" />
-        <x-stats.breakdown-table title="By Instrument" :rows="$stats->byInstrument()" />
-        <x-stats.breakdown-table title="By Exit Reason" :rows="$stats->byExitReason()" />
+        <x-stats.breakdown-table title="By Trade Type" :tip="$breakdownTip" :rows="$stats->byTradeType()" />
+        <x-stats.breakdown-table title="Long vs. Short" :tip="$breakdownTip" :rows="$stats->byDirection()" />
+        <x-stats.breakdown-table title="By Day of Week" :tip="$breakdownTip" :rows="$stats->byDayOfWeek()" />
+        <x-stats.breakdown-table title="By Time of Day (entry)" :tip="$breakdownTip" :rows="$stats->byHour()" />
+        <x-stats.breakdown-table title="By Instrument" :tip="$breakdownTip" :rows="$stats->byInstrument()" />
+        <x-stats.breakdown-table title="By Exit Reason" :tip="$breakdownTip" :rows="$stats->byExitReason()" />
     </div>
 
     {{-- ── Trade quality ── --}}
@@ -278,7 +308,13 @@ new class extends Component {
     @endphp
     <div class="mx-6 mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <section class="{{ $card }}">
-            <h3 class="{{ $cardH }}">Holding Time</h3>
+            <h3 class="{{ $cardH }}">
+                Holding Time
+                <x-stats.info-tip label="About Holding Time">
+                    <span class="block">Average time between entry and exit.</span>
+                    <span class="block">Winners and losers are shown separately on purpose — a big gap between them is usually a sign of cutting winners short or holding losers too long.</span>
+                </x-stats.info-tip>
+            </h3>
             <dl class="grid grid-cols-2 gap-y-1.5 p-4 text-sm">
                 <dt class="{{ $dt }}">All trades</dt><dd class="{{ $dd }}">{{ Format::duration($d['all']) }}</dd>
                 <dt class="{{ $dt }}">Winners</dt><dd class="{{ $dd }}">{{ Format::duration($d['winners']) }}</dd>
@@ -287,7 +323,13 @@ new class extends Component {
         </section>
 
         <section class="{{ $card }}">
-            <h3 class="{{ $cardH }}">Costs</h3>
+            <h3 class="{{ $cardH }}">
+                Costs
+                <x-stats.info-tip label="About Costs">
+                    <span class="block">Total commission and fees, and what share of gross P&amp;L they represent.</span>
+                    <span class="block">This is the only panel that shows a real, non-allocated commission figure — trade legs (see Runners below) don't carry their own commission value at all.</span>
+                </x-stats.info-tip>
+            </h3>
             <dl class="grid grid-cols-2 gap-y-1.5 p-4 text-sm">
                 <dt class="{{ $dt }}">Commission</dt><dd class="{{ $dd }}">{{ Format::money($c['commission']) }}</dd>
                 <dt class="{{ $dt }}">Fees</dt><dd class="{{ $dd }}">{{ Format::money($c['fees']) }}</dd>
@@ -301,7 +343,15 @@ new class extends Component {
         </section>
 
         <section class="{{ $card }}">
-            <h3 class="{{ $cardH }}">MAE / MFE</h3>
+            <h3 class="{{ $cardH }}">
+                MAE / MFE
+                <x-stats.info-tip label="About MAE / MFE">
+                    <span class="block">Averages are from trades with a <em>complete</em> excursion only.</span>
+                    <span class="block">A trade's excursion is marked incomplete when the AddOn's price feed dropped mid-trade — those MAE/MFE values are lower bounds, not real numbers, so they're excluded rather than silently understating the average.</span>
+                    <span class="block">CSV-imported trades don't have any MAE/MFE at all unless you've also imported a matching NinjaTrader Trades export (Journal Settings).</span>
+                    <span class="block">Capture ratio = net P&amp;L ÷ MFE in dollars — how much of the best price move actually available was banked.</span>
+                </x-stats.info-tip>
+            </h3>
             @if ($e['trades'] === 0)
                 <p class="p-4 text-sm text-gray-500 dark:text-gray-400">No trades with a complete excursion in this selection.</p>
             @else
@@ -324,7 +374,14 @@ new class extends Component {
         </section>
 
         <section class="{{ $card }}">
-            <h3 class="{{ $cardH }}">Runners</h3>
+            <h3 class="{{ $cardH }}">
+                Runners
+                <x-stats.info-tip label="About Runners">
+                    <span class="block">Runner legs = every exit after a trade's first exit (scaling out and letting the remainder run). Base exits = everything else, including every exit on a single-exit trade.</span>
+                    <span class="block">Runner share = runner gross P&amp;L ÷ total gross P&amp;L.</span>
+                    <span class="block"><strong>Shown in gross dollars, not net</strong> — the <code class="font-mono">trade_legs</code> table has no commission column at all (only the whole trade does, shown in Costs above), so splitting a trade's commission across its legs would be an invented number, not a real one.</span>
+                </x-stats.info-tip>
+            </h3>
             @if ($r['trades'] === 0)
                 <p class="p-4 text-sm text-gray-500 dark:text-gray-400">No trades with exit-leg data in this selection.</p>
             @else
