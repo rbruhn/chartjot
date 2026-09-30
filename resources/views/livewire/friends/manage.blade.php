@@ -94,8 +94,10 @@ new class extends Component {
 
     public function acceptInvitation(int $invitationId): void
     {
-        $this->pendingInvitationForMe($invitationId)->update(['status' => InvitationStatus::Accepted]);
-        $this->resetComputed();
+        $invitation = $this->pendingInvitationForMe($invitationId);
+        $invitation->update(['status' => InvitationStatus::Accepted]);
+
+        $this->redirectRoute('trades.shared', $invitation->trade);
     }
 
     public function declineInvitation(int $invitationId): void
@@ -292,6 +294,8 @@ new class extends Component {
                             @if ($inv->isPending())
                                 <button wire:click="acceptInvitation({{ $inv->id }})" class="{{ $btnPri }}">Accept</button>
                                 <button wire:click="declineInvitation({{ $inv->id }})" class="{{ $btn }}">Decline</button>
+                            @else
+                                <a href="{{ route('trades.shared', $t) }}" class="{{ $btnPri }}">Open</a>
                             @endif
                         </span>
                     </div>
