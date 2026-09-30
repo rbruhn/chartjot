@@ -3,6 +3,7 @@
 use App\Http\Controllers\JournalAccountsController;
 use App\Http\Controllers\JournalController;
 use App\Http\Controllers\JournalSettingsController;
+use App\Http\Controllers\JournalStatisticsController;
 use App\Http\Controllers\TradeScreenshotController;
 use Illuminate\Support\Facades\Route;
 use Livewire\Volt\Volt;
@@ -12,6 +13,10 @@ Route::redirect('/', '/journal');
 Route::get('journal', [JournalController::class, 'index'])
     ->middleware(['auth', 'active'])
     ->name('journal.index');
+
+Route::get('journal/statistics', [JournalStatisticsController::class, 'index'])
+    ->middleware(['auth', 'active'])
+    ->name('journal.statistics');
 
 Route::get('accounts', [JournalAccountsController::class, 'index'])
     ->middleware(['auth', 'active'])
