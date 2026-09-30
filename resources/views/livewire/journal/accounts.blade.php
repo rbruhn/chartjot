@@ -16,8 +16,6 @@ new class extends Component
 
     public bool $creating   = false;
     public ?int $editingId  = null;
-    public ?int $confirmDeleteId = null;
-    public ?int $confirmClearId  = null;
 
     public string $name            = '';
     public string $accountType     = 'funded';
@@ -96,41 +94,17 @@ new class extends Component
         unset($this->accounts);
     }
 
-    public function confirmDelete(int $id): void
-    {
-        $this->confirmClearId  = null;
-        $this->confirmDeleteId = $id;
-    }
-
-    public function cancelDelete(): void
-    {
-        $this->confirmDeleteId = null;
-    }
-
     public function delete(int $id): void
     {
         $account = $this->journal->accounts()->withCount('trades')->findOrFail($id);
 
         if ($account->trades_count > 0) {
             $this->addError('delete', "Cannot delete \"{$account->name}\" — it has {$account->trades_count} trade(s). Clear the trades first.");
-            $this->confirmDeleteId = null;
             return;
         }
 
         $account->delete();
-        $this->confirmDeleteId = null;
         unset($this->accounts);
-    }
-
-    public function confirmClear(int $id): void
-    {
-        $this->confirmDeleteId = null;
-        $this->confirmClearId  = $id;
-    }
-
-    public function cancelClear(): void
-    {
-        $this->confirmClearId = null;
     }
 
     public function clearTrades(int $id): void
@@ -139,17 +113,14 @@ new class extends Component
 
         $screenshots = TradeScreenshot::whereIn('trade_id', $account->trades()->select('id'))->get();
 
-        // Executions, legs, copies (+ their executions), screenshots, and notes
-        // all cascadeOnDelete at the DB level — only the screenshot files need
-        // explicit cleanup. Copies *into* this account that hang off another
-        // account's trade are left alone; they belong to that trade's record.
+        // Executions, legs, screenshots, and notes all cascadeOnDelete at the
+        // DB level — only the screenshot files need explicit cleanup.
         DB::transaction(fn () => $account->trades()->delete());
 
         foreach ($screenshots as $shot) {
             Storage::disk($shot->disk)->delete($shot->path);
         }
 
-        $this->confirmClearId = null;
         unset($this->accounts);
     }
 
@@ -157,8 +128,6 @@ new class extends Component
     {
         $this->creating        = false;
         $this->editingId       = null;
-        $this->confirmDeleteId = null;
-        $this->confirmClearId  = null;
         $this->resetForm();
     }
 
@@ -173,7 +142,7 @@ new class extends Component
 }; ?>
 
 <div class="py-8">
-    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
 
         {{-- Header --}}
         <div class="flex items-center justify-between">
@@ -326,50 +295,26 @@ new class extends Component
                         <td class="text-gray-500 dark:text-gray-400" style="padding:0.875rem 1rem;text-align:right">
                             {{ number_format($account->trades_count) }}
                         </td>
-                        <td style="padding:0.875rem 1rem;text-align:right">
-                            @if($confirmDeleteId === $account->id)
-                            <span class="text-gray-700 dark:text-gray-300" style="font-size:0.8125rem;margin-right:0.5rem">Delete?</span>
-                            <button wire:click="delete({{ $account->id }})"
-                                class="rounded bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 dark:hover:bg-red-900/50"
-                                style="padding:0.25rem 0.625rem;font-size:0.75rem;cursor:pointer;margin-right:0.25rem">
-                                Yes
-                            </button>
-                            <button wire:click="cancelDelete"
-                                class="rounded bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
-                                style="padding:0.25rem 0.625rem;font-size:0.75rem;cursor:pointer">
-                                No
-                            </button>
-                            @elseif($confirmClearId === $account->id)
-                            <span class="text-gray-700 dark:text-gray-300" style="font-size:0.8125rem;margin-right:0.5rem">Clear all {{ number_format($account->trades_count) }} trade(s)? All trades and images will be lost.</span>
-                            <button wire:click="clearTrades({{ $account->id }})"
-                                class="rounded bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 dark:hover:bg-red-900/50"
-                                style="padding:0.25rem 0.625rem;font-size:0.75rem;cursor:pointer;margin-right:0.25rem">
-                                Yes
-                            </button>
-                            <button wire:click="cancelClear"
-                                class="rounded bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
-                                style="padding:0.25rem 0.625rem;font-size:0.75rem;cursor:pointer">
-                                No
-                            </button>
-                            @else
+                        <td style="padding:0.875rem 1rem;text-align:right;white-space:nowrap">
                             <button wire:click="startEdit({{ $account->id }})"
                                 class="rounded border border-gray-300 bg-white text-gray-600 hover:text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
                                 style="padding:0.25rem 0.625rem;font-size:0.75rem;cursor:pointer;margin-right:0.25rem">
                                 Edit
                             </button>
                             @if($account->trades_count > 0)
-                            <button wire:click="confirmClear({{ $account->id }})"
+                            <button wire:click="clearTrades({{ $account->id }})"
+                                wire:confirm="Clear all {{ number_format($account->trades_count) }} trade(s) from &quot;{{ $account->name }}&quot;? All trades and images will be lost. This cannot be undone."
                                 class="rounded border border-gray-300 bg-white text-gray-600 hover:text-red-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:text-red-400"
                                 style="padding:0.25rem 0.625rem;font-size:0.75rem;cursor:pointer;margin-right:0.25rem">
                                 Clear
                             </button>
                             @endif
-                            <button wire:click="confirmDelete({{ $account->id }})"
+                            <button wire:click="delete({{ $account->id }})"
+                                wire:confirm="Delete account &quot;{{ $account->name }}&quot;? This cannot be undone."
                                 class="rounded border border-gray-300 bg-white text-gray-600 hover:text-red-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:text-red-400"
                                 style="padding:0.25rem 0.625rem;font-size:0.75rem;cursor:pointer">
                                 Delete
                             </button>
-                            @endif
                         </td>
                     </tr>
                     @endforeach

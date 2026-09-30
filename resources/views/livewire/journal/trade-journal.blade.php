@@ -277,9 +277,9 @@ new class extends Component {
             Storage::disk($shot->disk)->delete($shot->path);
         }
 
-        // Executions, legs, copies (+ their executions), screenshots, and notes
-        // all cascadeOnDelete at the DB level — only the screenshot files above
-        // need explicit cleanup, everything else goes with the trade row.
+        // Executions, legs, screenshots, and notes all cascadeOnDelete at the
+        // DB level — only the screenshot files above need explicit cleanup,
+        // everything else goes with the trade row.
         $trade->delete();
 
         $this->selectedUuid  = '';

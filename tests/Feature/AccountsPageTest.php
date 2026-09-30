@@ -5,7 +5,6 @@ use App\Enums\ScreenshotSource;
 use App\Models\Account;
 use App\Models\Journal;
 use App\Models\Trade;
-use App\Models\TradeCopy;
 use App\Models\TradeExecution;
 use App\Models\TradeNote;
 use App\Models\TradeScreenshot;
@@ -205,7 +204,6 @@ test('can delete an account with no trades', function () {
 
     Livewire::actingAs($user)
         ->test('journal.accounts', ['journal' => $journal])
-        ->call('confirmDelete', $account->id)
         ->call('delete', $account->id);
 
     expect(Account::find($account->id))->toBeNull();
@@ -223,7 +221,6 @@ test('cannot delete an account that has trades', function () {
 
     Livewire::actingAs($user)
         ->test('journal.accounts', ['journal' => $journal])
-        ->call('confirmDelete', $account->id)
         ->call('delete', $account->id)
         ->assertHasErrors(['delete']);
 
@@ -253,7 +250,6 @@ test('clearTrades removes all trades, their data, and screenshot files but keeps
 
     TradeExecution::factory()->create(['trade_id' => $tradeA->id]);
     TradeNote::factory()->create(['trade_id' => $tradeA->id, 'created_by' => $user->id]);
-    TradeCopy::factory()->create(['trade_id' => $tradeB->id, 'account_id' => $account->id]);
 
     $path = "trade-screenshots/{$journal->id}/{$tradeA->uuid}.png";
     Storage::disk('local')->put($path, 'fake-image-data');
@@ -268,10 +264,7 @@ test('clearTrades removes all trades, their data, and screenshot files but keeps
 
     Livewire::actingAs($user)
         ->test('journal.accounts', ['journal' => $journal])
-        ->call('confirmClear', $account->id)
-        ->assertSet('confirmClearId', $account->id)
         ->call('clearTrades', $account->id)
-        ->assertSet('confirmClearId', null)
         ->assertHasNoErrors();
 
     $fresh = Account::find($account->id);
@@ -281,7 +274,6 @@ test('clearTrades removes all trades, their data, and screenshot files but keeps
         ->and(Trade::count())->toBe(0)
         ->and(TradeExecution::count())->toBe(0)
         ->and(TradeNote::count())->toBe(0)
-        ->and(TradeCopy::count())->toBe(0)
         ->and(TradeScreenshot::count())->toBe(0);
     Storage::disk('local')->assertMissing($path);
 });
@@ -315,18 +307,20 @@ test('account can be deleted after its trades are cleared', function () {
     expect(Account::find($account->id))->toBeNull();
 });
 
-test('cancelClear resets the confirmation without deleting anything', function () {
+test('Clear and Delete ask for confirmation in a popup before running', function () {
     [$user, $journal] = accountsUser();
-    $account = Account::factory()->create(['journal_id' => $journal->id]);
+    $account = Account::factory()->create(['journal_id' => $journal->id, 'name' => 'Apex-12345']);
+    tradeInAccount($account);
     tradeInAccount($account);
 
+    // wire:confirm shows a browser confirm dialog and only sends the call if
+    // the trader accepts — the same pattern as deleting a trade.
     Livewire::actingAs($user)
         ->test('journal.accounts', ['journal' => $journal])
-        ->call('confirmClear', $account->id)
-        ->call('cancelClear')
-        ->assertSet('confirmClearId', null);
-
-    expect(Trade::where('account_id', $account->id)->count())->toBe(1);
+        ->assertSeeHtml("wire:click=\"clearTrades({$account->id})\"")
+        ->assertSeeHtml('wire:confirm="Clear all 2 trade(s) from &quot;Apex-12345&quot;? All trades and images will be lost. This cannot be undone."')
+        ->assertSeeHtml("wire:click=\"delete({$account->id})\"")
+        ->assertSeeHtml('wire:confirm="Delete account &quot;Apex-12345&quot;? This cannot be undone."');
 });
 
 test('Clear button only shows for accounts with trades', function () {
@@ -335,12 +329,12 @@ test('Clear button only shows for accounts with trades', function () {
 
     $component = Livewire::actingAs($user)
         ->test('journal.accounts', ['journal' => $journal])
-        ->assertDontSee("confirmClear({$account->id})");
+        ->assertDontSeeHtml("clearTrades({$account->id})");
 
     tradeInAccount($account);
 
     $component->call('$refresh')
-        ->assertSee("confirmClear({$account->id})");
+        ->assertSeeHtml("clearTrades({$account->id})");
 });
 
 test('cannot clear trades from an account in another journal', function () {

@@ -3,8 +3,6 @@
 namespace App\Services;
 
 use App\Enums\AccountType;
-use App\Enums\CopiesSource;
-use App\Enums\CopyStatus;
 use App\Enums\Direction;
 use App\Enums\ExecutionAction;
 use App\Enums\ExecutionRole;
@@ -15,8 +13,6 @@ use App\Enums\TradeType;
 use App\Models\Account;
 use App\Models\Journal;
 use App\Models\Trade;
-use App\Models\TradeCopy;
-use App\Models\TradeCopyExecution;
 use App\Models\TradeExecution;
 use App\Models\TradeLeg;
 use App\Models\TradeNote;
@@ -29,9 +25,8 @@ use Illuminate\Support\Str;
 class TradeIntakeService
 {
     /**
-     * Finds the journal's account by name, creating it when the AddOn reports one the journal has not seen
-     * (a new copier follower, for example). The trader can correct its type, balance and timezone on the
-     * Accounts page afterwards.
+     * Finds the journal's account by name, creating it when the AddOn reports one the journal has not seen.
+     * The trader can correct its type, balance and timezone on the Accounts page afterwards.
      */
     private function resolveAccount(Journal $journal, string $name, ?string $connection): Account
     {
@@ -43,7 +38,7 @@ class TradeIntakeService
             ]
         );
 
-        // Fill in the connection later if the account was first seen as a copy, which carries none.
+        // Fill in the connection later if the account was created without one (by hand or from a CSV import).
         if ($account->connection === null && $connection !== null) {
             $account->update(['connection' => $connection]);
         }
@@ -96,9 +91,6 @@ class TradeIntakeService
                 'excursion_max_adverse_price'   => $excursion['max_adverse_price'] ?? null,
                 'excursion_max_favorable_price' => $excursion['max_favorable_price'] ?? null,
                 'excursion_complete'            => $excursion['complete'],
-                'copies_source'                 => isset($data['copies_source'])
-                    ? CopiesSource::from($data['copies_source'])
-                    : null,
                 'raw_payload'                   => collect($data)->except(['screenshot_file', 'trade'])->all(),
             ]);
 
@@ -136,62 +128,6 @@ class TradeIntakeService
                     'mae_points'         => $leg['mae_points'] ?? null,
                     'mfe_points'         => $leg['mfe_points'] ?? null,
                 ]);
-            }
-
-            foreach ($data['copies'] ?? [] as $copyData) {
-                $copyAccount = $this->resolveAccount($journal, $copyData['account_name'], null);
-
-                $copyInstrument = $copyData['instrument'] ?? null;
-                $copyPerf       = $copyData['performance'] ?? null;
-                $copyExpected   = $copyData['expected'] ?? null;
-
-                $copy = TradeCopy::create([
-                    'trade_id'                => $trade->id,
-                    'account_id'              => $copyAccount->id,
-                    'status'                  => CopyStatus::from($copyData['status']),
-                    'instrument_contract'     => $copyInstrument['contract'] ?? null,
-                    'instrument_symbol'       => $copyInstrument['symbol'] ?? null,
-                    'instrument_tick_size'    => $copyInstrument['tick_size'] ?? null,
-                    'instrument_point_value'  => $copyInstrument['point_value'] ?? null,
-                    'expected_contract_size'  => $copyExpected['contract_size'] ?? null,
-                    'expected_multiplier'     => $copyExpected['multiplier'] ?? null,
-                    'expected_faded'          => $copyExpected['faded'] ?? null,
-                    'expected_blown'          => $copyExpected['blown'] ?? null,
-                    'expected_quantity'       => $copyExpected['quantity'] ?? null,
-                    'warnings'               => $copyData['warnings'] ?? [],
-                    'direction'              => isset($copyData['direction'])
-                        ? Direction::from($copyData['direction'])
-                        : null,
-                    'quantity'               => $copyData['quantity'] ?? 0,
-                    'entry_average_price'    => $copyData['entry_average_price'] ?? null,
-                    'exit_average_price'     => $copyData['exit_average_price'] ?? null,
-                    'entered_at'             => $copyData['entered_at'] ?? null,
-                    'exited_at'              => $copyData['exited_at'] ?? null,
-                    'points'                 => $copyPerf['points'] ?? null,
-                    'ticks'                  => $copyPerf['ticks'] ?? null,
-                    'gross_pnl'              => $copyPerf['gross_pnl'] ?? null,
-                    'commission'             => $copyPerf['commission'] ?? null,
-                    'fees'                   => $copyPerf['fees'] ?? null,
-                    'net_pnl'                => $copyPerf['net_pnl'] ?? null,
-                ]);
-
-                foreach ($copyData['executions'] ?? [] as $exec) {
-                    TradeCopyExecution::create([
-                        'trade_copy_id'       => $copy->id,
-                        'source_execution_id' => $exec['execution_id'],
-                        'order_id'            => $exec['order_id'] ?? null,
-                        'occurred_at'         => $exec['occurred_at'],
-                        'action'              => ExecutionAction::from($exec['action']),
-                        'role'                => ExecutionRole::from($exec['role']),
-                        'quantity'            => $exec['quantity'],
-                        'allocated_quantity'  => $exec['allocated_quantity'],
-                        'price'               => $exec['price'],
-                        'commission'          => $exec['commission'] ?? null,
-                        'fee'                 => $exec['fee'] ?? null,
-                        'order_name'          => $exec['order_name'] ?? '',
-                        'position_after'      => $exec['position_after'],
-                    ]);
-                }
             }
 
             foreach ($data['notes'] ?? [] as $note) {
