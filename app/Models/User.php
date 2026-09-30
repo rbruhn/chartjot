@@ -51,4 +51,11 @@ class User extends Authenticatable
     {
         return $this->status === UserStatus::Pending;
     }
+
+    /** Whether an accepted friendship exists between this user and $other, in either direction. */
+    public function isFriendsWith(User $other): bool
+    {
+        return $this->isNot($other)
+            && Friendship::between($this, $other)->accepted()->exists();
+    }
 }

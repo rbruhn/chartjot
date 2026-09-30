@@ -8,7 +8,7 @@ namespace ChartJot.Core
 	public static class TradeCalculator
 	{
 		public static CompletedTrade Complete(string account, InstrumentSpec instrument, Direction direction,
-			int maxQuantity, IList<TradeFill> fills, bool feedInterrupted)
+			int maxQuantity, IList<TradeFill> fills, bool feedInterrupted, bool openedByReversal = false)
 		{
 			List<TradeFill> entries = fills.Where(f => f.Role == FillRole.Entry).ToList();
 			List<TradeFill> exits = fills.Where(f => f.Role == FillRole.Exit).ToList();
@@ -57,7 +57,8 @@ namespace ChartJot.Core
 				Excursion = excursion,
 				ExcursionComplete = excursion != null && !feedInterrupted,
 				Legs = BuildLegs(fills, direction, averageEntry, instrument),
-				Fills = fills
+				Fills = fills,
+				OpenedByReversal = openedByReversal
 			};
 		}
 

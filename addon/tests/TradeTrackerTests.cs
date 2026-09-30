@@ -317,5 +317,32 @@ namespace ChartJot.Core.Tests
 			Assert.Null(es.Excursion);
 			Assert.Equal(10m, mes.Excursion.MaePoints);
 		}
+
+		[Fact]
+		public void Reversal_FlagsOnlyTheTradeItOpened()
+		{
+			TradeTracker tracker = new TradeTracker();
+			OpenTradeInfo fromFlat = tracker.Apply(Buy("a", "o1", "", 1, 7804.75m, 0, 0, 1, isEntry: true)).Opened;
+			ApplyResult flip = tracker.Apply(Sell("b", "o2", "", 2, 7805.25m, 30, 0, -1, isEntry: true, isExit: true));
+			CompletedTrade second = tracker.Apply(Buy("c", "o3", "", 1, 7805.00m, 90, 0, 0, isExit: true)).Closed[0];
+
+			Assert.False(fromFlat.OpenedByReversal);
+			Assert.False(flip.Closed[0].OpenedByReversal);
+			Assert.True(flip.Opened.OpenedByReversal);
+			Assert.True(second.OpenedByReversal);
+		}
+
+		[Fact]
+		public void Rebuild_KeepsTheReversalFlag()
+		{
+			Fill a = Buy("a", "o1", "", 1, 7804.75m, 0, 0, 1, isEntry: true);
+			Fill b = Sell("b", "o2", "", 2, 7805.25m, 30, 0, -1, isEntry: true, isExit: true);
+			TradeTracker tracker = new TradeTracker();
+
+			RebuildResult result = tracker.Rebuild(a.Account, a.Instrument.FullName, new[] { a, b }, -1);
+
+			Assert.True(result.Open.OpenedByReversal);
+			Assert.False(result.Closed[0].OpenedByReversal);
+		}
 	}
 }
