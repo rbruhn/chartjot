@@ -2,13 +2,16 @@
 
 use App\Enums\Direction;
 use App\Enums\ExitReason;
+use App\Mail\FailedImportsMail;
 use App\Models\Account;
+use App\Models\FailedTradeImport;
 use App\Models\Journal;
 use App\Models\Trade;
 use App\Models\TradeExecution;
 use App\Models\User;
 use App\Services\ExecutionsCsvImporter;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 
 uses(LazilyRefreshDatabase::class);
@@ -234,6 +237,40 @@ test('a trade group with no entry fills records an error and continues', functio
     expect($result['trades_created'])->toBe(1)
         ->and(count($result['errors']))->toBe(1);
 });
+
+test('a malformed row is recorded as a failed import instead of aborting the import', function (string $badRow, string $reason) {
+    // AccountA: valid round-turn. AccountB: one good fill plus one malformed
+    // fill. Dropping just the bad fill would corrupt AccountB's position
+    // tracking, so AccountB/ES is withheld entirely while AccountA imports.
+    $csv = csvFixture(
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,AccountA,,\n" .
+        "ES 12-26,Sell,1,5002.00,1/2/2026 9:05:00 AM,exec-2,Exit,- ,ord-2,Exit,\$5.97,1,AccountA,,\n" .
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-3,Entry,1 L,ord-3,Entry,\$5.97,1,AccountB,,\n" .
+        $badRow . "\n"
+    );
+
+    $journal = journal(['AccountA', 'AccountB']);
+    Mail::fake();
+
+    $result = importer()->import($journal, $csv);
+
+    expect($result['trades_created'])->toBe(1)
+        ->and(Trade::count())->toBe(1)
+        ->and($result['errors'])->not->toBeEmpty();
+
+    $failure = FailedTradeImport::sole();
+    expect($failure->journal_id)->toBe($journal->id)
+        ->and($failure->account_name)->toBe('AccountB')
+        ->and($failure->reason)->toContain('Row 5')
+        ->and($failure->reason)->toContain($reason);
+
+    Mail::assertSent(FailedImportsMail::class);
+})->with([
+    'bad date'         => ['ES 12-26,Sell,1,5002.00,not-a-date,exec-4,Exit,- ,ord-4,Exit,$5.97,1,AccountB,,', 'time'],
+    'overflowing date' => ['ES 12-26,Sell,1,5002.00,13/45/2026 9:05:00 AM,exec-4,Exit,- ,ord-4,Exit,$5.97,1,AccountB,,', 'time'],
+    'non-numeric price' => ['ES 12-26,Sell,1,abc,1/2/2026 9:05:00 AM,exec-4,Exit,- ,ord-4,Exit,$5.97,1,AccountB,,', 'price'],
+    'bad quantity'     => ['ES 12-26,Sell,x,5002.00,1/2/2026 9:05:00 AM,exec-4,Exit,- ,ord-4,Exit,$5.97,1,AccountB,,', 'quantity'],
+]);
 
 // ---------------------------------------------------------------------------
 // Timezone guard

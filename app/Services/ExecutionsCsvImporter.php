@@ -45,14 +45,49 @@ class ExecutionsCsvImporter
             ];
         }
 
-        $rawFills = $this->parseFills($filePath);
-        $fills = $this->resolveFillTimes($journal, $rawFills);
-        $tradeGroups = $this->groupIntoTrades($fills);
+        [$rawFills, $malformedRows] = $this->parseFills($filePath);
 
         $created  = 0;
         $skipped  = 0;
         $errors   = [];
         $failures = [];
+
+        // A malformed row can't be imported, and dropping just that fill would
+        // throw off the running position for its account/instrument, so every
+        // fill in that series is withheld. Re-importing after fixing the file
+        // is safe: trades already imported are skipped as duplicates.
+        $withheldSeries = [];
+        foreach ($malformedRows as $bad) {
+            $withheldSeries[$bad['account_name'].'|'.$bad['instrument']] = true;
+
+            $reason = "Row {$bad['line']}: {$bad['reason']}. Other fills for "
+                .Str::limit($bad['instrument'], 32).' on this account were not imported; fix the row and re-import.';
+
+            FailedTradeImport::create([
+                'journal_id'      => $journal->id,
+                'account_name'    => $bad['account_name'],
+                'source_trade_id' => null,
+                'reason'          => $reason,
+                'occurred_at'     => now(),
+            ]);
+
+            $failures[] = [
+                'account_name'    => $bad['account_name'],
+                'source_trade_id' => null,
+                'reason'          => $reason,
+                'occurred_at'     => now()->toDateTimeString(),
+            ];
+
+            $errors[] = $reason;
+        }
+
+        $rawFills = array_values(array_filter(
+            $rawFills,
+            fn (array $f) => ! isset($withheldSeries[$f['account_name'].'|'.$f['instrument']])
+        ));
+
+        $fills = $this->resolveFillTimes($journal, $rawFills);
+        $tradeGroups = $this->groupIntoTrades($fills);
 
         foreach ($tradeGroups as $group) {
             try {
@@ -107,9 +142,14 @@ class ExecutionsCsvImporter
 
     // -------------------------------------------------------------------------
 
+    /**
+     * @return array{0: array, 1: array<array{line:int,account_name:string,instrument:string,reason:string}>}
+     */
     private function parseFills(string $filePath): array
     {
         $fills = [];
+        $malformed = [];
+        $line = 1;
         $handle = fopen($filePath, 'r');
 
         // Strip UTF-8 BOM from the first line if present
@@ -125,6 +165,8 @@ class ExecutionsCsvImporter
         }
 
         while (($row = fgetcsv($handle)) !== false) {
+            $line++;
+
             if (count($row) < 13 || empty(trim($row[0]))) {
                 continue;
             }
@@ -133,6 +175,17 @@ class ExecutionsCsvImporter
                 trim($row[12]),
                 trim($row[13] ?? '')
             );
+
+            if ($reason = $this->invalidRowReason($row)) {
+                $malformed[] = [
+                    'line'         => $line,
+                    'account_name' => $accountName,
+                    'instrument'   => trim($row[0]),
+                    'reason'       => $reason,
+                ];
+
+                continue;
+            }
 
             $fills[] = [
                 'instrument' => trim($row[0]),
@@ -155,7 +208,32 @@ class ExecutionsCsvImporter
 
         fclose($handle);
 
-        return $fills;
+        return [$fills, $malformed];
+    }
+
+    /**
+     * Why a fill row can't be trusted, or null if its quantity, price and time
+     * all parse. Casting these blindly would turn garbage into 0s (or throw
+     * mid-import on a bad timestamp).
+     */
+    private function invalidRowReason(array $row): ?string
+    {
+        $quantity = trim($row[2]);
+        if (! ctype_digit($quantity) || (int) $quantity < 1) {
+            return "invalid quantity '".Str::limit($quantity, 32)."'";
+        }
+
+        $price = trim($row[3]);
+        if (! is_numeric($price) || (float) $price <= 0) {
+            return "invalid price '".Str::limit($price, 32)."'";
+        }
+
+        $time = trim($row[4]);
+        if (! $this->isValidTime($time)) {
+            return "invalid time '".Str::limit($time, 32)."'";
+        }
+
+        return null;
     }
 
     /**
@@ -345,9 +423,21 @@ class ExecutionsCsvImporter
         return explode(' ', $instrument)[0];
     }
 
+    private const TIME_FORMAT = 'n/j/Y g:i:s A';
+
     private function parseTime(string $raw, string $timezone): Carbon
     {
-        return Carbon::createFromFormat('n/j/Y g:i:s A', $raw, $timezone);
+        return Carbon::createFromFormat(self::TIME_FORMAT, $raw, $timezone);
+    }
+
+    /** Strict check: rejects unparseable values and overflow like 13/45/2026. */
+    private function isValidTime(string $raw): bool
+    {
+        $parsed = \DateTime::createFromFormat(self::TIME_FORMAT, $raw);
+        $issues = \DateTime::getLastErrors();
+
+        return $parsed !== false
+            && ($issues === false || ($issues['warning_count'] === 0 && $issues['error_count'] === 0));
     }
 
     private function parsePosition(string $raw): int
