@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Enums\Direction;
-use App\Mail\FailedImportsMail;
 use App\Models\Account;
 use App\Models\FailedTradeImport;
 use App\Models\Journal;
@@ -13,7 +12,6 @@ use App\Support\NinjaTraderCsv;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Mail;
 use RuntimeException;
 
 /**
@@ -44,7 +42,7 @@ class TradesMaeMfeImporter
     ];
 
     /**
-     * @return array{legs_imported: int, trades_enriched: int, rows_skipped: int, errors: array<int, string>}
+     * @return array{legs_imported: int, trades_enriched: int, rows_skipped: int, errors: array<int, string>, failures: array<int, array>}
      */
     public function import(Journal $journal, string $filePath): array
     {
@@ -54,6 +52,7 @@ class TradesMaeMfeImporter
                 'trades_enriched' => 0,
                 'rows_skipped'    => 0,
                 'errors'          => ['Journal timezone is not set. Configure it in Journal Settings before importing.'],
+                'failures'        => [],
             ];
         }
 
@@ -130,13 +129,13 @@ class TradesMaeMfeImporter
             $enriched++;
         }
 
-        $this->recordFailures($journal, $failures);
-
+        // Reported to the user by ImportTradesMaeMfeCsv's completion email.
         return [
             'legs_imported'   => $legsImported,
             'trades_enriched' => $enriched,
             'rows_skipped'    => $skipped,
             'errors'          => array_column($failures, 'reason'),
+            'failures'        => $this->recordFailures($journal, $failures),
         ];
     }
 
@@ -329,13 +328,14 @@ class TradesMaeMfeImporter
         ];
     }
 
-    /** One FailedTradeImport per failed row, and one email for the whole upload. */
-    private function recordFailures(Journal $journal, array $failures): void
+    /**
+     * One FailedTradeImport per failed row. Returns the failures in the shape the
+     * failures CSV takes (no raw row payload).
+     *
+     * @return array<array{account_name:string,source_trade_id:string|null,reason:string,occurred_at:string}>
+     */
+    private function recordFailures(Journal $journal, array $failures): array
     {
-        if (! $failures) {
-            return;
-        }
-
         $now = now();
         foreach ($failures as $f) {
             FailedTradeImport::create([
@@ -348,15 +348,11 @@ class TradesMaeMfeImporter
             ]);
         }
 
-        Mail::to($journal->user()->value('email'))->send(new FailedImportsMail(
-            $journal->name,
-            array_map(fn (array $f) => [
-                'account_name'    => $f['account_name'],
-                'source_trade_id' => $f['source_trade_id'],
-                'reason'          => $f['reason'],
-                'occurred_at'     => $now->toDateTimeString(),
-            ], $failures),
-            FailedImportsMail::KIND_MAE_MFE,
-        ));
+        return array_map(fn (array $f) => [
+            'account_name'    => $f['account_name'],
+            'source_trade_id' => $f['source_trade_id'],
+            'reason'          => $f['reason'],
+            'occurred_at'     => $now->toDateTimeString(),
+        ], $failures);
     }
 }
