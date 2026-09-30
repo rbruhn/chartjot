@@ -99,6 +99,39 @@ namespace ChartJot.Core.Tests
 		}
 
 		[Fact]
+		public void Deserialize_ADeliverySavedMidRequest_ComesBackPendingAndDue()
+		{
+			DeliveryQueue queue = new DeliveryQueue();
+			queue.Enqueue("t1", "{\"a\":1}");
+			queue.MarkSending("t1");
+
+			DeliveryQueue reloaded = DeliveryQueue.Deserialize(queue.Serialize());
+
+			QueuedDelivery d = reloaded.Find("t1");
+			Assert.Equal(DeliveryState.Pending, d.State);
+			Assert.Equal("{\"a\":1}", d.PayloadJson);
+			Assert.Equal("t1", Assert.Single(reloaded.Due(Now)).TradeId);
+		}
+
+		[Fact]
+		public void Deserialize_ASendingDeliveryWithAStaleRetryTime_ComesBackPendingWithNoRetryTime()
+		{
+			DeliveryQueue queue = new DeliveryQueue(initialBackoff: TimeSpan.FromSeconds(5));
+			queue.Enqueue("t1", "{}");
+			queue.MarkSending("t1");
+			queue.RecordResult("t1", DeliveryOutcome.Retryable, Now, errorMessage: "timed out");
+			queue.MarkSending("t1");
+			string json = queue.Serialize();
+			Assert.Equal(DeliveryState.Sending, queue.Find("t1").State);
+
+			QueuedDelivery d = DeliveryQueue.Deserialize(json).Find("t1");
+
+			Assert.Equal(DeliveryState.Pending, d.State);
+			Assert.Null(d.NextAttemptAt);
+			Assert.Equal(1, d.Attempts);
+		}
+
+		[Fact]
 		public void Deserialize_UnrecognizedState_ThrowsFormatException()
 		{
 			string json = "{\"configuration_error_halted\":false,\"deliveries\":[{\"trade_id\":\"t1\",\"payload_json\":\"{}\"," +
