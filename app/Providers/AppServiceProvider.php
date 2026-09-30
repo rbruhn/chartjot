@@ -5,8 +5,10 @@ namespace App\Providers;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use Livewire\Livewire;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -24,5 +26,11 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('journal-api', function (Request $request) {
             return Limit::perMinute(60)->by($request->ip());
         });
+
+        // Volt pages submit via POST /livewire/update, not their own route, so
+        // a route-level throttle (e.g. on register / forgot-password) would
+        // only limit page loads. Persisting it makes Livewire re-apply the
+        // page route's throttle to that component's update requests too.
+        Livewire::addPersistentMiddleware([ThrottleRequests::class]);
     }
 }
