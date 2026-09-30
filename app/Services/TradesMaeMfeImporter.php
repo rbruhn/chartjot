@@ -27,8 +27,8 @@ use RuntimeException;
  *   one. Rows are therefore matched to the trade whose entry→exit span
  *   contains them (same account and instrument), not by exact entry time.
  * - MAE and MFE are dollar amounts for the row's whole quantity (the grid's
- *   default Currency display unit), e.g. "$1025.00" on 2 ES contracts is
- *   10.25 points. They're converted with the trade's point value. Any other
+ *   default Currency display unit), e.g. "$500.00" on 2 ES contracts is
+ *   5 points. They're converted with the trade's point value. Any other
  *   display unit (points, ticks, percent) is rejected — a bare number can't
  *   be told apart.
  * - Profit is net of that row's Commission, so it isn't used: leg gross
@@ -236,7 +236,7 @@ class TradesMaeMfeImporter
         return null;
     }
 
-    /** "$1,025.00" → 1025.0, "($12.50)" → -12.5; null when the value isn't a currency amount. */
+    /** "$500.00" → 500.0, "($12.50)" → -12.5; null when the value isn't a currency amount. */
     private static function currency(string $raw): ?float
     {
         $value = trim($raw);
