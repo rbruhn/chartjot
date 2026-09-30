@@ -2,6 +2,7 @@
 
 use App\Enums\FriendshipStatus;
 use App\Enums\InvitationStatus;
+use App\Mail\FriendRequestMail;
 use App\Models\Friendship;
 use App\Models\Journal;
 use App\Models\TradeInvitation;
@@ -9,6 +10,7 @@ use App\Models\User;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Mail;
 use Livewire\Attributes\Computed;
 use Livewire\Volt\Component;
 
@@ -131,11 +133,11 @@ new class extends Component {
             $existing = Friendship::between($me, $target)->first();
 
             if (! $existing) {
-                Friendship::create([
+                $this->notifyRecipient(Friendship::create([
                     'requester_id' => $me->id,
                     'recipient_id' => $target->id,
                     'status'       => FriendshipStatus::Pending,
-                ]);
+                ]));
                 $this->flash = "Friend request sent to {$target->name}.";
             } elseif ($existing->isPending() && (int) $existing->recipient_id === $me->id) {
                 // They already asked you: sending one back is accepting theirs.
@@ -148,6 +150,7 @@ new class extends Component {
                     'recipient_id' => $target->id,
                     'status'       => FriendshipStatus::Pending,
                 ]);
+                $this->notifyRecipient($existing);
                 $this->flash = "Friend request sent to {$target->name}.";
             }
         } catch (UniqueConstraintViolationException) {
@@ -157,6 +160,13 @@ new class extends Component {
 
         $this->searchEmail = '';
         $this->resetComputed();
+    }
+
+    /** One email to the recipient per new (or re-sent) request. */
+    private function notifyRecipient(Friendship $friendship): void
+    {
+        $friendship->load(['requester', 'recipient']);
+        Mail::to($friendship->recipient->email)->send(new FriendRequestMail($friendship));
     }
 
     public function accept(int $friendshipId): void
