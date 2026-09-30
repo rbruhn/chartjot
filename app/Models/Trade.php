@@ -111,6 +111,11 @@ class Trade extends BaseModel
         return $this->hasMany(TradeInvitation::class);
     }
 
+    public function comments(): HasMany
+    {
+        return $this->hasMany(TradeComment::class);
+    }
+
     /**
      * The id of the user who owns this trade (via its journal). Always a
      * fresh query, never a loaded relation, so access checks built on it
