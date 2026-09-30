@@ -2,7 +2,9 @@
 
 use App\Enums\AccountType;
 use App\Enums\ScreenshotSource;
+use App\Enums\TransactionType;
 use App\Models\Account;
+use App\Models\AccountTransaction;
 use App\Models\Journal;
 use App\Models\Trade;
 use App\Models\TradeExecution;
@@ -387,4 +389,160 @@ test('current balance shown is starting balance plus net pnl', function () {
     $listed = $component->get('accounts')->first();
     expect((float) $listed->starting_balance + (float) ($listed->trades_sum_net_pnl ?? 0))
         ->toBe(50300.0);
+});
+
+function fundedAccountWithPnl(Journal $journal, string $startingBalance = '50000.00', string $netPnl = '300.00'): Account
+{
+    $account = Account::factory()->create([
+        'journal_id'       => $journal->id,
+        'starting_balance' => $startingBalance,
+        'account_type'     => AccountType::Funded,
+    ]);
+    Trade::factory()->create([
+        'journal_id' => $journal->id,
+        'account_id' => $account->id,
+        'net_pnl'    => $netPnl,
+        'entry_at'   => now()->subHour(),
+        'exit_at'    => now()->subMinutes(30),
+    ]);
+
+    return $account;
+}
+
+test('current balance includes deposits', function () {
+    [$user, $journal] = accountsUser();
+    $account = fundedAccountWithPnl($journal);
+    AccountTransaction::factory()->create(['account_id' => $account->id, 'type' => TransactionType::Deposit, 'amount' => '1000.00']);
+    AccountTransaction::factory()->create(['account_id' => $account->id, 'type' => TransactionType::Deposit, 'amount' => '250.50']);
+
+    $component = Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal]);
+
+    $listed = $component->get('accounts')->first();
+    expect($component->instance()->balanceFor($listed))->toBe(51550.5);
+    $component->assertSee('$51,550.50');
+});
+
+test('current balance is net of deposits and withdrawals', function () {
+    [$user, $journal] = accountsUser();
+    $account = fundedAccountWithPnl($journal);
+    AccountTransaction::factory()->create(['account_id' => $account->id, 'type' => TransactionType::Deposit, 'amount' => '1000.00']);
+    AccountTransaction::factory()->create(['account_id' => $account->id, 'type' => TransactionType::Withdrawal, 'amount' => '2500.00']);
+
+    $component = Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal]);
+
+    $listed = $component->get('accounts')->first();
+    expect($component->instance()->balanceFor($listed))->toBe(48800.0);
+    $component->assertSee('$48,800.00');
+});
+
+test('adding a transaction persists it on the right account and keeps the ledger open', function () {
+    [$user, $journal] = accountsUser();
+    $other   = fundedAccountWithPnl($journal);
+    $account = fundedAccountWithPnl($journal);
+
+    Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal])
+        ->call('toggleTransactions', $account->id)
+        ->set('txType', TransactionType::Deposit->value)
+        ->set('txAmount', '1500')
+        ->set('txDate', '2026-09-15')
+        ->call('addTransaction')
+        ->assertHasNoErrors()
+        ->assertSet('expandedAccountId', $account->id)
+        ->assertSet('txAmount', '')
+        ->assertSee('Sep 15, 2026');
+
+    expect(AccountTransaction::where('account_id', $other->id)->count())->toBe(0);
+    $tx = AccountTransaction::where('account_id', $account->id)->sole();
+    expect($tx->type)->toBe(TransactionType::Deposit)
+        ->and((float) $tx->amount)->toBe(1500.0)
+        ->and($tx->occurred_at->toDateString())->toBe('2026-09-15');
+});
+
+test('a withdrawal up to the current balance is allowed', function () {
+    [$user, $journal] = accountsUser();
+    $account = fundedAccountWithPnl($journal, '1000.00', '200.00');
+
+    Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal])
+        ->call('toggleTransactions', $account->id)
+        ->set('txType', TransactionType::Withdrawal->value)
+        ->set('txAmount', '1200.00')
+        ->call('addTransaction')
+        ->assertHasNoErrors();
+
+    expect(AccountTransaction::where('account_id', $account->id)->count())->toBe(1);
+});
+
+test('a withdrawal exceeding the current balance is rejected', function () {
+    [$user, $journal] = accountsUser();
+    $account = fundedAccountWithPnl($journal, '1000.00', '200.00');
+    AccountTransaction::factory()->create(['account_id' => $account->id, 'type' => TransactionType::Withdrawal, 'amount' => '500.00']);
+
+    Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal])
+        ->call('toggleTransactions', $account->id)
+        ->set('txType', TransactionType::Withdrawal->value)
+        ->set('txAmount', '700.01')
+        ->call('addTransaction')
+        ->assertHasErrors(['txAmount']);
+
+    expect(AccountTransaction::where('account_id', $account->id)->count())->toBe(1);
+});
+
+test('transaction amount must be positive and date is required', function () {
+    [$user, $journal] = accountsUser();
+    $account = fundedAccountWithPnl($journal);
+
+    Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal])
+        ->call('toggleTransactions', $account->id)
+        ->set('txAmount', '0')
+        ->set('txDate', '')
+        ->call('addTransaction')
+        ->assertHasErrors(['txAmount', 'txDate']);
+
+    expect(AccountTransaction::count())->toBe(0);
+});
+
+test('Transactions button and ledger only appear for funded accounts', function () {
+    [$user, $journal] = accountsUser();
+    $funded = Account::factory()->create(['journal_id' => $journal->id, 'account_type' => AccountType::Funded]);
+    $sim    = Account::factory()->create(['journal_id' => $journal->id, 'account_type' => AccountType::Sim]);
+    $eval   = Account::factory()->create(['journal_id' => $journal->id, 'account_type' => AccountType::Eval]);
+
+    $component = Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal])
+        ->assertSeeHtml("toggleTransactions({$funded->id})")
+        ->assertDontSeeHtml("toggleTransactions({$sim->id})")
+        ->assertDontSeeHtml("toggleTransactions({$eval->id})")
+        ->assertDontSee('Deposits & Withdrawals');
+
+    $component->call('toggleTransactions', $funded->id)
+        ->assertSee('Deposits & Withdrawals');
+
+    // Non-funded accounts can't be opened (or written to) by calling the
+    // action directly either.
+    expect(fn () => $component->call('toggleTransactions', $sim->id))
+        ->toThrow(ModelNotFoundException::class);
+    expect(fn () => $component->set('expandedAccountId', $eval->id)
+        ->set('txAmount', '100')
+        ->call('addTransaction'))
+        ->toThrow(ModelNotFoundException::class);
+    expect(AccountTransaction::count())->toBe(0);
+});
+
+test('deleting an account removes its transactions', function () {
+    [$user, $journal] = accountsUser();
+    $account = Account::factory()->create(['journal_id' => $journal->id, 'account_type' => AccountType::Funded]);
+    AccountTransaction::factory()->count(2)->create(['account_id' => $account->id]);
+
+    Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal])
+        ->call('delete', $account->id)
+        ->assertHasNoErrors();
+
+    expect(AccountTransaction::count())->toBe(0);
 });
