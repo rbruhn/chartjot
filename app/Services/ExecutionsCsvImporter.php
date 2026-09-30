@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Enums\Direction;
 use App\Enums\ExecutionAction;
 use App\Enums\ExecutionRole;
-use App\Enums\ExitReason;
 use App\Enums\TradeType;
 use App\Mail\FailedImportsMail;
 use App\Models\Account;
@@ -13,7 +12,7 @@ use App\Models\FailedTradeImport;
 use App\Models\Journal;
 use App\Models\Trade;
 use App\Models\TradeExecution;
-use Illuminate\Support\Carbon;
+use App\Support\NinjaTraderCsv;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
@@ -171,7 +170,7 @@ class ExecutionsCsvImporter
                 continue;
             }
 
-            [$accountName, $connection] = $this->parseAccountName(
+            [$accountName, $connection] = NinjaTraderCsv::parseAccountName(
                 trim($row[12]),
                 trim($row[13] ?? '')
             );
@@ -189,7 +188,7 @@ class ExecutionsCsvImporter
 
             $fills[] = [
                 'instrument' => trim($row[0]),
-                'instrument_symbol' => $this->extractSymbol(trim($row[0])),
+                'instrument_symbol' => NinjaTraderCsv::extractSymbol(trim($row[0])),
                 'action' => strtolower(trim($row[1])) === 'buy' ? 'buy' : 'sell',
                 'quantity' => (int) trim($row[2]),
                 'price' => trim($row[3]),
@@ -229,7 +228,7 @@ class ExecutionsCsvImporter
         }
 
         $time = trim($row[4]);
-        if (! $this->isValidTime($time)) {
+        if (! NinjaTraderCsv::isValidTime($time)) {
             return "invalid time '".Str::limit($time, 32)."'";
         }
 
@@ -244,13 +243,11 @@ class ExecutionsCsvImporter
      */
     private function resolveFillTimes(Journal $journal, array $rawFills): array
     {
-        $accountTimezones = $journal->accounts()
-            ->get(['name', 'timezone'])
-            ->mapWithKeys(fn (Account $a) => [$a->name => $a->timezone ?: $journal->timezone]);
+        $accountTimezones = NinjaTraderCsv::accountTimezones($journal);
 
         foreach ($rawFills as &$fill) {
             $timezone = $accountTimezones->get($fill['account_name'], $journal->timezone);
-            $fill['occurred_at'] = $this->parseTime($fill['occurred_at_raw'], $timezone);
+            $fill['occurred_at'] = NinjaTraderCsv::parseTime($fill['occurred_at_raw'], $timezone);
             unset($fill['occurred_at_raw']);
         }
 
@@ -355,7 +352,7 @@ class ExecutionsCsvImporter
         $netPnl = round($grossPnl - $totalCommission, 2);
 
         $lastExit = end($exitFills);
-        $exitReason = $this->exitReasonFromName($lastExit['order_name']);
+        $exitReason = NinjaTraderCsv::exitReasonFromName($lastExit['order_name']);
         $maxPosition = $this->maxPosition($fills);
 
         $trade = Trade::create([
@@ -407,39 +404,6 @@ class ExecutionsCsvImporter
 
     // -------------------------------------------------------------------------
 
-    private function parseAccountName(string $raw, string $connectionColumn): array
-    {
-        if (str_contains($raw, '!')) {
-            $parts = explode('!', $raw);
-
-            return [trim($parts[0]), trim($parts[1] ?? $connectionColumn)];
-        }
-
-        return [$raw, $connectionColumn ?: 'Unknown'];
-    }
-
-    private function extractSymbol(string $instrument): string
-    {
-        return explode(' ', $instrument)[0];
-    }
-
-    private const TIME_FORMAT = 'n/j/Y g:i:s A';
-
-    private function parseTime(string $raw, string $timezone): Carbon
-    {
-        return Carbon::createFromFormat(self::TIME_FORMAT, $raw, $timezone);
-    }
-
-    /** Strict check: rejects unparseable values and overflow like 13/45/2026. */
-    private function isValidTime(string $raw): bool
-    {
-        $parsed = \DateTime::createFromFormat(self::TIME_FORMAT, $raw);
-        $issues = \DateTime::getLastErrors();
-
-        return $parsed !== false
-            && ($issues === false || ($issues['warning_count'] === 0 && $issues['error_count'] === 0));
-    }
-
     private function parsePosition(string $raw): int
     {
         if ($raw === '-' || $raw === '') {
@@ -483,23 +447,6 @@ class ExecutionsCsvImporter
         }
 
         return $max;
-    }
-
-    private function exitReasonFromName(string $name): ExitReason
-    {
-        $lower = strtolower($name);
-
-        if (str_contains($lower, 'stop')) {
-            return ExitReason::Stop;
-        }
-        if (str_contains($lower, 'target')) {
-            return ExitReason::ProfitTarget;
-        }
-        if (in_array($lower, ['close', 'exit', 'flatten'])) {
-            return ExitReason::Exit;
-        }
-
-        return ExitReason::Other;
     }
 
     private function sourceTradeId(array $fills): string
