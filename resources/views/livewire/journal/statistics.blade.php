@@ -222,7 +222,7 @@ new class extends Component {
     </div>
 
     {{-- ── Curves: two charts, never one dual-axis chart ── --}}
-    <div class="mx-6 mt-4 grid gap-4 xl:grid-cols-2">
+    <div class="mx-6 mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <section class="{{ $card }}">
             <h3 class="{{ $cardH }}">P&amp;L Curve <span class="normal-case font-normal tracking-normal">— cumulative net P&amp;L by day</span></h3>
             <div class="p-4">
@@ -260,7 +260,7 @@ new class extends Component {
     </section>
 
     {{-- ── Breakdowns ── --}}
-    <div class="mx-6 mt-4 grid gap-4 lg:grid-cols-2">
+    <div class="mx-6 mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <x-stats.breakdown-table title="By Trade Type" :rows="$stats->byTradeType()" />
         <x-stats.breakdown-table title="Long vs. Short" :rows="$stats->byDirection()" />
         <x-stats.breakdown-table title="By Day of Week" :rows="$stats->byDayOfWeek()" />
@@ -276,7 +276,7 @@ new class extends Component {
         $e = $stats->excursion();
         $r = $stats->runners();
     @endphp
-    <div class="mx-6 mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <div class="mx-6 mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <section class="{{ $card }}">
             <h3 class="{{ $cardH }}">Holding Time</h3>
             <dl class="grid grid-cols-2 gap-y-1.5 p-4 text-sm">

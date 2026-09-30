@@ -53,15 +53,24 @@
             this.i = this.i === null ? this.pts.length - 1 : Math.max(0, Math.min(this.pts.length - 1, this.i + d));
         },
     }"
-    class="flex gap-2">
+    class="flex gap-2 w-full" style="display:flex;width:100%">
 
-    {{-- Y axis: top, zero (when shown) and bottom of the data range --}}
-    <div class="relative w-20 flex-shrink-0 text-right text-xs text-gray-500 dark:text-gray-400 tabular-nums" style="height:15rem">
-        <span class="absolute right-0 -translate-y-1/2" style="top:{{ $pct($max) }}%">{{ $fmt($max) }}</span>
-        @if ($zeroBaseline && $min < 0 && $max > 0 && abs($pct(0) - $pct($min)) > 8 && abs($pct(0) - $pct($max)) > 8)
-            <span class="absolute right-0 -translate-y-1/2" style="top:{{ $pct(0) }}%">$0</span>
-        @endif
-        <span class="absolute right-0 -translate-y-1/2" style="top:{{ $pct($min) }}%">{{ $fmt($min) }}</span>
+    {{--
+        Y axis: top, zero (when shown) and bottom of the data range. The box
+        sizes itself to its widest label via an invisible in-flow copy, so a
+        six- or seven-figure balance can't overflow it. Label geometry is
+        inline so the axis still lays out if the compiled CSS is stale.
+    --}}
+    @php $axisLabel = fn (float $v) => $v == 0.0 && $zeroBaseline ? '$0' : $fmt($v); @endphp
+    <div class="relative flex-shrink-0 text-right text-xs text-gray-500 dark:text-gray-400 tabular-nums" style="height:15rem;min-width:3rem">
+        <span class="invisible block whitespace-nowrap" style="visibility:hidden;height:0" aria-hidden="true">{{ strlen($fmt($max)) >= strlen($fmt($min)) ? $fmt($max) : $fmt($min) }}</span>
+        @foreach (array_filter([
+            $max,
+            ($zeroBaseline && $min < 0 && $max > 0 && abs($pct(0) - $pct($min)) > 8 && abs($pct(0) - $pct($max)) > 8) ? 0.0 : null,
+            $min,
+        ], fn ($v) => $v !== null) as $tick)
+            <span class="whitespace-nowrap" style="position:absolute;right:0;top:{{ $pct($tick) }}%;transform:translateY(-50%)">{{ $axisLabel($tick) }}</span>
+        @endforeach
     </div>
 
     <div class="flex-1 min-w-0">
@@ -72,11 +81,11 @@
 
             <svg viewBox="0 0 {{ $W }} {{ $H }}" preserveAspectRatio="none" class="absolute inset-0 w-full h-full overflow-visible" aria-hidden="true">
                 @if ($zeroBaseline && $lo < 0 && $hi > 0)
-                    <line x1="0" x2="{{ $W }}" y1="{{ $y(0) }}" y2="{{ $y(0) }}" vector-effect="non-scaling-stroke"
+                    <line x1="0" x2="{{ $W }}" y1="{{ $y(0) }}" y2="{{ $y(0) }}" stroke="#9ca3af" vector-effect="non-scaling-stroke"
                         class="stroke-gray-300 dark:stroke-gray-600" stroke-width="1" />
                 @endif
                 @if ($n > 1)
-                    <path d="{{ $path }}" fill="none" vector-effect="non-scaling-stroke" stroke-width="2"
+                    <path d="{{ $path }}" fill="none" stroke="#6366f1" vector-effect="non-scaling-stroke" stroke-width="2"
                         stroke-linejoin="round" stroke-linecap="round" class="stroke-indigo-600 dark:stroke-indigo-400" />
                 @endif
             </svg>
