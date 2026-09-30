@@ -1,11 +1,18 @@
 <?php
 
 use App\Enums\AccountType;
+use App\Enums\ScreenshotSource;
 use App\Models\Account;
 use App\Models\Journal;
 use App\Models\Trade;
+use App\Models\TradeCopy;
+use App\Models\TradeExecution;
+use App\Models\TradeNote;
+use App\Models\TradeScreenshot;
 use App\Models\User;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 
 uses(LazilyRefreshDatabase::class);
@@ -221,6 +228,137 @@ test('cannot delete an account that has trades', function () {
         ->assertHasErrors(['delete']);
 
     expect(Account::find($account->id))->not->toBeNull();
+});
+
+// ---------------------------------------------------------------------------
+// Clear trades
+// ---------------------------------------------------------------------------
+
+function tradeInAccount(Account $account): Trade
+{
+    return Trade::factory()->create([
+        'journal_id' => $account->journal_id,
+        'account_id' => $account->id,
+        'entry_at'   => now()->subHour(),
+        'exit_at'    => now()->subMinutes(30),
+    ]);
+}
+
+test('clearTrades removes all trades, their data, and screenshot files but keeps the account', function () {
+    Storage::fake('local');
+    [$user, $journal] = accountsUser();
+    $account = Account::factory()->create(['journal_id' => $journal->id, 'starting_balance' => '50000.00']);
+    $tradeA  = tradeInAccount($account);
+    $tradeB  = tradeInAccount($account);
+
+    TradeExecution::factory()->create(['trade_id' => $tradeA->id]);
+    TradeNote::factory()->create(['trade_id' => $tradeA->id, 'created_by' => $user->id]);
+    TradeCopy::factory()->create(['trade_id' => $tradeB->id, 'account_id' => $account->id]);
+
+    $path = "trade-screenshots/{$journal->id}/{$tradeA->uuid}.png";
+    Storage::disk('local')->put($path, 'fake-image-data');
+    TradeScreenshot::factory()->create([
+        'trade_id'  => $tradeA->id,
+        'disk'      => 'local',
+        'path'      => $path,
+        'mime_type' => 'image/png',
+        'bytes'     => 15,
+        'source'    => ScreenshotSource::ManualUpload,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal])
+        ->call('confirmClear', $account->id)
+        ->assertSet('confirmClearId', $account->id)
+        ->call('clearTrades', $account->id)
+        ->assertSet('confirmClearId', null)
+        ->assertHasNoErrors();
+
+    $fresh = Account::find($account->id);
+    expect($fresh)->not->toBeNull()
+        ->and($fresh->name)->toBe($account->name)
+        ->and((float) $fresh->starting_balance)->toBe(50000.0)
+        ->and(Trade::count())->toBe(0)
+        ->and(TradeExecution::count())->toBe(0)
+        ->and(TradeNote::count())->toBe(0)
+        ->and(TradeCopy::count())->toBe(0)
+        ->and(TradeScreenshot::count())->toBe(0);
+    Storage::disk('local')->assertMissing($path);
+});
+
+test('clearTrades leaves other accounts\' trades untouched', function () {
+    [$user, $journal] = accountsUser();
+    $cleared = Account::factory()->create(['journal_id' => $journal->id]);
+    $kept    = Account::factory()->create(['journal_id' => $journal->id]);
+    tradeInAccount($cleared);
+    $keptTrade = tradeInAccount($kept);
+
+    Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal])
+        ->call('clearTrades', $cleared->id);
+
+    expect(Trade::where('account_id', $cleared->id)->count())->toBe(0)
+        ->and(Trade::find($keptTrade->id))->not->toBeNull();
+});
+
+test('account can be deleted after its trades are cleared', function () {
+    [$user, $journal] = accountsUser();
+    $account = Account::factory()->create(['journal_id' => $journal->id]);
+    tradeInAccount($account);
+
+    Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal])
+        ->call('clearTrades', $account->id)
+        ->call('delete', $account->id)
+        ->assertHasNoErrors();
+
+    expect(Account::find($account->id))->toBeNull();
+});
+
+test('cancelClear resets the confirmation without deleting anything', function () {
+    [$user, $journal] = accountsUser();
+    $account = Account::factory()->create(['journal_id' => $journal->id]);
+    tradeInAccount($account);
+
+    Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal])
+        ->call('confirmClear', $account->id)
+        ->call('cancelClear')
+        ->assertSet('confirmClearId', null);
+
+    expect(Trade::where('account_id', $account->id)->count())->toBe(1);
+});
+
+test('Clear button only shows for accounts with trades', function () {
+    [$user, $journal] = accountsUser();
+    $account = Account::factory()->create(['journal_id' => $journal->id]);
+
+    $component = Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal])
+        ->assertDontSee("confirmClear({$account->id})");
+
+    tradeInAccount($account);
+
+    $component->call('$refresh')
+        ->assertSee("confirmClear({$account->id})");
+});
+
+test('cannot clear trades from an account in another journal', function () {
+    [$user, $journal]  = accountsUser();
+    [, $otherJournal]  = accountsUser();
+    $otherAccount = Account::factory()->create(['journal_id' => $otherJournal->id]);
+    $otherTrade   = tradeInAccount($otherAccount);
+
+    try {
+        Livewire::actingAs($user)
+            ->test('journal.accounts', ['journal' => $journal])
+            ->call('clearTrades', $otherAccount->id);
+        $this->fail('Expected ModelNotFoundException');
+    } catch (ModelNotFoundException) {
+        // expected
+    }
+
+    expect(Trade::find($otherTrade->id))->not->toBeNull();
 });
 
 // ---------------------------------------------------------------------------
