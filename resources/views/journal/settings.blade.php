@@ -72,6 +72,16 @@
             </div>
 
             <div class="rounded-lg bg-white p-6 shadow-sm dark:bg-gray-800">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Import MAE/MFE</h3>
+                <p class="mt-1 mb-5 text-sm text-gray-600 dark:text-gray-400">
+                    Adds leg-level MAE/MFE to trades you've <strong>already imported</strong> from the Executions export above —
+                    it doesn't import trades itself. Upload the NT8 Trade Performance → <strong>Trades</strong> CSV covering the
+                    same period, with the grid's display unit set to Currency. Re-uploading the same file is safe.
+                </p>
+                <livewire:journal.trades-mae-mfe-import :journal="$journal" />
+            </div>
+
+            <div class="rounded-lg bg-white p-6 shadow-sm dark:bg-gray-800">
                 <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                         <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">NinjaTrader intake</h3>
