@@ -275,3 +275,37 @@ test('removing a friend revokes active invitations in both directions', function
         ->and($bToA->fresh()->status)->toBe(InvitationStatus::Revoked)
         ->and($old->fresh()->status)->toBe(InvitationStatus::Declined);
 });
+
+// ---------------------------------------------------------------------------
+// Trade-list indicator & link to the shared page
+// ---------------------------------------------------------------------------
+
+test('the trade list flags trades with a live invitation or a comment thread', function () {
+    [$owner, $friend] = User::factory()->count(2)->create();
+    befriend($owner, $friend);
+    $invited   = ownedTrade($owner);
+    $discussed = ownedTrade($owner);
+    $revoked   = ownedTrade($owner);
+    invite($invited, $owner, $friend, InvitationStatus::Pending);
+    invite($discussed, $owner, $friend, InvitationStatus::Accepted);
+    invite($revoked, $owner, $friend, InvitationStatus::Revoked);
+    \App\Models\TradeComment::factory()->count(2)->create(['trade_id' => $discussed->id, 'user_id' => $friend->id]);
+
+    $trades = Livewire::actingAs($owner)
+        ->test('journal.trade-journal', ['journal' => $owner->journal])
+        ->set('dateFrom', '')->set('dateTo', '')
+        ->assertSee('Shared')
+        ->assertSee('2 comments')
+        ->instance()->trades->keyBy('id');
+
+    expect($trades[$invited->id]->active_invitations_count)->toBe(1)
+        ->and($trades[$discussed->id]->comments_count)->toBe(2)
+        ->and($trades[$revoked->id]->active_invitations_count)->toBe(0);
+});
+
+test('the invite panel links the owner to the shared page', function () {
+    $owner = User::factory()->create();
+    $trade = ownedTrade($owner);
+
+    journalFor($owner, $trade)->set('showInvite', true)->assertSee(route('trades.shared', $trade));
+});

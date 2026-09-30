@@ -86,6 +86,10 @@ new class extends Component {
     {
         return $this->journal->trades()
             ->with(['account.journal', 'notes', 'screenshot'])
+            ->withCount([
+                'comments',
+                'invitations as active_invitations_count' => fn ($q) => $q->active(),
+            ])
             ->when($this->dateFrom, fn ($q) => $q->where('entry_at', '>=', Carbon::parse($this->dateFrom)->startOfDay()))
             ->when($this->dateTo,   fn ($q) => $q->where('entry_at', '<=', Carbon::parse($this->dateTo)->endOfDay()))
             ->when($this->search,   function ($q) {
@@ -605,12 +609,31 @@ new class extends Component {
                                             {{ $this->pnlDisplay($netPnl) }}
                                         </div>
                                     </div>
-                                    @if($trade->notes->isNotEmpty())
-                                        <div class="mt-1 flex items-center gap-1 text-[11px] text-indigo-600 dark:text-indigo-400">
-                                            <svg class="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                                                <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/>
-                                            </svg>
-                                            Noted
+                                    @if($trade->notes->isNotEmpty() || $trade->comments_count > 0 || $trade->active_invitations_count > 0)
+                                        <div class="mt-1 flex items-center gap-3">
+                                            @if($trade->notes->isNotEmpty())
+                                                <div class="flex items-center gap-1 text-[11px] text-indigo-600 dark:text-indigo-400">
+                                                    <svg class="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/>
+                                                    </svg>
+                                                    Noted
+                                                </div>
+                                            @endif
+                                            @if($trade->comments_count > 0)
+                                                <div class="flex items-center gap-1 text-[11px] text-indigo-600 dark:text-indigo-400">
+                                                    <svg class="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path fill-rule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.84 8.84 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7z" clip-rule="evenodd"/>
+                                                    </svg>
+                                                    {{ $trade->comments_count }} {{ Str::plural('comment', $trade->comments_count) }}
+                                                </div>
+                                            @elseif($trade->active_invitations_count > 0)
+                                                <div class="flex items-center gap-1 text-[11px] text-indigo-600 dark:text-indigo-400">
+                                                    <svg class="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path d="M8 9a3 3 0 100-6 3 3 0 000 6zM8 11a6 6 0 016 6H2a6 6 0 016-6zM16 7a1 1 0 10-2 0v1h-1a1 1 0 100 2h1v1a1 1 0 102 0v-1h1a1 1 0 100-2h-1V7z"/>
+                                                    </svg>
+                                                    Shared
+                                                </div>
+                                            @endif
                                         </div>
                                     @endif
                                 </div>
@@ -700,6 +723,8 @@ new class extends Component {
                     <div class="mb-6 rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3">
                         <div class="flex items-center justify-between gap-3 mb-2">
                             <h3 class="text-xs font-semibold text-gray-600 dark:text-gray-500 uppercase tracking-wider">Invite a friend to comment</h3>
+                            <a href="{{ route('trades.shared', $t) }}" target="_blank" rel="noopener"
+                                class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Open shared page ↗</a>
                         </div>
                         <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">
                             They'll see this trade's screenshot, prices, P&amp;L and notes on a separate page — never your account or other trades.
