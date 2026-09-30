@@ -32,6 +32,9 @@ new class extends Component
                     <x-nav-link :href="route('journal.index')" :active="request()->routeIs('journal.index')" wire:navigate>
                         {{ __('Journal') }}
                     </x-nav-link>
+                    <x-nav-link :href="route('journal.statistics')" :active="request()->routeIs('journal.statistics')" wire:navigate>
+                        {{ __('Statistics') }}
+                    </x-nav-link>
                     <x-nav-link :href="route('journal.accounts')" :active="request()->routeIs('journal.accounts')" wire:navigate>
                         {{ __('Accounts') }}
                     </x-nav-link>
@@ -116,6 +119,9 @@ new class extends Component
         <div class="pt-2 pb-3 space-y-1">
             <x-responsive-nav-link :href="route('journal.index')" :active="request()->routeIs('journal.index')" wire:navigate>
                 {{ __('Journal') }}
+            </x-responsive-nav-link>
+            <x-responsive-nav-link :href="route('journal.statistics')" :active="request()->routeIs('journal.statistics')" wire:navigate>
+                {{ __('Statistics') }}
             </x-responsive-nav-link>
             <x-responsive-nav-link :href="route('journal.accounts')" :active="request()->routeIs('journal.accounts')" wire:navigate>
                 {{ __('Accounts') }}
