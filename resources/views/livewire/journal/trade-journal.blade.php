@@ -77,6 +77,28 @@ new class extends Component {
         $this->journalName = $journal->name;
     }
 
+    public function clearDates(): void
+    {
+        $this->dateFrom = '';
+        $this->dateTo   = '';
+    }
+
+    /** The earliest trade's local date for the current account selection, ignoring the date filter itself. */
+    #[Computed]
+    public function earliestTradeDate(): ?string
+    {
+        $earliest = $this->journal->trades()
+            ->with('account')
+            ->when($this->selectedAccountIds !== null, fn ($q) => empty($this->selectedAccountIds)
+                ? $q->whereRaw('0 = 1')
+                : $q->whereIn('account_id', $this->selectedAccountIds)
+            )
+            ->oldest('entry_at')
+            ->first();
+
+        return $earliest?->entry_at_local->format('M j, Y');
+    }
+
     #[Computed]
     public function accounts(): Collection
     {
@@ -549,6 +571,14 @@ new class extends Component {
                 class="bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 text-sm rounded px-3 py-1 w-48 focus:outline-none focus:ring-1 focus:ring-indigo-500 placeholder-gray-400 dark:placeholder-gray-500">
         </div>
         <x-account-filter :accounts="$this->accounts" />
+        <div class="flex flex-col gap-1">
+            <span class="text-xs opacity-0 leading-none select-none">&nbsp;</span>
+            @if ($dateFrom !== '' || $dateTo !== '')
+                <button type="button" wire:click="clearDates" class="text-sm text-indigo-600 dark:text-indigo-400 hover:underline py-1">All time</button>
+            @else
+                <span class="text-sm text-gray-500 dark:text-gray-400 py-1">All time{{ $this->earliestTradeDate ? ' — since '.$this->earliestTradeDate : '' }}</span>
+            @endif
+        </div>
         <div class="flex flex-col gap-1">
             <span class="text-xs opacity-0 leading-none select-none">&nbsp;</span>
             <label class="flex items-center gap-2 cursor-pointer select-none text-sm text-gray-700 dark:text-gray-300 py-1">
