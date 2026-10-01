@@ -113,6 +113,22 @@ new class extends Component {
         $this->dateFrom = '';
         $this->dateTo   = '';
     }
+
+    /** The earliest trade's local date for the current account selection, ignoring the date filter itself. */
+    #[Computed]
+    public function earliestTradeDate(): ?string
+    {
+        $earliest = $this->journal->trades()
+            ->with('account')
+            ->when($this->selectedAccountIds !== null, fn ($q) => empty($this->selectedAccountIds)
+                ? $q->whereRaw('0 = 1')
+                : $q->whereIn('account_id', $this->selectedAccountIds)
+            )
+            ->oldest('entry_at')
+            ->first();
+
+        return $earliest?->entry_at_local->format('M j, Y');
+    }
 }; ?>
 
 @php
@@ -151,7 +167,7 @@ new class extends Component {
             @if ($dateFrom !== '' || $dateTo !== '')
                 <button type="button" wire:click="clearDates" class="text-sm text-indigo-600 dark:text-indigo-400 hover:underline py-1">All time</button>
             @else
-                <span class="text-sm text-gray-500 dark:text-gray-400 py-1">All time</span>
+                <span class="text-sm text-gray-500 dark:text-gray-400 py-1">All time{{ $this->earliestTradeDate ? ' — since '.$this->earliestTradeDate : '' }}</span>
             @endif
         </div>
     </div>
