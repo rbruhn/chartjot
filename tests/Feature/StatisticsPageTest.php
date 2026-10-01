@@ -171,6 +171,15 @@ test('the date range narrows statistics and defaults to all time', function () {
     expect($s['total'])->toBe(1)->and($s['net_pnl'])->toBe(50.0);
 });
 
+test('the all-time label shows the earliest trade date', function () {
+    [$user, $journal] = statsPageUser();
+    $a = statsAccount($journal);
+    statsPageTrade($a, 100, '2025-01-15 14:00:00');
+    statsPageTrade($a, 50, '2026-03-02 14:00:00');
+
+    statsComponent($user, $journal)->assertSee('Jan 15, 2025');
+});
+
 // ---------------------------------------------------------------------------
 // Equity curve
 // ---------------------------------------------------------------------------
