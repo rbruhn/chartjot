@@ -87,6 +87,19 @@ test('trade list does not show trades from another journal', function () {
         ->assertDontSee('ISOLATEDX');
 });
 
+test('a trade from a prior month still shows by default', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, [
+        'instrument_symbol' => 'LASTMONTH',
+        'entry_at'          => now()->subMonth(),
+        'exit_at'           => now()->subMonth()->addHour(),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->assertSee('LASTMONTH');
+});
+
 // ---------------------------------------------------------------------------
 // Filters
 // ---------------------------------------------------------------------------
