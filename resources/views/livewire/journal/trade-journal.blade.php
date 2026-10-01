@@ -75,12 +75,6 @@ new class extends Component {
     {
         $this->journal     = $journal;
         $this->journalName = $journal->name;
-        if ($this->dateFrom === '') {
-            $this->dateFrom = now()->startOfMonth()->format('Y-m-d');
-        }
-        if ($this->dateTo === '') {
-            $this->dateTo = now()->format('Y-m-d');
-        }
     }
 
     #[Computed]
