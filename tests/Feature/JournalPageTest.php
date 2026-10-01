@@ -87,6 +87,42 @@ test('trade list does not show trades from another journal', function () {
         ->assertDontSee('ISOLATEDX');
 });
 
+test('a trade from a prior month still shows by default', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, [
+        'instrument_symbol' => 'LASTMONTH',
+        'entry_at'          => now()->subMonth(),
+        'exit_at'           => now()->subMonth()->addHour(),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->assertSee('LASTMONTH');
+});
+
+test('the all-time label shows the earliest trade date', function () {
+    [$user, $journal] = journalUser();
+    $journal->update(['timezone' => 'UTC']);
+    tradeInJournal($journal, ['entry_at' => '2026-02-03 10:00:00', 'exit_at' => '2026-02-03 11:00:00']);
+    tradeInJournal($journal, ['entry_at' => '2026-05-01 10:00:00', 'exit_at' => '2026-05-01 11:00:00']);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->assertSee('Feb 3, 2026');
+});
+
+test('clearing the date range resets to all time', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['entry_at' => now()->subMonths(2), 'exit_at' => now()->subMonths(2)->addHour()]);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->set('dateFrom', now()->format('Y-m-d'))
+        ->call('clearDates')
+        ->assertSet('dateFrom', '')
+        ->assertSet('dateTo', '');
+});
+
 // ---------------------------------------------------------------------------
 // Filters
 // ---------------------------------------------------------------------------
