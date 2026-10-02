@@ -42,6 +42,7 @@
     "max_favorable_price": null,
     "complete": false
   },
+  "stop_price": null,
   "legs": [
     {
       "sequence": 1,
