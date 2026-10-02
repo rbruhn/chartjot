@@ -20,7 +20,7 @@ use Illuminate\Support\Str;
     'uuid', 'journal_id', 'account_id', 'source_trade_id', 'source', 'addon_version',
     'trade_type', 'trade_type_other', 'instrument', 'instrument_symbol',
     'tick_size', 'point_value', 'direction', 'quantity', 'total_entry_quantity',
-    'entry_at', 'exit_at', 'entry_price', 'exit_price',
+    'entry_at', 'exit_at', 'entry_price', 'exit_price', 'stop_price',
     'entry_order_name', 'exit_order_name', 'exit_reason',
     'points', 'ticks', 'gross_pnl', 'commission', 'fees', 'net_pnl',
     'excursion_mae_points', 'excursion_mfe_points',

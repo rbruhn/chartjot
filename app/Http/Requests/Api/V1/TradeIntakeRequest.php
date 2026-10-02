@@ -69,6 +69,9 @@ class TradeIntakeRequest extends FormRequest
             'exit.order_name'     => ['nullable', 'string', 'max:64'],
             'exit.reason'         => ['required', Rule::in($exitReasons)],
 
+            // Optional stop price; never required, so older AddOns still post.
+            'stop_price'          => ['nullable', 'numeric', 'gt:0'],
+
             // Performance
             'performance'              => ['required', 'array'],
             'performance.points'       => ['required', 'numeric'],
