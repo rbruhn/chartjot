@@ -42,6 +42,7 @@
     "max_favorable_price": "7703.25",
     "complete": true
   },
+  "stop_price": "7702.50",
   "legs": [
     {
       "sequence": 1,
