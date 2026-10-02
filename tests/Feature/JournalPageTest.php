@@ -309,6 +309,93 @@ test('editing a note updates its body', function () {
     expect($note->fresh()->body)->toBe('Updated note content.');
 });
 
+// ---------------------------------------------------------------------------
+// Stop price (issue #60)
+// ---------------------------------------------------------------------------
+
+test('adding a stop price to a trade without one saves it', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['stop_price' => null]);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->assertSee('Add Stop Price')
+        ->call('startEditStopPrice')
+        ->assertSet('editingStopPrice', true)
+        ->assertSet('stopPriceForm', '')
+        ->set('stopPriceForm', '4512.25')
+        ->call('saveStopPrice')
+        ->assertHasNoErrors()
+        ->assertSet('editingStopPrice', false)
+        ->assertSee('4,512.25')
+        ->assertSee('Edit Stop Price');
+
+    expect((float) $trade->fresh()->stop_price)->toBe(4512.25);
+});
+
+test('editing a stop price seeds the input with the current value', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['stop_price' => 4500]);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->call('startEditStopPrice')
+        ->assertSet('stopPriceForm', '4500')
+        ->set('stopPriceForm', '4498.75')
+        ->call('saveStopPrice');
+
+    expect((float) $trade->fresh()->stop_price)->toBe(4498.75);
+});
+
+test('saving a blank stop price clears it to null', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['stop_price' => 4500.5]);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->call('startEditStopPrice')
+        ->set('stopPriceForm', '  ')
+        ->call('saveStopPrice')
+        ->assertHasNoErrors()
+        ->assertSee('Add Stop Price');
+
+    expect($trade->fresh()->stop_price)->toBeNull();
+});
+
+test('a zero, negative or non-numeric stop price is rejected', function (string $value) {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['stop_price' => 4500]);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->call('startEditStopPrice')
+        ->set('stopPriceForm', $value)
+        ->call('saveStopPrice')
+        ->assertHasErrors('stopPriceForm')
+        ->assertSet('editingStopPrice', true);
+
+    expect((float) $trade->fresh()->stop_price)->toBe(4500.0);
+})->with(['0', '-5', 'abc']);
+
+test('cancelling a stop price edit leaves it unchanged', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['stop_price' => 4500]);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->call('startEditStopPrice')
+        ->set('stopPriceForm', '4400')
+        ->call('cancelEditStopPrice')
+        ->assertSet('editingStopPrice', false);
+
+    expect((float) $trade->fresh()->stop_price)->toBe(4500.0);
+});
+
 test('deleting a note removes it', function () {
     [$user, $journal] = journalUser();
     $trade = tradeInJournal($journal);
