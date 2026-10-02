@@ -57,6 +57,10 @@ new class extends Component {
     public string $editNotePhase = 'post_trade';
     public ?int   $confirmDeleteNoteId = null;
 
+    // Stop price is edited only here, never in the AddOn (issue #60).
+    public bool   $editingStopPrice = false;
+    public string $stopPriceForm    = '';
+
     public mixed $screenshotUpload = null;
 
     public bool  $editingTrade    = false;
@@ -184,6 +188,8 @@ new class extends Component {
         $this->addingNote          = false;
         $this->editingNoteId       = null;
         $this->confirmDeleteNoteId = null;
+        $this->editingStopPrice    = false;
+        $this->stopPriceForm       = '';
         $this->editingTrade        = false;
         $this->tradeEditForm       = [];
         $this->showInvite          = false;
@@ -249,6 +255,45 @@ new class extends Component {
     {
         $this->editingNoteId = null;
         $this->editNoteBody  = '';
+    }
+
+    public function startEditStopPrice(): void
+    {
+        $trade = $this->selectedTrade;
+        if (! $trade) return;
+        $this->editingStopPrice = true;
+        $stop = (string) $trade->stop_price;
+        // Drop the decimal(12,4) column's trailing zeros: "4512.2500" -> "4512.25".
+        $this->stopPriceForm    = str_contains($stop, '.') ? rtrim(rtrim($stop, '0'), '.') : $stop;
+        $this->resetErrorBag('stopPriceForm');
+    }
+
+    public function saveStopPrice(): void
+    {
+        $this->stopPriceForm = trim($this->stopPriceForm);
+        $this->validate(
+            ['stopPriceForm' => ['nullable', 'numeric', 'gt:0']],
+            [],
+            ['stopPriceForm' => 'stop price'],
+        );
+
+        $trade = $this->selectedTrade;
+        if (! $trade) return;
+
+        $trade->update([
+            'stop_price' => $this->stopPriceForm === '' ? null : $this->stopPriceForm,
+        ]);
+
+        $this->editingStopPrice = false;
+        $this->stopPriceForm    = '';
+        unset($this->selectedTrade);
+    }
+
+    public function cancelEditStopPrice(): void
+    {
+        $this->editingStopPrice = false;
+        $this->stopPriceForm    = '';
+        $this->resetErrorBag('stopPriceForm');
     }
 
     public function confirmDelete(int $id): void
@@ -994,6 +1039,40 @@ new class extends Component {
                                 <div class="text-gray-900 dark:text-gray-100 font-medium">{{ $value }}</div>
                             </div>
                         @endforeach
+                    </div>
+
+                    {{-- Stop price: optional, edited only here (issue #60) --}}
+                    <div class="-mt-4 mb-6 px-3 text-sm">
+                        @if($editingStopPrice)
+                            <div class="flex flex-wrap items-center gap-2">
+                                <label for="stop-price-input" class="text-xs text-gray-600 dark:text-gray-500 uppercase tracking-wide">Stop Price</label>
+                                <input id="stop-price-input" type="number" step="any" min="0" wire:model="stopPriceForm"
+                                    wire:keydown.enter="saveStopPrice" wire:keydown.escape="cancelEditStopPrice"
+                                    placeholder="blank to clear"
+                                    class="w-36 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 text-sm rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                                <button wire:click="saveStopPrice"
+                                    class="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded transition-colors">
+                                    Save
+                                </button>
+                                <button wire:click="cancelEditStopPrice"
+                                    class="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 px-3 py-1.5 rounded transition-colors">
+                                    Cancel
+                                </button>
+                            </div>
+                            @error('stopPriceForm')
+                                <p class="mt-1 text-xs text-red-600 dark:text-red-400">{{ $message }}</p>
+                            @enderror
+                        @elseif($t->stop_price !== null)
+                            <div class="flex items-center gap-3">
+                                <span class="text-xs text-gray-600 dark:text-gray-500 uppercase tracking-wide">Stop Price</span>
+                                <span class="text-gray-900 dark:text-gray-100 font-medium">{{ number_format((float) $t->stop_price, 2) }}</span>
+                                <button wire:click="startEditStopPrice"
+                                    class="text-xs text-gray-600 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">Edit Stop Price</button>
+                            </div>
+                        @else
+                            <button wire:click="startEditStopPrice"
+                                class="text-xs text-gray-600 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">+ Add Stop Price</button>
+                        @endif
                     </div>
                     @endif
 
