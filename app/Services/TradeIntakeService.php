@@ -77,6 +77,7 @@ class TradeIntakeService
                 'exit_at'                       => $exit['occurred_at'],
                 'entry_price'                   => $entry['average_price'],
                 'exit_price'                    => $exit['average_price'],
+                'stop_price'                    => $data['stop_price'] ?? null,
                 'entry_order_name'              => $entry['order_name'] ?? '',
                 'exit_order_name'               => $exit['order_name'] ?? '',
                 'exit_reason'                   => ExitReason::from($exit['reason']),
