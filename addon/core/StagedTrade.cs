@@ -21,6 +21,10 @@ namespace ChartJot.Core
 
 		/// <summary>Null when capture failed or is disabled; that must never block submission.</summary>
 		public ScreenshotMeta Screenshot { get; set; }
+
+		/// <summary>The working stop's price when the trade closed, or whatever the trader typed over it. Null when
+		/// there was none or it is unknown; that must never block submission.</summary>
+		public decimal? StopPrice { get; set; }
 	}
 
 	/// <summary>Trades awaiting review, keyed by trade_id, with the same save/load round trip as
@@ -105,6 +109,9 @@ namespace ChartJot.Core
 			else
 				WriteScreenshot(w, s.Screenshot);
 
+			w.Name("stop_price");
+			if (s.StopPrice.HasValue) w.Decimal(s.StopPrice.Value); else w.Null();
+
 			w.EndObject();
 		}
 
@@ -116,7 +123,9 @@ namespace ChartJot.Core
 				Notes = v["notes"].Items.Select(ReadNote).ToList(),
 				TradeType = v["trade_type"].AsString(),
 				TradeTypeOther = v["trade_type_other"].AsString(),
-				Screenshot = v["screenshot"].IsNull ? null : ReadScreenshot(v["screenshot"])
+				Screenshot = v["screenshot"].IsNull ? null : ReadScreenshot(v["screenshot"]),
+				// Missing in files written before the field existed, which reads as null.
+				StopPrice = v["stop_price"].IsNull ? (decimal?)null : v["stop_price"].AsDecimal()
 			};
 		}
 

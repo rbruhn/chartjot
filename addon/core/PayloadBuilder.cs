@@ -50,6 +50,9 @@ namespace ChartJot.Core
 
 		/// <summary>Null when no screenshot file is attached.</summary>
 		public ScreenshotMeta Screenshot { get; set; }
+
+		/// <summary>Optional (<see cref="StagedTrade.StopPrice"/>); null is sent as null and never blocks submission.</summary>
+		public decimal? StopPrice { get; set; }
 	}
 
 	/// <summary>Builds the JSON `trade` part of the intake request (NT8.md, Provisional Payload Contract).</summary>
@@ -108,6 +111,8 @@ namespace ChartJot.Core
 			w.Property("max_favorable_price", e == null ? null : DecimalFormat.Price(e.MaxFavorablePrice, tick));
 			w.Property("complete", trade.ExcursionComplete);
 			w.EndObject();
+
+			w.Property("stop_price", info.StopPrice.HasValue ? DecimalFormat.Price(info.StopPrice.Value, tick) : null);
 
 			w.Name("legs").BeginArray();
 			foreach (Leg leg in trade.Legs)
