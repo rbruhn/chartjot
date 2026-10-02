@@ -171,6 +171,30 @@ test('trade is stored with correct fields', function () {
         ->and($trade->addon_version)->toBe('1.0.0');
 });
 
+test('stop_price is stored when present', function () {
+    [$journal, $token] = journalWithToken();
+
+    postTrade(minimalPayload(['stop_price' => '4998.50']), $token)->assertStatus(201);
+
+    expect((float) Trade::first()->stop_price)->toBe(4998.5);
+});
+
+test('stop_price is optional and stored as null when absent', function () {
+    [$journal, $token] = journalWithToken();
+
+    postTrade(minimalPayload(), $token)->assertStatus(201);
+
+    expect(Trade::first()->stop_price)->toBeNull();
+});
+
+test('an explicit null stop_price is accepted', function () {
+    [$journal, $token] = journalWithToken();
+
+    postTrade(minimalPayload(['stop_price' => null]), $token)->assertStatus(201);
+
+    expect(Trade::first()->stop_price)->toBeNull();
+});
+
 test('legs are stored when present', function () {
     [$journal, $token] = journalWithToken();
 
@@ -309,6 +333,7 @@ test('non-positive prices, instrument specs and negative commissions return 422'
     $payload['entry']['average_price']        = '-5000.00';
     $payload['executions'][0]['price']        = '0';
     $payload['performance']['commission']     = '-1.00';
+    $payload['stop_price']                    = '0';
 
     postTrade($payload, $token)
         ->assertStatus(422)
@@ -317,6 +342,7 @@ test('non-positive prices, instrument specs and negative commissions return 422'
             'entry.average_price',
             'executions.0.price',
             'performance.commission',
+            'stop_price',
         ]);
 
     expect(Trade::count())->toBe(0);

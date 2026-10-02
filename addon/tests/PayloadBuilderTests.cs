@@ -144,6 +144,29 @@ namespace ChartJot.Core.Tests
 		}
 
 		[Fact]
+		public void StopPrice_IsSentAsAPriceStringWhenKnown()
+		{
+			SubmissionInfo info = Info();
+			info.StopPrice = 7698.5m;
+
+			JsonElement root = Parse(PayloadBuilder.Build(WorkedExample(), info));
+
+			Assert.Equal(JsonValueKind.String, root.GetProperty("stop_price").ValueKind);
+			Assert.Equal("7698.50", root.GetProperty("stop_price").GetString());
+		}
+
+		[Fact]
+		public void StopPrice_IsSentAsNullWhenUnknown_AndNeverBlocksSubmission()
+		{
+			SubmissionInfo info = Info();
+			info.StopPrice = null;
+
+			JsonElement root = Parse(PayloadBuilder.Build(WorkedExample(), info));
+
+			Assert.Equal(JsonValueKind.Null, root.GetProperty("stop_price").ValueKind);
+		}
+
+		[Fact]
 		public void CarriesNoTradeCopierFields()
 		{
 			JsonElement root = Parse(PayloadBuilder.Build(WorkedExample(), Info()));
