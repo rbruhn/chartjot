@@ -1,6 +1,8 @@
 *.log
 *.md
 !/README.md
+!/NT.md
+!/NT8.md
 .DS_Store
 .editorconfig
 .env

@@ -52,7 +52,10 @@ namespace ChartJot.Core.Tests
 			tracker.OnPrice("ES 12-26", 7703.25m);
 			CompletedTrade trade = tracker.Apply(Sell("a1b2c3d4e5f8", "ord-1003", "Stop1", 1, 7702.50m, 380, 1.29m, 0, isExit: true)).Closed[0];
 
-			return PayloadBuilder.Build(trade, Info());
+			// The runner's stop, trailed up to where it filled.
+			SubmissionInfo info = Info();
+			info.StopPrice = 7702.50m;
+			return PayloadBuilder.Build(trade, info);
 		}
 
 		/// <summary>An Orders-mode Micro follower of the long runner above, sent as its own trade.</summary>

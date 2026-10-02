@@ -31,7 +31,8 @@ namespace ChartJot.Core.Tests
 				},
 				TradeType = null,
 				TradeTypeOther = null,
-				Screenshot = new ScreenshotMeta { CapturedAt = At(381), Caption = "ES 1m", Format = "png" }
+				Screenshot = new ScreenshotMeta { CapturedAt = At(381), Caption = "ES 1m", Format = "png" },
+				StopPrice = 7698.75m
 			};
 		}
 
@@ -152,6 +153,47 @@ namespace ChartJot.Core.Tests
 			Assert.Null(reloaded.Screenshot);
 			Assert.Equal("2ES", reloaded.TradeType);
 			Assert.Empty(reloaded.Notes);
+		}
+
+		[Fact]
+		public void SerializeDeserialize_RoundTripsTheStopPrice()
+		{
+			StagedTrade original = FullExample();
+			StagedTrades trades = new StagedTrades();
+			trades.Add(original);
+
+			StagedTrade reloaded = StagedTrades.Deserialize(trades.Serialize()).Find(original.Trade.TradeId);
+
+			Assert.Equal(7698.75m, reloaded.StopPrice);
+		}
+
+		[Fact]
+		public void SerializeDeserialize_NullStopPrice_RoundTripsAsNull()
+		{
+			StagedTrade original = FullExample();
+			original.StopPrice = null;
+			StagedTrades trades = new StagedTrades();
+			trades.Add(original);
+
+			string saved = trades.Serialize();
+			StagedTrade reloaded = StagedTrades.Deserialize(saved).Find(original.Trade.TradeId);
+
+			Assert.Contains("\"stop_price\":null", saved);
+			Assert.Null(reloaded.StopPrice);
+		}
+
+		[Fact]
+		public void Deserialize_AStateFileWithoutTheStopPrice_ReadsItAsNull()
+		{
+			StagedTrade original = FullExample();
+			StagedTrades trades = new StagedTrades();
+			trades.Add(original);
+			string legacy = trades.Serialize().Replace(",\"stop_price\":7698.75", "");
+			Assert.DoesNotContain("stop_price", legacy);
+
+			StagedTrade reloaded = StagedTrades.Deserialize(legacy).Find(original.Trade.TradeId);
+
+			Assert.Null(reloaded.StopPrice);
 		}
 
 		[Fact]
