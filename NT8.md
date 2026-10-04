@@ -277,9 +277,9 @@ submission. If the user selects `Other`, provide an optional free-text
 description field named `trade_type_other`.
 
 If the selected type's implied direction differs from the trade's actual
-direction, show a non-blocking warning. Do not prevent submission. (The
-implied direction of `F2ES`/`F2EL` assumes a failed setup is traded in the
-opposite direction; confirm with the trader.)
+direction, show a non-blocking warning. Do not prevent submission. A failed
+second entry is traded in the opposite direction (confirmed by the trader,
+2026-10-04): `F2ES` is taken long and `F2EL` is taken short.
 
 ### Stop price
 
