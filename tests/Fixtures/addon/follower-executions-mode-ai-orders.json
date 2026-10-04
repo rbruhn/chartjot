@@ -2,7 +2,7 @@
   "schema_version": 1,
   "source": "ninjatrader_8",
   "addon_version": "1.0.0",
-  "trade_id": "NT8-TEST_ACCT_005-MES_12_26-6ec47dbad5d8d521",
+  "trade_id": "NT8-TEST_ACCT_005-MES_12_26-a3002640ea66df2a",
   "account_name": "TEST-ACCT-005",
   "connection": "Rithmic",
   "trade_type": "2ES",

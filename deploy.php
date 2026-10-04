@@ -21,7 +21,10 @@ require 'deploy/custom.php';
  */
 
 // Deployment Configuration
-set('repository', 'https://github.com/rbruhn/chartjot.git');
+// Private repository: cloned over SSH with the read-only REPO_DEPLOY_KEY, which GitHub Actions loads into
+// its SSH agent and Deployer forwards to the server (forward_agent below). A manual `dep deploy` needs an
+// agent holding a key with read access to the repository.
+set('repository', 'git@github.com:rbruhn/chartjot.git');
 set('base_path', '/var/www');
 set('remote_user', 'ubuntu');
 set('php_fpm_version', '8.5');
@@ -56,6 +59,7 @@ set('update_queries_operation', '');
 host('production')
     ->set('hostname', '40.160.146.238')
     ->set('deploy_path', '{{base_path}}/chartjot')
+    ->setForwardAgent(true)
     ->set('branch', 'main')
     ->set('environment', 'production');
 

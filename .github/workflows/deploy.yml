@@ -120,6 +120,11 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     if: "!contains(github.event.head_commit.message, '[skip deploy]') && !contains(github.event.head_commit.message, '[no deploy]')"
+    # The repository is private: the server downloads this run's build artifact with GITHUB_TOKEN
+    # (deploy:ci-artifacts), which needs actions: read on top of contents: read.
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v6
 
@@ -166,10 +171,15 @@ jobs:
       - name: Install Composer dependencies (for the Deployer CLI)
         run: composer install --prefer-dist --no-progress --no-interaction --no-scripts
 
-      - name: Setup SSH key
+      # Two keys in the agent: DEPLOY_PRIVATE_KEY logs in to the server; REPO_DEPLOY_KEY is a read-only
+      # GitHub deploy key for this repository. Deployer forwards the agent, so the server clones over
+      # SSH with REPO_DEPLOY_KEY without that key ever being stored on the server.
+      - name: Setup SSH keys
         uses: webfactory/ssh-agent@v0.10.0
         with:
-          ssh-private-key: ${{ secrets.DEPLOY_PRIVATE_KEY }}
+          ssh-private-key: |
+            ${{ secrets.DEPLOY_PRIVATE_KEY }}
+            ${{ secrets.REPO_DEPLOY_KEY }}
 
       - name: Configure SSH host key checking
         run: |
