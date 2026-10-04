@@ -9,6 +9,13 @@ namespace ChartJot.Core
 		Exit
 	}
 
+	/// <summary>A fill's commission and fee as NT8 reports them now, for re-reading after the settle period.</summary>
+	public sealed class FillCharges
+	{
+		public decimal Commission { get; set; }
+		public decimal Fee { get; set; }
+	}
+
 	/// <summary>A fill's contribution to one trade. A reversal fill contributes to two trades.</summary>
 	public sealed class TradeFill
 	{
