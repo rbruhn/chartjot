@@ -163,6 +163,144 @@ namespace ChartJot.Core
 			records.Remove(tradeId);
 		}
 
+		/// <summary>
+		/// Re-reads each fill's commission and fee (NT8.md: commission may arrive after the fill, so re-read it after
+		/// the settle period; staged values may still be refreshed until the trader submits) and recomputes the trade
+		/// with the same trade_id. Works on a trade awaiting staging or a staged one that <see cref="CanEdit"/>.
+		/// <paramref name="currentCharges"/> returns null for a fill it has nothing for. Returns true when anything
+		/// changed.
+		/// </summary>
+		public bool RefreshCharges(string tradeId, Func<string, FillCharges> currentCharges)
+		{
+			if (currentCharges == null)
+				throw new ArgumentNullException("currentCharges");
+
+			CompletedTrade trade;
+			StagedTrade staged = Staged.Find(tradeId);
+			if (staged != null)
+			{
+				if (!CanEdit(tradeId))
+					return false;
+				trade = staged.Trade;
+			}
+			else if (!awaiting.TryGetValue(tradeId, out trade))
+			{
+				return false;
+			}
+
+			bool changed = false;
+			List<TradeFill> fills = new List<TradeFill>();
+			foreach (TradeFill f in trade.Fills)
+			{
+				FillCharges charges = currentCharges(f.Fill.ExecutionId);
+				if (charges == null || (charges.Commission == f.Fill.Commission && charges.Fee == f.Fill.Fee))
+				{
+					fills.Add(f);
+					continue;
+				}
+
+				changed = true;
+				Fill fill = CopyWithCharges(f.Fill, charges);
+				fills.Add(new TradeFill
+				{
+					Fill = fill,
+					Role = f.Role,
+					AllocatedQuantity = f.AllocatedQuantity,
+					// Same pro-rating as TradeTracker: a reversal fill's charges are split by allocated quantity.
+					Commission = f.AllocatedQuantity == fill.Quantity ? fill.Commission : fill.Commission * f.AllocatedQuantity / fill.Quantity,
+					Fee = f.AllocatedQuantity == fill.Quantity ? fill.Fee : fill.Fee * f.AllocatedQuantity / fill.Quantity,
+					PositionAfter = f.PositionAfter,
+					Excursion = f.Excursion
+				});
+			}
+			if (!changed)
+				return false;
+
+			CompletedTrade refreshed = TradeCalculator.Complete(trade.Account, trade.Instrument, trade.Direction, trade.Quantity, fills,
+				feedInterrupted: !trade.ExcursionComplete, openedByReversal: trade.OpenedByReversal);
+			if (staged != null)
+				staged.Trade = refreshed;
+			else
+				awaiting[tradeId] = refreshed;
+			return true;
+		}
+
+		private static Fill CopyWithCharges(Fill f, FillCharges charges)
+		{
+			return new Fill
+			{
+				ExecutionId = f.ExecutionId,
+				OrderId = f.OrderId,
+				OrderName = f.OrderName,
+				Account = f.Account,
+				Instrument = f.Instrument,
+				Time = f.Time,
+				Side = f.Side,
+				Quantity = f.Quantity,
+				Price = f.Price,
+				Commission = charges.Commission,
+				Fee = charges.Fee,
+				PositionAfter = f.PositionAfter,
+				IsEntry = f.IsEntry,
+				IsExit = f.IsExit
+			};
+		}
+
+		// ---- submission
+
+		/// <summary>
+		/// True while the trader may still change a staged trade (notes, trade type, stop price): before Submit, and
+		/// again after a delivery failed (a 422 or a bad token), when resubmitting freezes a new payload. False while a
+		/// submission is pending, in flight, or sent, and for a trade that is not staged.
+		/// </summary>
+		public bool CanEdit(string tradeId)
+		{
+			if (Staged.Find(tradeId) == null)
+				return false;
+			QueuedDelivery delivery = Deliveries.Find(tradeId);
+			return delivery == null || delivery.State == DeliveryState.Failed;
+		}
+
+		/// <summary>
+		/// The trader clicked Submit trade: freezes the staged trade into a payload and queues it (NT8.md, "Once the
+		/// trader clicks Submit trade, the JSON payload is frozen and saved"). The trade stays in <see cref="Staged"/>
+		/// so the panel can show its delivery state, until <see cref="RemoveSent"/>. Throws when the trade is not
+		/// staged or not editable (already submitted), or has no valid trade type; nothing is queued then.
+		/// </summary>
+		public QueuedDelivery Submit(string tradeId, string addonVersion, string connection)
+		{
+			StagedTrade staged = Staged.Find(tradeId);
+			if (staged == null)
+				throw new InvalidOperationException("Trade " + tradeId + " is not staged for review.");
+			if (!CanEdit(tradeId))
+				throw new InvalidOperationException("Trade " + tradeId + " has already been submitted.");
+
+			string payload = PayloadBuilder.Build(staged.Trade, new SubmissionInfo
+			{
+				AddonVersion = addonVersion,
+				Connection = connection,
+				TradeType = staged.TradeType,
+				TradeTypeOther = staged.TradeTypeOther,
+				Notes = staged.Notes ?? new List<NoteRecord>(),
+				Screenshot = staged.Screenshot,
+				StopPrice = staged.StopPrice
+			});
+			return Deliveries.Enqueue(tradeId, payload);
+		}
+
+		/// <summary>Drops staged trades the server has accepted. Their deliveries stay in the queue as the record
+		/// that they were sent, which is also what stops <see cref="RecordClosed"/> journaling them again.</summary>
+		public IList<string> RemoveSent()
+		{
+			List<string> sent = Staged.All
+				.Select(s => s.Trade.TradeId)
+				.Where(id => { QueuedDelivery d = Deliveries.Find(id); return d != null && d.State == DeliveryState.Sent; })
+				.ToList();
+			foreach (string tradeId in sent)
+				Staged.Remove(tradeId);
+			return sent;
+		}
+
 		// ---- reconcile
 
 		/// <summary>
