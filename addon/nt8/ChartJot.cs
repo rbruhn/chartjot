@@ -1165,6 +1165,13 @@ namespace NinjaTrader.NinjaScript.AddOns
 		/// <summary>The skin's button text size (15 in the stock skins), the size Chart Trader's text uses.</summary>
 		public const string TextSizeKey = "FontButtonHeight";
 
+		/// <summary>The skin's text colour for a whole window; WPF's default is black, unreadable on dark skins.</summary>
+		public static void UseNinjaTraderTextColor(Window window)
+		{
+			string key = Application.Current.TryFindResource("FontControlBrush") != null ? "FontControlBrush" : "FontLabelBrush";
+			window.SetResourceReference(Control.ForegroundProperty, key);
+		}
+
 		public static void UseNinjaTraderTextSize(params FrameworkElement[] elements)
 		{
 			foreach (FrameworkElement element in elements)
@@ -1196,13 +1203,15 @@ namespace NinjaTrader.NinjaScript.AddOns
 			Width	= 720;
 			Height	= 460;
 
+			ChartJotLook.UseNinjaTraderTextColor(this);
 			AddonSettings current = ChartJotMonitor.Settings;
 
 			endpoint		= new TextBox { Text = current.EndpointUrl ?? "", Margin = new Thickness(4) };
 			token			= new PasswordBox { Margin = new Thickness(4) };
 			tokenStatus		= new TextBlock { Margin = new Thickness(4), TextWrapping = TextWrapping.Wrap };
 			dataFolder		= new TextBox { Text = current.DataFolder ?? "", Margin = new Thickness(4) };
-			captureEntry	= new CheckBox { Content = "Capture an entry image shortly after each entry (the exit image is always captured)", IsChecked = current.CaptureEntryImage, Margin = new Thickness(4) };
+			captureEntry	= new CheckBox { Content = new TextBlock { Text = "Capture an entry image shortly after each entry. The exit image is always captured.", TextWrapping = TextWrapping.Wrap },
+							IsChecked = current.CaptureEntryImage, Margin = new Thickness(4), VerticalContentAlignment = VerticalAlignment.Top };
 			folderWarning	= new TextBlock { Margin = new Thickness(4), TextWrapping = TextWrapping.Wrap, Foreground = System.Windows.Media.Brushes.Orange };
 			errors			= new TextBlock { Margin = new Thickness(4), TextWrapping = TextWrapping.Wrap, Foreground = System.Windows.Media.Brushes.IndianRed };
 
@@ -1761,11 +1770,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 			Height	= 560;
 			Owner	= chart;
 
-			// NinjaTrader's own text colour, so the form follows the skin (WPF's default is black).
-			System.Windows.Media.Brush text = Application.Current.TryFindResource("FontControlBrush") as System.Windows.Media.Brush
-				?? Application.Current.TryFindResource("FontLabelBrush") as System.Windows.Media.Brush;
-			if (text != null)
-				Foreground = text;
+			ChartJotLook.UseNinjaTraderTextColor(this);
 
 			scope		= new TextBlock { Margin = new Thickness(6, 6, 6, 2), FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
 			status		= new TextBlock { Margin = new Thickness(6, 2, 6, 6), TextWrapping = TextWrapping.Wrap };
