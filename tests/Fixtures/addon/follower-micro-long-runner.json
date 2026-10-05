@@ -133,5 +133,8 @@
       "phase": "post_trade",
       "occurred_at": "2026-09-24T09:36:40-04:00"
     }
-  ]
+  ],
+  "entry_screenshot": {
+    "captured_at": "2026-09-24T09:30:01-04:00"
+  }
 }

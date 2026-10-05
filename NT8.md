@@ -212,8 +212,9 @@ fills say −2 pt; the excursion shows the trade was +3 pt at its best.
 
 ### Trade form (decided 2026-10-04, #64)
 
-One form per chart, opened from a **Chart Jot** button on the chart's toolbar.
-It follows that chart's **Chart Trader** account and instrument; there is no
+One form per chart, opened from a **Chart Jot** button at the bottom of the
+chart's Chart Trader panel (or, when that panel's layout is not available, at
+the very end of the chart toolbar). It follows that chart's **Chart Trader** account and instrument; there is no
 account or instrument picker. It has:
 
 - One large note box. The trader writes in it before, during and after the
@@ -221,15 +222,27 @@ account or instrument picker. It has:
   typed (never transmitted until Submit) and survives an NT8 restart.
 - A **Trade type** dropdown (see below), with the `Other` description field.
 - **Submit**: enabled once a trade on that account/instrument has closed and a
-  trade type is chosen. It sends every closed, unsubmitted trade there (the
-  master) plus each copier follower's own trade (see "Copier followers"), all
+  trade type is chosen. It sends the trade(s) that closed there since the form
+  was opened or last submitted/reset (the master) plus each copier follower's own trade (see "Copier followers"), all
   with the form's note and trade type, then clears the form.
 - **Reset**: clears the note and type for the next idea. If a trade has closed
   and not been submitted, Reset drops it without journaling it (after a
   confirmation).
-- One status line: waiting for entry, in trade (direction, size, time open),
-  closed and ready to submit, sending, sent, queued for retry, or failed (with
-  **Retry**).
+- One status line about the current trade only: waiting for entry, in trade
+  (direction, size, time open), closed and ready to submit, and, after Submit,
+  "Sending (try 1/3)..." until the journal has it. While it cannot be reached,
+  each try is shown with a countdown ("Try 1/3 failed: the journal can't be
+  reached. Try 2/3 in 4s..."). Then "Sent." for a few seconds, or "Not sent ...
+  Click Retry" once the 3 tries run out. Past submissions are not listed; only a
+  failed one is shown, with **Retry**, because it needs action.
+- A **Settings** button that opens Chart Jot Settings (the only way in; there
+  is no Control Center menu item).
+
+The form only cares about trades that close after it is first opened in an NT
+session, or after its last Submit/Reset (decided 2026-10-05). The AddOn still
+tracks every account's fills (it needs them for followers), but trades taken
+before the form was opened are never offered, warned about, or sent; the 24-hour
+prune drops them.
 
 There is no staged-trades list and no separate pre/in/post-trade notes. The
 note is sent as a single `general` note whose `occurred_at` is when the trader
@@ -313,12 +326,12 @@ Capture **two** images per trade, both optional (a capture failure on either
 must never prevent the trader from submitting the trade):
 
 - **Entry screenshot**: captured shortly after the position opens (same short
-  render delay as exit, below, so the entry fill/marker is drawn). Sent to
-  the server with the trade, but the journal web UI is not required to
-  display it on the main trade view -- it exists so the trader can retrieve
-  it later via the API (for example, for outside analysis). No **Recapture**
-  for this one; it is a point-in-time record of what the setup looked like at
-  entry, not something to redo.
+  render delay as exit, below, so the entry fill/marker is drawn), **only when
+  "Entry image" is ticked in Chart Jot Settings** (off by default; decided
+  2026-10-04). Sent as `entry_screenshot_file` with an `entry_screenshot`
+  object (`captured_at`). The journal shows it behind an "Entry Image" link
+  under the exit image (#72). No **Recapture** for this one; it is a
+  point-in-time record of what the setup looked like at entry.
 - **Exit screenshot**: captured after a short render delay (default 1 second
   after flat) so the exit fill and execution markers are drawn. The trader
   can replace it with **Recapture** any time before submission -- this is the
@@ -334,15 +347,23 @@ must never prevent the trader from submitting the trade):
 Both captures use the same originating-chart logic (below) and the same
 threading rules.
 
+Images are written as PNG to `{Data folder}\images\{trade_id}.png` (exit) and
+`{trade_id}-entry.png` (entry). Copier followers send their master's images:
+at Submit the master's files are copied under each follower's trade_id
+(see "Copier followers").
+
 ### Originating chart
 
 The originating chart is chosen in this order:
 
-1. The chart window hosting the note panel whose visible tab shows the trade's
-   instrument.
-2. Otherwise, the most recently active chart window whose visible tab shows
+1. For Recapture, the chart window whose Chart Jot form was used, if its
+   visible tab shows the trade's instrument.
+2. Otherwise, a chart window whose visible tab shows the instrument and whose
+   Chart Trader account is the trade's account.
+3. Otherwise, the most recently active chart window whose visible tab shows
    that instrument.
-3. Otherwise, no screenshot; the trade is staged with "screenshot skipped".
+4. Otherwise, no screenshot; the trade is staged without it (logged as
+   "image skipped").
 
 "Visible tab shows the trade's instrument" is not a visual/title check --
 match on `ChartTab.Instrument` directly (confirmed 2026-09-30, issue #37):
@@ -450,7 +471,14 @@ event handlers, or dispatcher while waiting for an HTTP response.
 - Record the server response and mark the local delivery as sent only after a
   successful response.
 - For timeouts, connection errors, and HTTP `5xx`, retain the exact same
-  staged request data and offer retry with exponential backoff.
+  staged request data and retry automatically with exponential backoff, **up
+  to 3 attempts in all** (decided 2026-10-05: about 5s, then 10s apart). After
+  the third, the delivery is Failed: the form says it could not be sent and
+  offers **Retry**, which sends the same payload again with 3 fresh attempts.
+  Retry covers **every** failed trade, not only the last Submit, and any form
+  shows how many are waiting ("3 trades not sent ... Click Retry"; during a
+  trade, a short note), so a trade can never be left stuck out of sight.
+  The failed payload and its images stay saved across NT8 restarts until then.
 - For HTTP `401` or `403`, stop automatic retries and show a configuration
   error; the trader must correct/replace the intake token.
 - For HTTP `422`, retain the payload, show the validation response, and permit

@@ -39,7 +39,8 @@ namespace ChartJot.Core.Tests
 					new NoteRecord { Body = "T1 filled. Letting the runner work.", Phase = "in_trade", OccurredAt = At(85) },
 					new NoteRecord { Body = "Runner stopped. Good management.", Phase = "post_trade", OccurredAt = At(400) }
 				},
-				Screenshot = new ScreenshotMeta { CapturedAt = At(381), Caption = "5-minute ES with H2 at EMA" }
+				Screenshot = new ScreenshotMeta { CapturedAt = At(381), Caption = "5-minute ES with H2 at EMA" },
+				EntryScreenshot = new ScreenshotMeta { CapturedAt = At(1), Format = "png" }
 			};
 		}
 
