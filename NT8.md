@@ -230,9 +230,11 @@ account or instrument picker. It has:
   confirmation).
 - One status line about the current trade only: waiting for entry, in trade
   (direction, size, time open), closed and ready to submit, and, after Submit,
-  "Submitted." for a few seconds. Past submissions are not listed; only a
+  "Sending..." until the journal has it ("Not sent yet ... retrying" while it
+  cannot be reached), then "Sent." for a few seconds. Past submissions are not listed; only a
   failed one is shown, with **Retry**, because it needs action.
-- A **Settings** button that opens Chart Jot Settings.
+- A **Settings** button that opens Chart Jot Settings (the only way in; there
+  is no Control Center menu item).
 
 The form only cares about trades that close after it is first opened in an NT
 session, or after its last Submit/Reset (decided 2026-10-05). The AddOn still
