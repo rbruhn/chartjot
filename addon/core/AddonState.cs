@@ -246,6 +246,146 @@ namespace ChartJot.Core
 			};
 		}
 
+		// ---- note panel (NT8.md, "Note targeting" and "Note phases")
+
+		/// <summary>
+		/// Saves a note the trader explicitly added for an account/instrument:
+		/// <list type="bullet">
+		/// <item>while a position is open there, an <c>in_trade</c> note on that trade (a staged target is ignored);</item>
+		/// <item>while flat with <paramref name="stagedTradeId"/> set, a <c>post_trade</c> note on that staged trade,
+		/// which must be on the same account/instrument and still editable;</item>
+		/// <item>otherwise a pending <c>pre_trade</c> note for the next trade there.</item>
+		/// </list>
+		/// <paramref name="now"/> becomes the note's <c>occurred_at</c>, kept through any later edit.
+		/// </summary>
+		public NoteRecord SaveNote(string account, string instrumentFullName, string body, DateTimeOffset now, string stagedTradeId)
+		{
+			if (string.IsNullOrWhiteSpace(body))
+				throw new ArgumentException("A note needs some text.", "body");
+
+			NoteRecord note = new NoteRecord { Body = body.Trim(), OccurredAt = now };
+
+			OpenTradeInfo open = FindOpen(account, instrumentFullName);
+			if (open != null)
+			{
+				note.Phase = NotePhases.InTrade;
+				AddTradeNote(open.TradeId, note);
+				return note;
+			}
+
+			if (stagedTradeId != null)
+			{
+				StagedTrade staged = Staged.Find(stagedTradeId);
+				if (staged == null)
+					throw new InvalidOperationException("Trade " + stagedTradeId + " is not staged for review.");
+				if (staged.Trade.Account != account || staged.Trade.Instrument.FullName != instrumentFullName)
+					throw new ArgumentException("Trade " + stagedTradeId + " belongs to another account or instrument.", "stagedTradeId");
+				if (!CanEdit(stagedTradeId))
+					throw new InvalidOperationException("Trade " + stagedTradeId + " has already been submitted.");
+
+				note.Phase = NotePhases.PostTrade;
+				EditableNotes(staged).Add(note);
+				return note;
+			}
+
+			note.Phase = NotePhases.PreTrade;
+			PendingNotes.Add(account, instrumentFullName, note);
+			return note;
+		}
+
+		/// <summary>Changes a note's text, keeping its original time. False when the state does not hold the note or
+		/// it belongs to a trade that can no longer be edited (already submitted).</summary>
+		public bool EditNote(NoteRecord note, string body)
+		{
+			if (note == null)
+				throw new ArgumentNullException("note");
+			if (string.IsNullOrWhiteSpace(body))
+				throw new ArgumentException("A note needs some text.", "body");
+			if (!IsEditableNote(note))
+				return false;
+
+			note.Body = body.Trim();
+			return true;
+		}
+
+		/// <summary>Deletes a note. False when the state does not hold it or its trade was already submitted.</summary>
+		public bool DeleteNote(NoteRecord note)
+		{
+			if (note == null)
+				throw new ArgumentNullException("note");
+
+			if (PendingNotes.Remove(note))
+				return true;
+
+			foreach (List<NoteRecord> notes in tradeNotes.Values)
+			{
+				if (RemoveByReference(notes, note))
+					return true;
+			}
+
+			StagedTrade staged = StagedHolding(note);
+			if (staged == null || !CanEdit(staged.Trade.TradeId))
+				return false;
+			return RemoveByReference(EditableNotes(staged), note);
+		}
+
+		/// <summary>The trader picked a trade type in the review form. Null clears it. <c>trade_type_other</c> is kept
+		/// only for <c>Other</c>. Refused once submitted.</summary>
+		public void SetTradeType(string tradeId, string tradeType, string tradeTypeOther)
+		{
+			StagedTrade staged = Staged.Find(tradeId);
+			if (staged == null)
+				throw new InvalidOperationException("Trade " + tradeId + " is not staged for review.");
+			if (!CanEdit(tradeId))
+				throw new InvalidOperationException("Trade " + tradeId + " has already been submitted.");
+			if (tradeType != null && !TradeTypes.IsValid(tradeType))
+				throw new ArgumentException("Unknown trade type '" + tradeType + "'.", "tradeType");
+
+			staged.TradeType = tradeType;
+			staged.TradeTypeOther = tradeType == "Other" && !string.IsNullOrWhiteSpace(tradeTypeOther) ? tradeTypeOther.Trim() : null;
+		}
+
+		/// <summary>Whether Submit trade is enabled: a staged, still-editable trade with a valid trade type.</summary>
+		public bool CanSubmit(string tradeId)
+		{
+			StagedTrade staged = Staged.Find(tradeId);
+			return staged != null && CanEdit(tradeId) && TradeTypes.IsValid(staged.TradeType);
+		}
+
+		private bool IsEditableNote(NoteRecord note)
+		{
+			if (PendingNotes.Contains(note) || tradeNotes.Values.Any(notes => notes.Any(n => ReferenceEquals(n, note))))
+				return true;
+			StagedTrade staged = StagedHolding(note);
+			return staged != null && CanEdit(staged.Trade.TradeId);
+		}
+
+		private StagedTrade StagedHolding(NoteRecord note)
+		{
+			return Staged.All.FirstOrDefault(s => s.Notes != null && s.Notes.Any(n => ReferenceEquals(n, note)));
+		}
+
+		// Staged notes may have been handed in as any IList (an array, a read-only list); make them a List we own.
+		private static IList<NoteRecord> EditableNotes(StagedTrade staged)
+		{
+			if (staged.Notes == null || staged.Notes.IsReadOnly)
+				staged.Notes = new List<NoteRecord>(staged.Notes ?? new List<NoteRecord>());
+			return staged.Notes;
+		}
+
+		private static bool RemoveByReference(IList<NoteRecord> notes, NoteRecord note)
+		{
+			for (int i = 0; i < notes.Count; i++)
+			{
+				if (ReferenceEquals(notes[i], note))
+				{
+					notes.RemoveAt(i);
+					return true;
+				}
+			}
+			return false;
+		}
+
 		// ---- submission
 
 		/// <summary>
