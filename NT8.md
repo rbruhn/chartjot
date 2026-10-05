@@ -230,8 +230,9 @@ account or instrument picker. It has:
   confirmation).
 - One status line about the current trade only: waiting for entry, in trade
   (direction, size, time open), closed and ready to submit, and, after Submit,
-  "Sending..." until the journal has it ("Not sent yet ... retrying" while it
-  cannot be reached), then "Sent." for a few seconds. Past submissions are not listed; only a
+  "Sending..." until the journal has it ("Not sent yet ... trying again" while
+  it cannot be reached, up to 3 tries), then "Sent." for a few seconds, or
+  "Not sent ... Click Retry" once the tries run out. Past submissions are not listed; only a
   failed one is shown, with **Retry**, because it needs action.
 - A **Settings** button that opens Chart Jot Settings (the only way in; there
   is no Control Center menu item).
@@ -469,7 +470,11 @@ event handlers, or dispatcher while waiting for an HTTP response.
 - Record the server response and mark the local delivery as sent only after a
   successful response.
 - For timeouts, connection errors, and HTTP `5xx`, retain the exact same
-  staged request data and offer retry with exponential backoff.
+  staged request data and retry automatically with exponential backoff, **up
+  to 3 attempts in all** (decided 2026-10-05: about 5s, then 10s apart). After
+  the third, the delivery is Failed: the form says it could not be sent and
+  offers **Retry**, which sends the same payload again with 3 fresh attempts.
+  The failed payload and its images stay saved across NT8 restarts until then.
 - For HTTP `401` or `403`, stop automatic retries and show a configuration
   error; the trader must correct/replace the intake token.
 - For HTTP `422`, retain the payload, show the validation response, and permit

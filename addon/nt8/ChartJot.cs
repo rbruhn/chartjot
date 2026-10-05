@@ -1947,15 +1947,18 @@ namespace NinjaTrader.NinjaScript.AddOns
 			if (failed != null)
 			{
 				awaitingDelivery = false;
-				return "Last submission failed" + (failed.StatusCode.HasValue ? " (HTTP " + failed.StatusCode.Value.ToString(CultureInfo.InvariantCulture) + ")" : "")
-					+ (failed.Detail != null ? ": " + failed.Detail : ".") + " Retry to send it again.";
+				if (!failed.StatusCode.HasValue || failed.StatusCode.Value >= 500)
+					return "Not sent: the journal couldn't be reached after " + failed.Attempts.ToString(CultureInfo.InvariantCulture)
+						+ " tries" + (failed.Detail != null ? " (" + failed.Detail + ")" : "") + ". Click Retry to send it again.";
+				return "Not sent: the journal refused it (HTTP " + failed.StatusCode.Value.ToString(CultureInfo.InvariantCulture) + ")"
+					+ (failed.Detail != null ? ": " + failed.Detail : ".") + " Click Retry to send it again.";
 			}
 			// A submission still on its way is the current trade too: say so until the journal has it.
-			if (view.LastSubmitted.Any(d => d.State == DeliveryState.Pending || d.State == DeliveryState.Sending))
+			if (view.LastSubmitted.Any(d => d.State == DeliveryState.Pending || d.State == DeliveryState.Sending || d.State == DeliveryState.QueuedForRetry))
 			{
 				awaitingDelivery = true;
-				return view.LastSubmitted.Any(d => d.State == DeliveryState.Pending && d.Attempts > 0)
-					? "Not sent yet: the journal can't be reached. Retrying automatically."
+				return view.LastSubmitted.Any(d => d.Attempts > 0)
+					? "Not sent yet: the journal can't be reached. Trying again (up to 3 tries)."
 					: "Sending...";
 			}
 			if (awaitingDelivery)
