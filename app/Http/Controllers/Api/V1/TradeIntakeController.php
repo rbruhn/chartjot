@@ -49,7 +49,8 @@ class TradeIntakeController extends Controller
             $trade = $service->store(
                 $journal,
                 $request->validated(),
-                $request->file('screenshot_file')
+                $request->file('screenshot_file'),
+                $request->file('entry_screenshot_file')
             );
         } catch (UnknownAccountException $e) {
             $failure = [
@@ -64,7 +65,7 @@ class TradeIntakeController extends Controller
                 'account_name'    => $failure['account_name'],
                 'source_trade_id' => $failure['source_trade_id'],
                 'reason'          => $failure['reason'],
-                'payload'         => $request->except('screenshot_file'),
+                'payload'         => $request->except(['screenshot_file', 'entry_screenshot_file']),
                 'occurred_at'     => now(),
             ]);
 
