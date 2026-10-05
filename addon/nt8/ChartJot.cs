@@ -1775,7 +1775,8 @@ namespace NinjaTrader.NinjaScript.AddOns
 			tradeType	= new ComboBox { Margin = new Thickness(6, 4, 6, 2), Width = 250, MinHeight = 30, HorizontalAlignment = HorizontalAlignment.Left,
 							VerticalContentAlignment = VerticalAlignment.Center, Padding = new Thickness(6, 3, 6, 3) };
 			tradeTypeOther = new TextBox { Margin = new Thickness(6, 2, 6, 2), Width = 250, MinHeight = 28, HorizontalAlignment = HorizontalAlignment.Left,
-							VerticalContentAlignment = VerticalAlignment.Center, Visibility = Visibility.Collapsed };
+							VerticalContentAlignment = VerticalAlignment.Center, Visibility = Visibility.Collapsed,
+							MaxLength = 64, ToolTip = "Describe the setup (up to 64 characters)" };
 			warning		= new TextBlock { Margin = new Thickness(6, 2, 6, 2), TextWrapping = TextWrapping.Wrap, Foreground = System.Windows.Media.Brushes.Orange };
 			submit		= new Button { Content = "Submit", Margin = new Thickness(6), Padding = new Thickness(18, 4, 18, 4), FontWeight = FontWeights.SemiBold };
 			reset		= new Button { Content = "Reset", Margin = new Thickness(6), Padding = new Thickness(18, 4, 18, 4) };
