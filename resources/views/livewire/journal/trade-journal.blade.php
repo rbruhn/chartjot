@@ -131,6 +131,7 @@ new class extends Component {
                     ->where('instrument_symbol', 'like', "%{$term}%")
                     ->orWhere('instrument', 'like', "%{$term}%")
                     ->orWhere('trade_type', 'like', "%{$term}%")
+                    ->orWhere('trade_type_other', 'like', "%{$term}%")
                     ->when($matchingTypes, fn ($i) => $i->orWhereIn('trade_type', $matchingTypes))
                     ->orWhereHas('account', fn ($a) => $a->where('name', 'like', "%{$term}%"))
                 );
@@ -537,6 +538,7 @@ new class extends Component {
             'exit_at'          => $t->exit_at->setTimezone($tz)->format('Y-m-d\TH:i'),
             'exit_reason'      => $t->exit_reason->value,
             'trade_type'       => $t->trade_type?->value ?? '',
+            'trade_type_other' => $t->trade_type_other ?? '',
             'entry_order_name' => $t->entry_order_name ?? '',
             'exit_order_name'  => $t->exit_order_name ?? '',
         ];
@@ -553,6 +555,13 @@ new class extends Component {
     {
         $trade = $this->selectedTrade;
         if (!$trade) return;
+
+        $this->tradeEditForm['trade_type_other'] = trim((string) ($this->tradeEditForm['trade_type_other'] ?? ''));
+        $this->validate(
+            ['tradeEditForm.trade_type_other' => ['nullable', 'string', 'max:64']],
+            [],
+            ['tradeEditForm.trade_type_other' => 'description'],
+        );
 
         $data       = $this->tradeEditForm;
         $tz         = $trade->account->effectiveTimezone();
@@ -578,6 +587,10 @@ new class extends Component {
             'exit_at'          => $exitAt,
             'exit_reason'      => ExitReason::from($data['exit_reason']),
             'trade_type'       => $data['trade_type'] ? \App\Enums\TradeType::from($data['trade_type']) : null,
+            // The description belongs to Other only (same rule as the AddOn); blank saves as null.
+            'trade_type_other' => $data['trade_type'] === \App\Enums\TradeType::Other->value && $data['trade_type_other'] !== ''
+                ? $data['trade_type_other']
+                : null,
             'entry_order_name' => $data['entry_order_name'] ?? '',
             'exit_order_name'  => $data['exit_order_name'] ?? '',
             'points'           => $points,
@@ -977,7 +990,7 @@ new class extends Component {
                         <div class="grid grid-cols-2 gap-4">
                             <div>
                                 <label class="block text-xs text-gray-600 dark:text-gray-500 uppercase tracking-wide mb-1">Trade Type</label>
-                                <select wire:model="tradeEditForm.trade_type"
+                                <select wire:model.live="tradeEditForm.trade_type"
                                     class="w-full bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 text-sm rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500">
                                     <option value="">— unknown —</option>
                                     <option value="2ES">Second Entry Short</option>
@@ -988,6 +1001,14 @@ new class extends Component {
                                     <option value="F2EL">Failed Second Entry Long</option>
                                     <option value="Other">Other</option>
                                 </select>
+                                @if(($tradeEditForm['trade_type'] ?? '') === 'Other')
+                                    <input type="text" wire:model="tradeEditForm.trade_type_other" maxlength="64" placeholder="Describe the setup (optional)"
+                                        aria-label="Other trade type description"
+                                        class="mt-2 w-full bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 text-sm rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                                    @error('tradeEditForm.trade_type_other')
+                                        <p class="mt-1 text-xs text-red-600 dark:text-red-400">{{ $message }}</p>
+                                    @enderror
+                                @endif
                             </div>
                             <div>
                                 <label class="block text-xs text-gray-600 dark:text-gray-500 uppercase tracking-wide mb-1">Exit Reason</label>
@@ -1036,7 +1057,13 @@ new class extends Component {
                         ] as [$label, $value])
                             <div class="bg-gray-50 dark:bg-gray-800 px-3 py-2.5">
                                 <div class="text-xs text-gray-600 dark:text-gray-500 uppercase tracking-wide mb-0.5">{{ $label }}</div>
-                                <div class="text-gray-900 dark:text-gray-100 font-medium">{{ $value }}</div>
+                                <div class="text-gray-900 dark:text-gray-100 font-medium">
+                                    {{ $value }}
+                                    {{-- An Other trade's description (up to 64 characters) sits behind an info icon so the cell stays one line (#75) --}}
+                                    @if($label === 'TRADE TYPE' && $t->trade_type === \App\Enums\TradeType::Other && filled($t->trade_type_other))
+                                        <x-stats.info-tip label="Other trade type description" class="align-middle">{{ $t->trade_type_other }}</x-stats.info-tip>
+                                    @endif
+                                </div>
                             </div>
                         @endforeach
                     </div>
