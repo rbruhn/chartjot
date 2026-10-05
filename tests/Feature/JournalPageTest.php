@@ -818,3 +818,125 @@ test('cannot delete a trade belonging to another journal', function () {
 
     expect(Trade::find($otherTrade->id))->not->toBeNull();
 });
+
+// ---------------------------------------------------------------------------
+// "Other" trade type description (issue #75)
+// ---------------------------------------------------------------------------
+
+function editTrade(User $user, Journal $journal, Trade $trade)
+{
+    return Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->call('startEditTrade');
+}
+
+test('the trade view shows Other with an info icon holding the description', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['trade_type' => TradeType::Other, 'trade_type_other' => 'breakout retest']);
+
+    $html = Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->assertSeeHtml('aria-label="Other trade type description"')
+        ->html();
+
+    // The description is in the icon's tooltip, not printed after "Other".
+    expect($html)->toMatch('#role="tooltip"[^>]*>\s*breakout retest\s*</span>#')
+        ->and($html)->not->toContain('Other: breakout retest');
+});
+
+test('the trade view shows plain Other when there is no description', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['trade_type' => TradeType::Other, 'trade_type_other' => null]);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->assertSee('Other')
+        ->assertDontSeeHtml('aria-label="Other trade type description"');
+});
+
+test('the Other description is escaped on the trade view', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['trade_type' => TradeType::Other, 'trade_type_other' => '<script>alert(1)</script>']);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->assertSeeHtml('&lt;script&gt;alert(1)&lt;/script&gt;')
+        ->assertDontSeeHtml('<script>alert(1)</script>');
+});
+
+test('startEditTrade prefills the Other description', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['trade_type' => TradeType::Other, 'trade_type_other' => 'news fade']);
+
+    editTrade($user, $journal, $trade)->assertSet('tradeEditForm.trade_type_other', 'news fade');
+});
+
+test('saveTrade stores a trimmed Other description', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['trade_type' => TradeType::SecondEntryLong]);
+
+    editTrade($user, $journal, $trade)
+        ->set('tradeEditForm.trade_type', TradeType::Other->value)
+        ->set('tradeEditForm.trade_type_other', '  opening drive  ')
+        ->call('saveTrade')
+        ->assertHasNoErrors();
+
+    $fresh = $trade->fresh();
+    expect($fresh->trade_type)->toBe(TradeType::Other)
+        ->and($fresh->trade_type_other)->toBe('opening drive');
+});
+
+test('saveTrade clears a blank Other description to null', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['trade_type' => TradeType::Other, 'trade_type_other' => 'old text']);
+
+    editTrade($user, $journal, $trade)
+        ->set('tradeEditForm.trade_type_other', '   ')
+        ->call('saveTrade');
+
+    expect($trade->fresh()->trade_type_other)->toBeNull();
+});
+
+test('saveTrade rejects an Other description longer than 64 characters', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['trade_type' => TradeType::Other, 'trade_type_other' => 'keep me']);
+
+    editTrade($user, $journal, $trade)
+        ->set('tradeEditForm.trade_type_other', str_repeat('x', 65))
+        ->call('saveTrade')
+        ->assertHasErrors(['tradeEditForm.trade_type_other' => 'max'])
+        ->assertSee('The description field must not be greater than 64 characters.');
+
+    expect($trade->fresh()->trade_type_other)->toBe('keep me');
+});
+
+test('changing the type away from Other clears the description', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['trade_type' => TradeType::Other, 'trade_type_other' => 'breakout retest']);
+
+    editTrade($user, $journal, $trade)
+        ->set('tradeEditForm.trade_type', TradeType::RangeLong->value)
+        ->call('saveTrade');
+
+    $fresh = $trade->fresh();
+    expect($fresh->trade_type)->toBe(TradeType::RangeLong)
+        ->and($fresh->trade_type_other)->toBeNull();
+});
+
+test('search matches the Other description, only in this journal', function () {
+    [$user, $journal] = journalUser();
+    tradeInJournal($journal, ['trade_type' => TradeType::Other, 'trade_type_other' => 'breakout retest']);
+    tradeInJournal($journal, ['trade_type' => TradeType::SecondEntryLong, 'instrument_symbol' => 'ES']);
+    [, $otherJournal] = journalUser();
+    tradeInJournal($otherJournal, ['trade_type' => TradeType::Other, 'trade_type_other' => 'breakout retest']);
+
+    $component = Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->set('search', 'retest');
+
+    expect($component->get('summary')['total'])->toBe(1);
+});
