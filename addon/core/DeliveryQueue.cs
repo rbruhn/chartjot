@@ -226,6 +226,25 @@ namespace ChartJot.Core
 			ConfigurationErrorHalted = false;
 		}
 
+		/// <summary>Every Failed delivery, in the order queued: what the trader still has to retry.</summary>
+		public IList<QueuedDelivery> FailedDeliveries
+		{
+			get { return order.Where(d => d.State == DeliveryState.Failed).ToList(); }
+		}
+
+		/// <summary>
+		/// The trader clicked Retry: every Failed delivery goes back to Pending with a fresh set of automatic attempts,
+		/// its payload unchanged (see <see cref="RetryManually"/>). Returns the retried trade_ids.
+		/// </summary>
+		public IList<string> RetryAllFailed(DateTimeOffset now)
+		{
+			List<string> retried = FailedDeliveries.Select(d => d.TradeId).ToList();
+			foreach (string tradeId in retried)
+				RetryManually(tradeId, now);
+			ConfigurationErrorHalted = false;
+			return retried;
+		}
+
 		/// <summary>Exponential backoff from attempt 1, doubling each time and capped at max.</summary>
 		public static TimeSpan NextBackoff(int attempt, TimeSpan initial, TimeSpan max)
 		{
