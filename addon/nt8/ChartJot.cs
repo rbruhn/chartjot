@@ -34,6 +34,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Media.Imaging;
 using ChartJot.Core;
 using NinjaTrader.Cbi;
@@ -1156,6 +1157,22 @@ namespace NinjaTrader.NinjaScript.AddOns
 		}
 	}
 
+	// ------------------------------------------------------- NinjaTrader look
+
+	/// <summary>Text size from the NinjaTrader skin, so Chart Jot's windows match Chart Trader and follow the skin.</summary>
+	public static class ChartJotLook
+	{
+		/// <summary>The skin's button text size (15 in the stock skins), the size Chart Trader's text uses.</summary>
+		public const string TextSizeKey = "FontButtonHeight";
+
+		public static void UseNinjaTraderTextSize(params FrameworkElement[] elements)
+		{
+			foreach (FrameworkElement element in elements)
+				if (element != null)
+					element.SetResourceReference(TextElement.FontSizeProperty, TextSizeKey);
+		}
+	}
+
 	// ------------------------------------------------------- settings window
 
 	/// <summary>
@@ -1176,8 +1193,8 @@ namespace NinjaTrader.NinjaScript.AddOns
 		public ChartJotSettingsWindow()
 		{
 			Caption	= "Chart Jot Settings";
-			Width	= 640;
-			Height	= 420;
+			Width	= 720;
+			Height	= 460;
 
 			AddonSettings current = ChartJotMonitor.Settings;
 
@@ -1202,6 +1219,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 			save.Click += (s, e) => Save();
 			Button close = new Button { Content = "Close", Margin = new Thickness(4), Padding = new Thickness(16, 2, 16, 2), IsCancel = true };
 			close.Click += (s, e) => Close();
+			ChartJotLook.UseNinjaTraderTextSize(save, close);
 
 			Grid grid = new Grid { Margin = new Thickness(8) };
 			grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -1232,6 +1250,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 			grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
 			TextBlock caption = new TextBlock { Text = label, Margin = new Thickness(4), VerticalAlignment = VerticalAlignment.Center };
+			ChartJotLook.UseNinjaTraderTextSize(caption, field as FrameworkElement, action as FrameworkElement);
 			Grid.SetRow(caption, row);
 			grid.Children.Add(caption);
 
@@ -1738,8 +1757,8 @@ namespace NinjaTrader.NinjaScript.AddOns
 		{
 			this.chart = chart;
 			Caption	= "Chart Jot";
-			Width	= 460;
-			Height	= 520;
+			Width	= 480;
+			Height	= 560;
 			Owner	= chart;
 
 			// NinjaTrader's own text colour, so the form follows the skin (WPF's default is black).
@@ -1751,9 +1770,12 @@ namespace NinjaTrader.NinjaScript.AddOns
 			scope		= new TextBlock { Margin = new Thickness(6, 6, 6, 2), FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
 			status		= new TextBlock { Margin = new Thickness(6, 2, 6, 6), TextWrapping = TextWrapping.Wrap };
 			note		= new TextBox { Margin = new Thickness(6), AcceptsReturn = true, AcceptsTab = true, TextWrapping = TextWrapping.Wrap,
-							VerticalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalContentAlignment = VerticalAlignment.Top, FontSize = 14 };
-			tradeType	= new ComboBox { Margin = new Thickness(6, 2, 6, 2) };
-			tradeTypeOther = new TextBox { Margin = new Thickness(6, 2, 6, 2), Visibility = Visibility.Collapsed };
+							VerticalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalContentAlignment = VerticalAlignment.Top };
+			// Sized like Chart Trader's dropdowns: compact and left-aligned, not the full width of the form.
+			tradeType	= new ComboBox { Margin = new Thickness(6, 4, 6, 2), Width = 250, MinHeight = 30, HorizontalAlignment = HorizontalAlignment.Left,
+							VerticalContentAlignment = VerticalAlignment.Center, Padding = new Thickness(6, 3, 6, 3) };
+			tradeTypeOther = new TextBox { Margin = new Thickness(6, 2, 6, 2), Width = 250, MinHeight = 28, HorizontalAlignment = HorizontalAlignment.Left,
+							VerticalContentAlignment = VerticalAlignment.Center, Visibility = Visibility.Collapsed };
 			warning		= new TextBlock { Margin = new Thickness(6, 2, 6, 2), TextWrapping = TextWrapping.Wrap, Foreground = System.Windows.Media.Brushes.Orange };
 			submit		= new Button { Content = "Submit", Margin = new Thickness(6), Padding = new Thickness(18, 4, 18, 4), FontWeight = FontWeights.SemiBold };
 			reset		= new Button { Content = "Reset", Margin = new Thickness(6), Padding = new Thickness(18, 4, 18, 4) };
@@ -1763,6 +1785,8 @@ namespace NinjaTrader.NinjaScript.AddOns
 
 			settings	= new Button { Content = "Settings", ToolTip = "Chart Jot Settings", Margin = new Thickness(6), Padding = new Thickness(10, 4, 10, 4) };
 			settings.Click += (s, e) => NinjaTrader.Core.Globals.RandomDispatcher.BeginInvoke(new Action(() => new ChartJotSettingsWindow().Show()));
+
+			ChartJotLook.UseNinjaTraderTextSize(scope, status, note, tradeType, tradeTypeOther, warning, submit, reset, retry, recapture, settings);
 
 			tradeType.Items.Add(new ComboBoxItem { Content = "Trade type...", Tag = null });
 			foreach (string value in TradeTypes.All)
