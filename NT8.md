@@ -89,9 +89,10 @@ time.
   trade (see `executions[].allocated_quantity`).
 - Keep trade state separate by account and instrument. A close in one
   instrument must never complete notes or executions belonging to another.
-- Every connected account's round turns become journal trades independently;
-  there is no master/follower distinction (the AddOn does not read or match
-  against any trade copier -- see "Housekeeping" in `NT.md`).
+- Every account's round turns are tracked independently. Only the trades a
+  chart form submits are journaled: the Chart Trader account's, plus each copier
+  follower's own trade, which carries the master's note and type (see "Copier
+  followers").
 - Ignore a fill whose `ExecutionId` has already been processed for that
   account. Reconnects can replay historical executions (verified on Rithmic:
   52 duplicates on reconnect; none on Sim). Treat `ExecutionId` as an opaque
@@ -209,53 +210,48 @@ fills say −2 pt; the excursion shows the trade was +3 pt at its best.
 
 ## Notes
 
-### Note panel
+### Trade form (decided 2026-10-04, #64)
 
-Implement a non-blocking WPF note panel attached to, or floating over, the
-chart. It should have:
+One form per chart, opened from a **Chart Jot** button on the chart's toolbar.
+It follows that chart's **Chart Trader** account and instrument; there is no
+account or instrument picker. It has:
 
-- A text box with an explicit **Add note** action.
-- A visible active-trade state: account, instrument, direction, quantity, and
-  elapsed time when known.
-- A timeline/list of locally captured notes for the selected trade, with
-  **Edit** and **Delete** for each note until that trade is submitted.
-- A staged-trades list showing every closed trade awaiting review or
-  delivery, with its delivery state.
-- A **Trade type** dropdown in the completed-trade review state. It must be
-  selected before **Submit trade** is enabled.
-- A prominent **Submit trade** action that is enabled only after the position
-  is closed and the trade has been staged for review.
-- A **Recapture** action for the screenshot while the trade is in review.
-- Clear delivery state: pending, sending, sent, queued for retry, or failed.
+- One large note box. The trader writes in it before, during and after the
+  trade; it is the same note throughout. Its text is saved locally as it is
+  typed (never transmitted until Submit) and survives an NT8 restart.
+- A **Trade type** dropdown (see below), with the `Other` description field.
+- **Submit**: enabled once a trade on that account/instrument has closed and a
+  trade type is chosen. It sends every closed, unsubmitted trade there (the
+  master) plus each copier follower's own trade (see "Copier followers"), all
+  with the form's note and trade type, then clears the form.
+- **Reset**: clears the note and type for the next idea. If a trade has closed
+  and not been submitted, Reset drops it without journaling it (after a
+  confirmation).
+- One status line: waiting for entry, in trade (direction, size, time open),
+  closed and ready to submit, sending, sent, queued for retry, or failed (with
+  **Retry**).
 
-Do not continuously transmit every keystroke. A note becomes a timestamped
-record when the trader explicitly saves it. If there is no active trade, retain
-the note as a pending `pre_trade` note for the next qualifying trade on that
-chart/account.
+There is no staged-trades list and no separate pre/in/post-trade notes. The
+note is sent as a single `general` note whose `occurred_at` is when the trader
+started writing it. Closed trades nobody submits within 24 hours of staging are
+dropped locally (they were never journaled).
 
-### Note targeting
+### Copier followers (corrected 2026-10-04)
 
-- While a position is open, a saved note is `in_trade` for that position.
-- While flat with no staged trade, a saved note is a pending `pre_trade` note.
-- While flat with one or more staged trades, the panel shows an explicit
-  target toggle: **Post-trade note for [selected staged trade]** (default)
-  or **Pre-trade note for next trade**.
-- A note is never silently moved to another trade after it is saved. Editing a
-  note keeps its original `occurred_at`.
+With the Affordable Indicators trade copier, the **master** is the Chart Trader
+account the form follows. The note, trade type and screenshot are written or
+captured once, on the master, and reused for every follower. Each account,
+master and followers alike, still sends **its own trade data**: instrument,
+entries, exits, legs/targets, P&L and excursion. Each is its own journal trade.
 
-### Note phases
-
-Use these values:
-
-| Phase | Meaning |
-| --- | --- |
-| `pre_trade` | Saved while flat before the associated trade opens |
-| `in_trade` | Saved while the associated position is open |
-| `post_trade` | Saved after the position closed but before the completed trade has been delivered |
-| `general` | A fallback only when a phase cannot be determined |
-
-Every note must include its original local timestamp with offset. Do not
-replace pre-trade notes with a single final text field.
+The AddOn reads the copier's follower list for the master from the copier
+indicator (`aiDuplicateAccountActions`, its `ThisMasterAccount` and
+`AllAccountData`) on any open chart, read-only. A follower's trade is the one
+that matches the vendor-confirmed rules: same market family and contract month
+(ES/MES, NQ/MNQ, YM/MYM, RTY/M2K, CL/MCL, GC/MGC), the master's direction (the
+opposite when the follower fades), and an entry from 5 seconds before the
+master's entry up to 5 seconds after it (Executions mode) or up to the master's
+exit (Orders mode). The earliest such trade per follower is used.
 
 ### Trade type selector
 
@@ -800,17 +796,16 @@ unless verbose diagnostics is enabled, or raw image bytes.
   fill's quantity split via `allocated_quantity`.
 - [ ] Replayed/duplicate execution events do not create duplicate fills or
   trades.
-- [ ] Pre-, in-, and post-trade notes arrive with the correct phase and time.
+- [ ] The form follows the chart's Chart Trader account and instrument, and its
+  note (written before, during and after the trade) arrives as one note.
 - [ ] A closed trade is staged for review and does not post until the trader
   clicks **Submit trade**.
-- [ ] A new trade can be opened, noted, and closed while a previous trade is
-  still awaiting review; the two never share notes.
-- [ ] A user can add, edit, and delete notes after close and before submission.
+- [ ] A copier follower's own trade is sent with the master's note and type.
+- [ ] Reset clears the form; a closed, unsubmitted trade is then not journaled.
 - [ ] A user must select one valid trade type before submission; a
   direction mismatch shows a non-blocking warning.
 - [ ] Selecting `Other` permits an optional custom entry description.
-- [ ] A successful submission clears the note field and starts a fresh
-  pre-trade note buffer.
+- [ ] A successful submission clears the form for the next trade.
 - [ ] A failed submission preserves the staged trade and notes for retry.
 - [ ] A submitted trade posts without a screenshot if screenshot capture fails.
 - [ ] Screenshot capture occurs on the chart dispatcher, includes drawings and
