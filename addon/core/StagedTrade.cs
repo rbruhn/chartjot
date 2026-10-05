@@ -22,6 +22,9 @@ namespace ChartJot.Core
 		/// <summary>Null when capture failed or is disabled; that must never block submission.</summary>
 		public ScreenshotMeta Screenshot { get; set; }
 
+		/// <summary>The image captured when the trade opened (#52). Null when disabled or not captured.</summary>
+		public ScreenshotMeta EntryScreenshot { get; set; }
+
 		/// <summary>The working stop's price when the trade closed, or whatever the trader typed over it. Null when
 		/// there was none or it is unknown; that must never block submission.</summary>
 		public decimal? StopPrice { get; set; }
@@ -108,10 +111,8 @@ namespace ChartJot.Core
 			w.Property("trade_type", s.TradeType);
 			w.Property("trade_type_other", s.TradeTypeOther);
 
-			if (s.Screenshot == null)
-				w.Name("screenshot").Null();
-			else
-				WriteScreenshot(w, s.Screenshot);
+			WriteScreenshot(w, "screenshot", s.Screenshot);
+			WriteScreenshot(w, "entry_screenshot", s.EntryScreenshot);
 
 			w.Name("stop_price");
 			if (s.StopPrice.HasValue) w.Decimal(s.StopPrice.Value); else w.Null();
@@ -129,6 +130,7 @@ namespace ChartJot.Core
 				TradeType = v["trade_type"].AsString(),
 				TradeTypeOther = v["trade_type_other"].AsString(),
 				Screenshot = v["screenshot"].IsNull ? null : ReadScreenshot(v["screenshot"]),
+				EntryScreenshot = ReadScreenshot(v["entry_screenshot"]),
 				// Missing in files written before the field existed, which reads as null.
 				StopPrice = v["stop_price"].IsNull ? (decimal?)null : v["stop_price"].AsDecimal(),
 				StagedAt = ParseTimestamp(v["staged_at"])
@@ -404,17 +406,26 @@ namespace ChartJot.Core
 
 		// ---- ScreenshotMeta ----
 
-		private static void WriteScreenshot(JsonWriter w, ScreenshotMeta s)
+		/// <summary>Writes <paramref name="s"/> under <paramref name="name"/>, or null.</summary>
+		internal static void WriteScreenshot(JsonWriter w, string name, ScreenshotMeta s)
 		{
-			w.Name("screenshot").BeginObject();
+			if (s == null)
+			{
+				w.Name(name).Null();
+				return;
+			}
+			w.Name(name).BeginObject();
 			w.Property("captured_at", Timestamp(s.CapturedAt));
 			w.Property("caption", s.Caption);
 			w.Property("format", s.Format);
 			w.EndObject();
 		}
 
-		private static ScreenshotMeta ReadScreenshot(JsonValue v)
+		/// <summary>Null for a JSON null or a missing key.</summary>
+		internal static ScreenshotMeta ReadScreenshot(JsonValue v)
 		{
+			if (v.IsNull)
+				return null;
 			return new ScreenshotMeta
 			{
 				CapturedAt = ParseTimestamp(v["captured_at"]).Value,

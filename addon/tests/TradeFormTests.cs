@@ -327,5 +327,76 @@ namespace ChartJot.Core.Tests
 
 			Assert.Equal(new[] { masterId }, legacy.PruneUnsubmitted(At(70), TimeSpan.FromHours(24)));
 		}
+
+		// ---- the form only cares about trades closed since it was opened, or since the last Submit/Reset
+
+		[Fact]
+		public void PendingForForm_IgnoresTradesStagedBeforeTheFormsCycleStarted()
+		{
+			string masterId, followerId;
+			AddonState state = Closed(out masterId, out followerId);	// staged at At(62)
+
+			state.StartFormCycle(Master, EsName, At(100));
+
+			Assert.Empty(state.PendingForForm(Master, EsName));
+			state.UpdateForm(Master, EsName, "idea", "2EL", null, At(101));
+			Assert.False(state.CanSubmitForm(Master, EsName));
+		}
+
+		[Fact]
+		public void PendingForForm_IncludesATradeClosedAfterTheCycleStarted()
+		{
+			AddonState state = new AddonState();
+			state.StartFormCycle(Master, EsName, At(-60));
+			state.Tracker.Apply(Entry);
+			CompletedTrade master = Assert.Single(state.Tracker.Apply(Exit).Closed);
+			state.RecordClosed(master);
+
+			Assert.Equal(master.TradeId, Assert.Single(state.PendingForForm(Master, EsName)).TradeId);	// waiting to be staged
+			state.Stage(master.TradeId, At(62));
+			Assert.Equal(master.TradeId, Assert.Single(state.PendingForForm(Master, EsName)).TradeId);	// staged after the start
+		}
+
+		[Fact]
+		public void Submit_StartsANewCycle_SoAnOlderLeftoverIsNotPickedUpNext()
+		{
+			string masterId, followerId;
+			AddonState state = Closed(out masterId, out followerId);	// staged at At(62)
+			state.Tracker.Apply(Buy("h1", "q1", "Entry", 1, 7700m, 70, 0m, 1, Master, isEntry: true));
+			CompletedTrade second = Assert.Single(state.Tracker.Apply(Sell("h2", "q2", "Target1", 1, 7702m, 90, 0m, 0, Master, isExit: true)).Closed);
+			state.RecordClosed(second);
+			state.Stage(second.TradeId, At(92));
+			state.StartFormCycle(Master, EsName, At(80));	// opened after the first trade, before the second
+			state.UpdateForm(Master, EsName, "idea", "2EL", null, At(85));
+
+			Assert.Equal(new[] { second.TradeId }, state.SubmitForm(Master, EsName, Version, Connection, new string[0], At(120)).Select(d => d.TradeId));
+			Assert.Empty(state.PendingForForm(Master, EsName));
+			Assert.NotNull(state.Staged.Find(masterId));	// the leftover is not sent, and not dropped by Submit
+		}
+
+		[Fact]
+		public void Reset_DropsOnlyTheCyclesTrades_AndStartsANewCycle()
+		{
+			string masterId, followerId;
+			AddonState state = Closed(out masterId, out followerId);	// staged at At(62)
+			state.StartFormCycle(Master, EsName, At(80));
+			state.Tracker.Apply(Buy("h1", "q1", "Entry", 1, 7700m, 70, 0m, 1, Master, isEntry: true));
+			CompletedTrade second = Assert.Single(state.Tracker.Apply(Sell("h2", "q2", "Target1", 1, 7702m, 90, 0m, 0, Master, isExit: true)).Closed);
+			state.RecordClosed(second);
+			state.Stage(second.TradeId, At(92));
+
+			Assert.Equal(new[] { second.TradeId }, state.ResetForm(Master, EsName, At(100)));
+			Assert.NotNull(state.Staged.Find(masterId));
+			Assert.Equal(At(100), state.FormFor(Master, EsName).CycleStartedAt);
+		}
+
+		[Fact]
+		public void CycleStart_SurvivesARestart()
+		{
+			AddonState state = new AddonState();
+			state.StartFormCycle(Master, EsName, At(-60));
+
+			Assert.Equal(At(-60), AddonState.Deserialize(state.Serialize()).FormFor(Master, EsName).CycleStartedAt);
+		}
 	}
 }

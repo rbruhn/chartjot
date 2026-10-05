@@ -76,6 +76,13 @@ namespace ChartJot.Core
 		public DateTimeOffset OccurredAt { get; set; }
 	}
 
+	/// <summary>A trade's two chart images (#52); either may be null.</summary>
+	public sealed class TradeImages
+	{
+		public ScreenshotMeta Exit { get; set; }
+		public ScreenshotMeta Entry { get; set; }
+	}
+
 	public sealed class ScreenshotMeta
 	{
 		public DateTimeOffset CapturedAt { get; set; }
@@ -97,6 +104,9 @@ namespace ChartJot.Core
 
 		/// <summary>Null when no screenshot file is attached.</summary>
 		public ScreenshotMeta Screenshot { get; set; }
+
+		/// <summary>The entry image (#52); null when none is attached. Only its capture time is sent.</summary>
+		public ScreenshotMeta EntryScreenshot { get; set; }
 
 		/// <summary>Optional (<see cref="StagedTrade.StopPrice"/>); null is sent as null and never blocks submission.</summary>
 		public decimal? StopPrice { get; set; }
@@ -202,6 +212,13 @@ namespace ChartJot.Core
 				w.Name("screenshot").BeginObject();
 				w.Property("captured_at", Timestamp(info.Screenshot.CapturedAt));
 				w.Property("caption", NullIfBlank(info.Screenshot.Caption));
+				w.EndObject();
+			}
+
+			if (info.EntryScreenshot != null)
+			{
+				w.Name("entry_screenshot").BeginObject();
+				w.Property("captured_at", Timestamp(info.EntryScreenshot.CapturedAt));
 				w.EndObject();
 			}
 

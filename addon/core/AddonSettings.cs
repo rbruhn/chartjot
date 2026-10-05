@@ -36,6 +36,9 @@ namespace ChartJot.Core
 
 		public string EndpointUrl { get; set; }
 
+		/// <summary>Whether to capture the entry image (#52). Off by default; the exit image is always captured.</summary>
+		public bool CaptureEntryImage { get; set; }
+
 		/// <summary>Where the state file (and later the screenshots) live. Defaults to <c>%USERPROFILE%\ChartJot</c>.</summary>
 		public string DataFolder { get; set; }
 
@@ -133,6 +136,7 @@ namespace ChartJot.Core
 			w.Property("endpoint_url", EndpointUrl);
 			w.Property("data_folder", DataFolder);
 			w.Property("protected_token", protectedToken);
+			w.Property("capture_entry_image", CaptureEntryImage);
 			w.EndObject();
 			return w.ToString();
 		}
@@ -147,7 +151,9 @@ namespace ChartJot.Core
 			{
 				EndpointUrl = root["endpoint_url"].AsString(),
 				DataFolder = root["data_folder"].AsString(),
-				protectedToken = root["protected_token"].AsString()
+				protectedToken = root["protected_token"].AsString(),
+				// Missing in settings files written before it existed: off.
+				CaptureEntryImage = root.Has("capture_entry_image") && root["capture_entry_image"].AsBool()
 			};
 		}
 
