@@ -2,6 +2,7 @@
 
 use App\Enums\InvitationStatus;
 use App\Enums\NotePhase;
+use App\Enums\ScreenshotKind;
 use App\Enums\ScreenshotSource;
 use App\Mail\NewTradeCommentMail;
 use App\Models\Account;
@@ -616,4 +617,96 @@ test('the conversation page chart can be expanded in a modal too', function () {
 
     expect($html)->toMatch('#<button[^>]*title="Expand image"#')
         ->and($html)->toMatch('#<dialog[^>]*>(?:(?!</dialog>).)*'.preg_quote($url, '#').'#s');
+});
+
+// ---------------------------------------------------------------------------
+// Entry image (#72): the exit image stays inline; the entry image is only
+// reachable through an "Entry Image" link that opens it in a modal.
+// ---------------------------------------------------------------------------
+
+/** The HTML of the <dialog> that holds $url, or null when no dialog holds it. */
+function dialogHolding(string $html, string $url): ?string
+{
+    return preg_match('#<dialog[^>]*>(?:(?!</dialog>).)*'.preg_quote($url, '#').'(?:(?!</dialog>).)*</dialog>#s', $html, $m) ? $m[0] : null;
+}
+
+function exitAndEntryImages(Trade $trade): array
+{
+    return [
+        TradeScreenshot::factory()->create(['trade_id' => $trade->id, 'kind' => ScreenshotKind::Exit]),
+        TradeScreenshot::factory()->create(['trade_id' => $trade->id, 'kind' => ScreenshotKind::Entry, 'caption' => null]),
+    ];
+}
+
+test('the journal shows the exit image inline and links the entry image in a modal', function () {
+    $f = sharedFixture();
+    [$exit, $entry] = exitAndEntryImages($f->trade);
+    $exitUrl = e(route('journal.screenshot', [$f->trade, $exit]));
+    $entryUrl = e(route('journal.screenshot', [$f->trade, $entry]));
+
+    $html = ownerJournal($f)->assertSee('Entry Image')->html();
+
+    $withoutDialogs = preg_replace('#<dialog.*?</dialog>#s', '', $html);
+    expect($withoutDialogs)->toContain('src="'.$exitUrl.'"')
+        ->and($withoutDialogs)->not->toContain($entryUrl)
+        ->and(dialogHolding($html, $entryUrl))->not->toBeNull()
+        ->and($html)->toMatch('#<button[^>]*onclick="document\.getElementById\(\x27entry-image-'.$entry->id.'\x27\)\.showModal\(\)"[^>]*>(?:(?!</button>).)*Entry Image#s');
+});
+
+test('the journal shows no Entry Image link when the trade has no entry image', function () {
+    $f = sharedFixture();
+    TradeScreenshot::factory()->create(['trade_id' => $f->trade->id, 'kind' => ScreenshotKind::Exit]);
+
+    ownerJournal($f)->assertDontSee('Entry Image');
+});
+
+test('the owner can delete the entry image from its modal', function () {
+    Storage::fake('local');
+    $f = sharedFixture();
+    $entry = TradeScreenshot::factory()->create(['trade_id' => $f->trade->id, 'kind' => ScreenshotKind::Entry, 'disk' => 'local', 'path' => 'trade-screenshots/entry.png']);
+    Storage::disk('local')->put('trade-screenshots/entry.png', 'png');
+
+    $component = ownerJournal($f);
+    expect(dialogHolding($component->html(), e(route('journal.screenshot', [$f->trade, $entry]))))
+        ->toContain('wire:click="deleteScreenshot('.$entry->id.')"');
+
+    $component->call('deleteScreenshot', $entry->id)->assertDontSee('Entry Image');
+
+    expect(TradeScreenshot::find($entry->id))->toBeNull();
+    Storage::disk('local')->assertMissing('trade-screenshots/entry.png');
+});
+
+test('the shared page links the entry image in a modal too, without a delete action', function () {
+    $f = sharedFixture();
+    [$exit, $entry] = exitAndEntryImages($f->trade);
+    $exitUrl = e(route('trades.shared.screenshot', [$f->trade, $exit]));
+    $entryUrl = e(route('trades.shared.screenshot', [$f->trade, $entry]));
+
+    $html = $this->actingAs($f->friend)->get(sharedUrl($f->trade))->assertOk()->assertSee('Entry Image')->getContent();
+
+    $withoutDialogs = preg_replace('#<dialog.*?</dialog>#s', '', $html);
+    expect($withoutDialogs)->toContain('src="'.$exitUrl.'"')
+        ->and($withoutDialogs)->not->toContain($entryUrl)
+        ->and(dialogHolding($html, $entryUrl))->not->toBeNull()
+        ->and($html)->not->toContain('deleteScreenshot');
+});
+
+test('the shared page shows no Entry Image link when the trade has no entry image', function () {
+    $f = sharedFixture();
+    TradeScreenshot::factory()->create(['trade_id' => $f->trade->id, 'kind' => ScreenshotKind::Exit]);
+
+    $this->actingAs($f->friend)->get(sharedUrl($f->trade))->assertOk()->assertDontSee('Entry Image');
+});
+
+test('a friend cannot delete the owner\'s entry image', function () {
+    $f = sharedFixture();
+    $entry = TradeScreenshot::factory()->create(['trade_id' => $f->trade->id, 'kind' => ScreenshotKind::Entry]);
+
+    // The friend's own journal component cannot reach a screenshot in the owner's journal.
+    expect(fn () => Livewire::actingAs($f->friend)
+        ->test('journal.trade-journal', ['journal' => $f->friend->journal])
+        ->call('deleteScreenshot', $entry->id))
+        ->toThrow(Illuminate\Database\Eloquent\ModelNotFoundException::class);
+
+    expect(TradeScreenshot::find($entry->id))->not->toBeNull();
 });

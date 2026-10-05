@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Casts\UtcDatetime;
 use App\Enums\Direction;
 use App\Enums\ExitReason;
+use App\Enums\ScreenshotKind;
 use App\Enums\TradeType;
 use Database\Factories\TradeFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -91,14 +92,28 @@ class Trade extends BaseModel
         return $this->hasMany(TradeLeg::class)->orderBy('sequence');
     }
 
+    /** The trade's main chart image: the first exit image (never the entry image, which is captured earlier). */
     public function screenshot(): HasOne
     {
-        return $this->hasOne(TradeScreenshot::class)->oldest();
+        return $this->hasOne(TradeScreenshot::class)->where('kind', ScreenshotKind::Exit)->oldest();
     }
 
+    /** Every image of the trade, entry included (for cleanup). */
     public function screenshots(): HasMany
     {
         return $this->hasMany(TradeScreenshot::class);
+    }
+
+    /** The chart images shown inline: the AddOn's exit image and any manual uploads. */
+    public function exitScreenshots(): HasMany
+    {
+        return $this->hasMany(TradeScreenshot::class)->where('kind', ScreenshotKind::Exit)->oldest();
+    }
+
+    /** The image captured when the trade opened (#72), shown only through the "Entry Image" link. */
+    public function entryScreenshot(): HasOne
+    {
+        return $this->hasOne(TradeScreenshot::class)->where('kind', ScreenshotKind::Entry)->latest('id');
     }
 
     public function notes(): HasMany
