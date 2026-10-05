@@ -1,13 +1,16 @@
-// Chart Jot AddOn - phase 2: settings, staging, note panel, and Submit (#64).
+// Chart Jot AddOn - phase 3: settings, staging, the chart form, Submit, and
+// chart images (#64, #37/#52).
 //
 // Wires NT8's real account/execution/connection events into addon/core's
 // TradeTracker/AddonState (ChartJot.Core.dll). Closed trades are staged after
 // the commission settle period. Each chart gets a Chart Jot form that follows its
 // Chart Trader account/instrument: one note and a trade type, Submit and Reset.
 // Submit sends the master trade plus each copier follower's own trade, all with
-// the master's note and type; a background pump delivers them. No screenshot
-// yet (#37/#52), and no live tick subscription for MAE/MFE, so excursion stays
-// incomplete.
+// the master's note, type and chart images; a background pump delivers them.
+// Chart images: the exit image about 1s after flat (Recapture replaces it) and,
+// when enabled in Settings, the entry image about 1s after the fill, each from
+// the chart whose visible tab shows the trade. No live tick subscription for
+// MAE/MFE yet, so excursion stays incomplete.
 //
 // Form:     the "Chart Jot" button on each chart's toolbar
 // Settings: Control Center -> New -> Chart Jot Settings
@@ -31,6 +34,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media.Imaging;
 using ChartJot.Core;
 using NinjaTrader.Cbi;
 using NinjaTrader.Gui;
@@ -380,7 +384,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 
 		// ---- submission (called by the note panel, #64's second PR)
 
-		public const string AddonVersion = "0.3.0";
+		public const string AddonVersion = "0.4.0";
 
 		/// <summary>
 		/// The trader clicked Submit trade. Freezes the staged trade into the delivery queue and wakes the delivery
@@ -484,6 +488,10 @@ namespace NinjaTrader.NinjaScript.AddOns
 				{
 					view.ClosedDirection = pending[pending.Count - 1].Direction;
 					view.ClosedNetPnl = pending.Sum(t => t.NetPnl);
+					view.LatestClosedTradeId = pending[pending.Count - 1].TradeId;
+					TradeImages images = state.ImagesFor(view.LatestClosedTradeId);
+					view.HasExitImage = images.Exit != null;
+					view.HasEntryImage = images.Entry != null;
 				}
 				view.CanSubmit = state.CanSubmitForm(accountName, instrumentFullName);
 
@@ -496,6 +504,17 @@ namespace NinjaTrader.NinjaScript.AddOns
 				}
 			}
 			return view;
+		}
+
+		/// <summary>Records a captured chart image (#52); false when the trade can no longer take one.</summary>
+		public static bool RecordCapture(string tradeId, bool entry, ScreenshotMeta meta)
+		{
+			bool recorded;
+			lock (sync)
+				recorded = state != null && state.RecordCapture(tradeId, entry, meta);
+			if (recorded)
+				SaveState();
+			return recorded;
 		}
 
 		public static void UpdateForm(string accountName, string instrumentFullName, string body, string tradeType, string tradeTypeOther)
@@ -517,6 +536,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 			Dictionary<string, string> connections = ConnectionNames();
 
 			IList<QueuedDelivery> queued;
+			Dictionary<string, string> followerMaster = new Dictionary<string, string>();
 			int followerCount;
 			lock (sync)
 			{
@@ -539,15 +559,19 @@ namespace NinjaTrader.NinjaScript.AddOns
 								continue;
 							state.RefreshCharges(match.TradeId, lookup);
 							followerIds.Add(match.TradeId);
+							followerMaster[match.TradeId] = master.TradeId;
 						}
 					}
 				}
 
 				queued = state.SubmitForm(accountName, instrumentFullName, AddonVersion,
 					name => { string connection; return connections.TryGetValue(name, out connection) ? connection : null; },
-					followerIds, DateTimeOffset.Now);
+					followerIds, DateTimeOffset.Now, id => { string master; return followerMaster.TryGetValue(id, out master) ? master : null; });
 				followerCount = followerIds.Count;
 			}
+			// Each follower sends the master's image files under its own trade_id.
+			foreach (KeyValuePair<string, string> pair in followerMaster)
+				ChartJotCapture.CopyImages(pair.Value, pair.Key);
 			SaveState();
 			ChartJotLog.Write("SUBMIT", string.Format(CultureInfo.InvariantCulture, "form account={0} instrument={1} trades={2} followers={3} trade_ids={4}",
 				accountName, instrumentFullName, queued.Count - followerCount, followerCount, string.Join(",", queued.Select(q => q.TradeId))));
@@ -730,6 +754,8 @@ namespace NinjaTrader.NinjaScript.AddOns
 				{
 					lock (sync)
 						state.AttachPendingNotes(result.Opened);
+					if (Settings.CaptureEntryImage)
+						ChartJotCapture.CaptureLater(result.Opened.Account, result.Opened.Instrument.FullName, result.Opened.TradeId, true);
 				}
 
 				foreach (CompletedTrade closed in result.Closed)
@@ -737,6 +763,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 					lock (sync)
 						state.RecordClosed(closed);
 					ChartJotLog.Write("TRADE", "closed trade_id=" + closed.TradeId + " net_pnl=" + closed.NetPnl.ToString(CultureInfo.InvariantCulture));
+					ChartJotCapture.CaptureLater(closed.Account, closed.Instrument.FullName, closed.TradeId, false);
 					StageAfterSettle(closed.Account, closed.TradeId);
 				}
 
@@ -967,8 +994,9 @@ namespace NinjaTrader.NinjaScript.AddOns
 					DeliveryAttempt attempt;
 					try
 					{
-						// No screenshot capture yet (#37/#52); a trade always posts without one.
-						attempt = await delivery.SendAsync(due, null, cancellationToken).ConfigureAwait(false);
+						DeliveryScreenshot exit, entry;
+						ChartJotCapture.ImagesForDelivery(due, out exit, out entry);
+						attempt = await delivery.SendAsync(due, exit, entry, cancellationToken).ConfigureAwait(false);
 					}
 					catch (Exception ex)
 					{
@@ -1087,6 +1115,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 		private readonly TextBlock tokenStatus;
 		private readonly TextBox dataFolder;
 		private readonly TextBlock folderWarning;
+		private readonly CheckBox captureEntry;
 		private readonly TextBlock errors;
 		private bool clearToken;
 
@@ -1094,7 +1123,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 		{
 			Caption	= "Chart Jot Settings";
 			Width	= 640;
-			Height	= 380;
+			Height	= 420;
 
 			AddonSettings current = ChartJotMonitor.Settings;
 
@@ -1102,6 +1131,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 			token			= new PasswordBox { Margin = new Thickness(4) };
 			tokenStatus		= new TextBlock { Margin = new Thickness(4), TextWrapping = TextWrapping.Wrap };
 			dataFolder		= new TextBox { Text = current.DataFolder ?? "", Margin = new Thickness(4) };
+			captureEntry	= new CheckBox { Content = "Capture an entry image shortly after each entry (the exit image is always captured)", IsChecked = current.CaptureEntryImage, Margin = new Thickness(4) };
 			folderWarning	= new TextBlock { Margin = new Thickness(4), TextWrapping = TextWrapping.Wrap, Foreground = System.Windows.Media.Brushes.Orange };
 			errors			= new TextBlock { Margin = new Thickness(4), TextWrapping = TextWrapping.Wrap, Foreground = System.Windows.Media.Brushes.IndianRed };
 
@@ -1129,13 +1159,14 @@ namespace NinjaTrader.NinjaScript.AddOns
 			AddRow(grid, 2, "", tokenStatus, null);
 			AddRow(grid, 3, "Data folder", dataFolder, openFolder);
 			AddRow(grid, 4, "", folderWarning, null);
-			AddRow(grid, 5, "", errors, null);
+			AddRow(grid, 5, "Entry image", captureEntry, null);
+			AddRow(grid, 6, "", errors, null);
 
 			StackPanel buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
 			buttons.Children.Add(save);
 			buttons.Children.Add(close);
 			grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-			Grid.SetRow(buttons, 6);
+			Grid.SetRow(buttons, 7);
 			Grid.SetColumnSpan(buttons, 3);
 			grid.Children.Add(buttons);
 
@@ -1190,6 +1221,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 				AddonSettings updated = AddonSettings.Deserialize(ChartJotMonitor.Settings.Serialize());
 				updated.EndpointUrl = endpoint.Text.Trim();
 				updated.DataFolder = dataFolder.Text.Trim();
+				updated.CaptureEntryImage = captureEntry.IsChecked == true;
 				if (token.Password.Trim().Length > 0)
 					updated.SetToken(token.Password, protector);
 				else if (clearToken)
@@ -1218,6 +1250,186 @@ namespace NinjaTrader.NinjaScript.AddOns
 	}
 
 
+
+	// ------------------------------------------------------- chart images (#37/#52)
+
+	/// <summary>
+	/// Captures a trade's chart image from the chart that shows it (NT8.md, "Screenshot Capture"):
+	/// <list type="bullet">
+	/// <item>Only a chart whose <b>visible</b> tab shows the trade's instrument qualifies: a background tab cannot be
+	/// captured without switching to it, which the AddOn never does. Charts hosting the copier dashboard are skipped.</item>
+	/// <item>Among those, the form's own chart (Recapture), then a chart whose Chart Trader account is the trade's,
+	/// then the most recently activated one.</item>
+	/// <item>The image is taken on the chart's dispatcher and encoded as PNG off it, into
+	/// <c>{Data folder}\images\{trade_id}.png</c> (exit) or <c>{trade_id}-entry.png</c> (entry).</item>
+	/// </list>
+	/// A capture that fails or finds no chart is logged and skipped; it never blocks submitting the trade.
+	/// </summary>
+	public static class ChartJotCapture
+	{
+		public static readonly TimeSpan RenderDelay = TimeSpan.FromSeconds(1);
+
+		public static string ImagesFolder
+		{
+			get { return Path.Combine(ChartJotMonitor.Settings.DataFolder, "images"); }
+		}
+
+		public static string PathFor(string tradeId, bool entry)
+		{
+			string name = new string((tradeId ?? "").Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c).ToArray());
+			return Path.Combine(ImagesFolder, name + (entry ? "-entry" : "") + ".png");
+		}
+
+		/// <summary>Captures after the render delay, so the fill and its markers are drawn. Never blocks the caller.</summary>
+		public static void CaptureLater(string account, string instrumentFullName, string tradeId, bool entry)
+		{
+			Task.Delay(RenderDelay).ContinueWith(t => Capture(account, instrumentFullName, tradeId, entry, null));
+		}
+
+		/// <summary>
+		/// Captures now and records it on the trade. Returns null on success, otherwise why nothing was captured.
+		/// Call off any chart's UI thread: it visits charts on their own dispatchers.
+		/// </summary>
+		public static string Capture(string account, string instrumentFullName, string tradeId, bool entry, NinjaTrader.Gui.Chart.Chart preferred)
+		{
+			string kind = entry ? "entry" : "exit";
+			try
+			{
+				NinjaTrader.Gui.Chart.Chart chart = FindChart(account, instrumentFullName, preferred);
+				if (chart == null)
+				{
+					string reason = "no open chart is showing " + instrumentFullName;
+					ChartJotLog.Write("CAPTURE", kind + " image skipped trade_id=" + tradeId + ": " + reason);
+					return reason;
+				}
+
+				BitmapSource image = null;
+				chart.Dispatcher.Invoke(() =>
+				{
+					image = chart.GetScreenshot(ShareScreenshotType.Chart) as BitmapSource;
+					if (image != null && image.CanFreeze)
+						image.Freeze();	// required before encoding on another thread
+				});
+				if (image == null)
+				{
+					ChartJotLog.Write("CAPTURE", kind + " image skipped trade_id=" + tradeId + ": the chart returned no image");
+					return "the chart returned no image";
+				}
+
+				string path = PathFor(tradeId, entry);
+				Directory.CreateDirectory(Path.GetDirectoryName(path));
+				string temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+				PngBitmapEncoder encoder = new PngBitmapEncoder();
+				encoder.Frames.Add(BitmapFrame.Create(image));
+				using (FileStream stream = File.Create(temp))
+					encoder.Save(stream);
+				if (File.Exists(path))
+					File.Delete(path);
+				File.Move(temp, path);
+
+				if (!ChartJotMonitor.RecordCapture(tradeId, entry, new ScreenshotMeta { CapturedAt = DateTimeOffset.Now, Format = "png" }))
+				{
+					ChartJotLog.Write("CAPTURE", kind + " image not recorded trade_id=" + tradeId + ": the trade is unknown or already submitted");
+					return "the trade was already submitted";
+				}
+				ChartJotLog.Write("CAPTURE", string.Format(CultureInfo.InvariantCulture, "{0} image trade_id={1} {2}x{3}",
+					kind, tradeId, image.PixelWidth, image.PixelHeight));
+				return null;
+			}
+			catch (Exception ex)
+			{
+				ChartJotLog.Write("CAPTURE", kind + " image failed trade_id=" + tradeId + ": " + ex.GetType().Name + ": " + ex.Message);
+				return "capture failed (" + ex.Message + ")";
+			}
+		}
+
+		/// <summary>A follower sends its master's image files under its own trade_id.</summary>
+		public static void CopyImages(string masterTradeId, string followerTradeId)
+		{
+			foreach (bool entry in new[] { false, true })
+			{
+				string from = PathFor(masterTradeId, entry);
+				if (!File.Exists(from))
+					continue;
+				try
+				{
+					File.Copy(from, PathFor(followerTradeId, entry), true);
+				}
+				catch (Exception ex)
+				{
+					ChartJotLog.Write("CAPTURE", "copying the master's image to trade_id=" + followerTradeId + " failed: " + ex.Message);
+				}
+			}
+		}
+
+		/// <summary>The image files a delivery's frozen payload says were captured; null for any that is absent or unreadable.</summary>
+		public static void ImagesForDelivery(QueuedDelivery delivery, out DeliveryScreenshot exit, out DeliveryScreenshot entry)
+		{
+			exit = null;
+			entry = null;
+			JsonValue payload;
+			try
+			{
+				payload = JsonValue.Parse(delivery.PayloadJson);
+			}
+			catch (FormatException)
+			{
+				return;
+			}
+			if (payload.Has("screenshot") && !payload["screenshot"].IsNull)
+				exit = Load(delivery.TradeId, false);
+			if (payload.Has("entry_screenshot") && !payload["entry_screenshot"].IsNull)
+				entry = Load(delivery.TradeId, true);
+		}
+
+		private static DeliveryScreenshot Load(string tradeId, bool entry)
+		{
+			string path = PathFor(tradeId, entry);
+			try
+			{
+				return File.Exists(path) ? new DeliveryScreenshot { Bytes = File.ReadAllBytes(path), Format = "png" } : null;
+			}
+			catch (Exception ex)
+			{
+				ChartJotLog.Write("CAPTURE", "reading " + path + " failed; sending without it: " + ex.Message);
+				return null;
+			}
+		}
+
+		private static NinjaTrader.Gui.Chart.Chart FindChart(string account, string instrumentFullName, NinjaTrader.Gui.Chart.Chart preferred)
+		{
+			NinjaTrader.Gui.Chart.Chart best = null;
+			int bestScore = 0;
+			foreach (NinjaTrader.Gui.Chart.Chart chart in ChartJotCopier.Charts())
+			{
+				int score = 0;
+				try
+				{
+					chart.Dispatcher.Invoke(() =>
+					{
+						NinjaTrader.Gui.Chart.ChartControl visible = chart.ActiveChartControl;
+						if (visible == null || visible.Instrument == null || visible.Instrument.FullName != instrumentFullName)
+							return;
+						if (ChartJotCopier.HostsCopier(chart))
+							return;
+						bool sameAccount = chart.ChartTrader != null && chart.ChartTrader.Account != null && chart.ChartTrader.Account.Name == account;
+						score = chart == preferred ? 3 : sameAccount ? 2 : 1;
+					});
+				}
+				catch (Exception ex)
+				{
+					ChartJotLog.Write("CAPTURE", "checking a chart failed: " + ex.Message);
+				}
+				// Charts() is most recently activated first, so the first chart with the best score wins ties.
+				if (score > bestScore)
+				{
+					best = chart;
+					bestScore = score;
+				}
+			}
+			return best;
+		}
+	}
 	// ------------------------------------------------------- trade copier (read-only)
 
 	/// <summary>
@@ -1232,17 +1444,57 @@ namespace NinjaTrader.NinjaScript.AddOns
 		private static readonly object sync = new object();
 		private static readonly List<NinjaTrader.Gui.Chart.Chart> charts = new List<NinjaTrader.Gui.Chart.Chart>();
 
+		private static readonly Dictionary<NinjaTrader.Gui.Chart.Chart, DateTime> activated = new Dictionary<NinjaTrader.Gui.Chart.Chart, DateTime>();
+
 		public static void Track(NinjaTrader.Gui.Chart.Chart chart)
 		{
 			lock (sync)
-				if (!charts.Contains(chart))
-					charts.Add(chart);
+			{
+				if (charts.Contains(chart))
+					return;
+				charts.Add(chart);
+				activated[chart] = DateTime.UtcNow;
+			}
+			chart.Dispatcher.InvokeAsync(() => chart.Activated += OnActivated);
+		}
+
+		private static void OnActivated(object sender, EventArgs e)
+		{
+			NinjaTrader.Gui.Chart.Chart chart = sender as NinjaTrader.Gui.Chart.Chart;
+			if (chart != null)
+				lock (sync)
+					activated[chart] = DateTime.UtcNow;
+		}
+
+		/// <summary>Tracked chart windows, most recently activated first.</summary>
+		public static IList<NinjaTrader.Gui.Chart.Chart> Charts()
+		{
+			lock (sync)
+				return charts.OrderByDescending(c => activated.ContainsKey(c) ? activated[c] : DateTime.MinValue).ToList();
+		}
+
+		/// <summary>True when the window hosts the copier dashboard (not a trading chart). Call on its dispatcher.</summary>
+		public static bool HostsCopier(NinjaTrader.Gui.Chart.Chart chart)
+		{
+			foreach (object chartControl in ChartControls(chart))
+			{
+				System.Collections.IEnumerable indicators = GetProp(chartControl, "Indicators") as System.Collections.IEnumerable;
+				if (indicators == null)
+					continue;
+				foreach (object indicator in indicators)
+					if (indicator != null && indicator.GetType().FullName == CopierType)
+						return true;
+			}
+			return false;
 		}
 
 		public static void Untrack(NinjaTrader.Gui.Chart.Chart chart)
 		{
 			lock (sync)
+			{
 				charts.Remove(chart);
+				activated.Remove(chart);
+			}
 		}
 
 		/// <summary>Call off any chart's UI thread: it visits each chart on that chart's dispatcher.</summary>
@@ -1359,6 +1611,9 @@ namespace NinjaTrader.NinjaScript.AddOns
 		public Direction ClosedDirection;
 		public decimal ClosedNetPnl;
 		public bool CanSubmit;
+		public string LatestClosedTradeId;
+		public bool HasExitImage;
+		public bool HasEntryImage;
 		public List<SubmittedView> LastSubmitted = new List<SubmittedView>();
 	}
 
@@ -1381,6 +1636,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 		private readonly Button submit;
 		private readonly Button reset;
 		private readonly Button retry;
+		private readonly Button recapture;
 		private readonly System.Windows.Threading.DispatcherTimer refresh;
 		private readonly System.Windows.Threading.DispatcherTimer saveDelay;
 
@@ -1437,6 +1693,8 @@ namespace NinjaTrader.NinjaScript.AddOns
 			submit		= new Button { Content = "Submit", Margin = new Thickness(6), Padding = new Thickness(18, 4, 18, 4), FontWeight = FontWeights.SemiBold };
 			reset		= new Button { Content = "Reset", Margin = new Thickness(6), Padding = new Thickness(18, 4, 18, 4) };
 			retry		= new Button { Content = "Retry", Margin = new Thickness(6), Padding = new Thickness(12, 4, 12, 4), Visibility = Visibility.Collapsed };
+			recapture	= new Button { Content = "Recapture", ToolTip = "Replace the exit image with what this chart shows now (e.g. after marking it up)",
+							Margin = new Thickness(6), Padding = new Thickness(12, 4, 12, 4), Visibility = Visibility.Collapsed };
 
 			tradeType.Items.Add(new ComboBoxItem { Content = "Trade type...", Tag = null });
 			foreach (string value in TradeTypes.All)
@@ -1450,8 +1708,10 @@ namespace NinjaTrader.NinjaScript.AddOns
 			submit.Click					+= (s, e) => OnSubmit();
 			reset.Click						+= (s, e) => OnReset();
 			retry.Click						+= (s, e) => OnRetry();
+			recapture.Click					+= (s, e) => OnRecapture();
 
 			StackPanel buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+			buttons.Children.Add(recapture);
 			buttons.Children.Add(retry);
 			buttons.Children.Add(reset);
 			buttons.Children.Add(submit);
@@ -1572,6 +1832,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 				status.Text = "";
 				warning.Text = "";
 				submit.IsEnabled = reset.IsEnabled = false;
+				recapture.Visibility = Visibility.Collapsed;
 				retry.Visibility = Visibility.Collapsed;
 				return;
 			}
@@ -1585,6 +1846,8 @@ namespace NinjaTrader.NinjaScript.AddOns
 			reset.IsEnabled = enabled;
 			bool failed = view.LastSubmitted.Any(d => d.State == DeliveryState.Failed);
 			retry.Visibility = failed && view.ClosedCount == 0 && !view.IsOpen ? Visibility.Visible : Visibility.Collapsed;
+			recapture.Visibility = view.ClosedCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+			recapture.IsEnabled = enabled;
 			status.Text = message ?? StatusText(view);
 		}
 
@@ -1603,7 +1866,9 @@ namespace NinjaTrader.NinjaScript.AddOns
 			{
 				string pnl = view.ClosedNetPnl.ToString("+0.00;-0.00;0.00", CultureInfo.InvariantCulture);
 				string what = view.ClosedCount == 1 ? "Trade closed (" + pnl + ")" : view.ClosedCount.ToString(CultureInfo.InvariantCulture) + " trades closed (" + pnl + ")";
-				return TradeTypes.IsValid(SelectedType()) ? what + ": ready to submit." : what + ": choose a trade type, then Submit.";
+				string images = view.HasExitImage ? (view.HasEntryImage ? " Entry and exit images captured." : " Exit image captured.")
+					: " No exit image yet: show " + instrument + " on this chart and click Recapture.";
+				return (TradeTypes.IsValid(SelectedType()) ? what + ": ready to submit." : what + ": choose a trade type, then Submit.") + images;
 			}
 			if (view.LastSubmitted.Count > 0)
 			{
@@ -1693,6 +1958,34 @@ namespace NinjaTrader.NinjaScript.AddOns
 			message = null;
 			Render();
 			note.Focus();
+		}
+
+		private void OnRecapture()
+		{
+			if (!HasScope || busy)
+				return;
+			FormView view = ChartJotMonitor.Form(account, instrument);
+			if (view.LatestClosedTradeId == null)
+				return;
+
+			busy = true;
+			Render();
+			string master = account;
+			string market = instrument;
+			string tradeId = view.LatestClosedTradeId;
+			Task.Run(() =>
+			{
+				// Capturing visits charts on their own dispatchers, so it runs off this one.
+				string failure = ChartJotCapture.Capture(master, market, tradeId, false, chart);
+				string result = failure == null ? "Exit image replaced." : "Not recaptured: " + failure + ".";
+				Dispatcher.InvokeAsync(() =>
+				{
+					busy = false;
+					message = result;
+					Render();
+					message = null;
+				});
+			});
 		}
 
 		private void OnRetry()

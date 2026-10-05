@@ -61,6 +61,8 @@ namespace ChartJot.Core
 		private readonly Dictionary<string, CompletedTrade> awaiting = new Dictionary<string, CompletedTrade>();
 		private readonly List<string> awaitingOrder = new List<string>();
 		private readonly Dictionary<string, TradeForm> forms = new Dictionary<string, TradeForm>();
+		// Chart images (#52) of trades not staged yet (open, or closed and waiting to be staged), by trade_id.
+		private readonly Dictionary<string, TradeImages> captures = new Dictionary<string, TradeImages>();
 
 		public AddonState(TimeSpan? initialBackoff = null, TimeSpan? maxBackoff = null)
 			: this(new PendingNotes(), new StagedTrades(), new DeliveryQueue(initialBackoff, maxBackoff))
@@ -152,7 +154,8 @@ namespace ChartJot.Core
 			if (!awaiting.TryGetValue(tradeId, out trade))
 				throw new InvalidOperationException("Trade " + tradeId + " is not waiting to be staged.");
 
-			StagedTrade staged = new StagedTrade { Trade = trade, Notes = NotesFor(tradeId), StagedAt = stagedAt };
+			TradeImages images = ImagesFor(tradeId);
+			StagedTrade staged = new StagedTrade { Trade = trade, Notes = NotesFor(tradeId), StagedAt = stagedAt, Screenshot = images.Exit, EntryScreenshot = images.Entry };
 			Staged.Add(staged);
 			Forget(tradeId);
 			return staged;
@@ -170,6 +173,7 @@ namespace ChartJot.Core
 				awaitingOrder.Remove(tradeId);
 			tradeNotes.Remove(tradeId);
 			records.Remove(tradeId);
+			captures.Remove(tradeId);
 		}
 
 		/// <summary>
@@ -331,6 +335,17 @@ namespace ChartJot.Core
 		public IList<QueuedDelivery> SubmitForm(string account, string instrumentFullName, string addonVersion,
 			Func<string, string> connectionFor, IEnumerable<string> followerTradeIds, DateTimeOffset now)
 		{
+			return SubmitForm(account, instrumentFullName, addonVersion, connectionFor, followerTradeIds, now, null);
+		}
+
+		/// <summary>
+		/// As above. Each follower trade also carries the chart images (#52) of its master trade:
+		/// <paramref name="masterOf"/> maps a follower trade_id to the master trade_id it copied; when null (or it
+		/// returns an id that is not one of the masters), the first master's images are used.
+		/// </summary>
+		public IList<QueuedDelivery> SubmitForm(string account, string instrumentFullName, string addonVersion,
+			Func<string, string> connectionFor, IEnumerable<string> followerTradeIds, DateTimeOffset now, Func<string, string> masterOf)
+		{
 			TradeForm form = FormFor(account, instrumentFullName);
 			List<CompletedTrade> masters = PendingForForm(account, instrumentFullName).ToList();
 			if (masters.Count == 0)
@@ -349,10 +364,20 @@ namespace ChartJot.Core
 					followers.Add(follower);
 			}
 
+			Dictionary<string, TradeImages> masterImages = masters.ToDictionary(t => t.TradeId, t => ImagesFor(t.TradeId));
 			List<QueuedDelivery> queued = new List<QueuedDelivery>();
 			foreach (CompletedTrade trade in masters.Concat(followers))
 			{
 				StagedTrade staged = Staged.Find(trade.TradeId) ?? Stage(trade.TradeId, now);
+				if (followers.Contains(trade))
+				{
+					string masterId = masterOf == null ? null : masterOf(trade.TradeId);
+					TradeImages images;
+					if (masterId == null || !masterImages.TryGetValue(masterId, out images))
+						images = masterImages[masters[0].TradeId];
+					staged.Screenshot = Copy(images.Exit);
+					staged.EntryScreenshot = Copy(images.Entry);
+				}
 				staged.Notes = string.IsNullOrWhiteSpace(form.Body)
 					? new List<NoteRecord>()
 					: new List<NoteRecord> { new NoteRecord { Body = form.Body.Trim(), Phase = NotePhases.General, OccurredAt = form.StartedAt ?? now } };
@@ -416,6 +441,66 @@ namespace ChartJot.Core
 				.Where(t => Deliveries.Find(t.TradeId) == null);
 		}
 
+		// ---- chart images (#37/#52)
+
+		/// <summary>
+		/// Records a chart image captured for a trade: the entry image (<paramref name="entry"/>) or the exit image,
+		/// replacing any earlier one of that kind (Recapture). Accepted for an open trade, a closed trade waiting to
+		/// be staged, and a staged trade that can still be edited. False otherwise (unknown, or already submitted):
+		/// a submitted trade's images are frozen with its payload.
+		/// </summary>
+		public bool RecordCapture(string tradeId, bool entry, ScreenshotMeta meta)
+		{
+			if (meta == null)
+				throw new ArgumentNullException("meta");
+
+			StagedTrade staged = Staged.Find(tradeId);
+			if (staged != null)
+			{
+				if (!CanEdit(tradeId))
+					return false;
+				if (entry)
+					staged.EntryScreenshot = meta;
+				else
+					staged.Screenshot = meta;
+				return true;
+			}
+
+			bool tracked = awaiting.ContainsKey(tradeId) || records.ContainsKey(tradeId)
+				|| Tracker.OpenTrades.Any(t => t.TradeId == tradeId);
+			if (!tracked)
+				return false;
+
+			TradeImages images;
+			if (!captures.TryGetValue(tradeId, out images))
+			{
+				images = new TradeImages();
+				captures[tradeId] = images;
+			}
+			if (entry)
+				images.Entry = meta;
+			else
+				images.Exit = meta;
+			return true;
+		}
+
+		/// <summary>A trade's images, wherever it is (open, waiting, staged). Never null; either image may be.</summary>
+		public TradeImages ImagesFor(string tradeId)
+		{
+			StagedTrade staged = Staged.Find(tradeId);
+			if (staged != null)
+				return new TradeImages { Exit = staged.Screenshot, Entry = staged.EntryScreenshot };
+			TradeImages images;
+			return captures.TryGetValue(tradeId, out images)
+				? new TradeImages { Exit = images.Exit, Entry = images.Entry }
+				: new TradeImages();
+		}
+
+		private static ScreenshotMeta Copy(ScreenshotMeta meta)
+		{
+			return meta == null ? null : new ScreenshotMeta { CapturedAt = meta.CapturedAt, Caption = meta.Caption, Format = meta.Format };
+		}
+
 		// ---- submission
 
 		/// <summary>
@@ -453,6 +538,7 @@ namespace ChartJot.Core
 				TradeTypeOther = staged.TradeTypeOther,
 				Notes = staged.Notes ?? new List<NoteRecord>(),
 				Screenshot = staged.Screenshot,
+				EntryScreenshot = staged.EntryScreenshot,
 				StopPrice = staged.StopPrice
 			});
 			return Deliveries.Enqueue(tradeId, payload);
@@ -641,6 +727,17 @@ namespace ChartJot.Core
 			w.Name("staged_trades").Raw(Staged.Serialize());
 			w.Name("deliveries").Raw(Deliveries.Serialize());
 
+			w.Name("captures").BeginArray();
+			foreach (KeyValuePair<string, TradeImages> entry in captures)
+			{
+				w.BeginObject();
+				w.Property("trade_id", entry.Key);
+				StagedTrades.WriteScreenshot(w, "exit", entry.Value.Exit);
+				StagedTrades.WriteScreenshot(w, "entry", entry.Value.Entry);
+				w.EndObject();
+			}
+			w.EndArray();
+
 			w.Name("forms").BeginArray();
 			foreach (TradeForm form in forms.Values)
 			{
@@ -700,6 +797,19 @@ namespace ChartJot.Core
 
 			foreach (JsonValue item in root["awaiting_stage"].Items)
 				state.RecordClosed(StagedTrades.ReadCompletedTrade(item));
+
+			// Missing in state files written before chart images existed.
+			if (root.Has("captures"))
+			{
+				foreach (JsonValue item in root["captures"].Items)
+				{
+					state.captures[item["trade_id"].AsString()] = new TradeImages
+					{
+						Exit = StagedTrades.ReadScreenshot(item["exit"]),
+						Entry = StagedTrades.ReadScreenshot(item["entry"])
+					};
+				}
+			}
 
 			// Missing in state files written before the form existed.
 			if (root.Has("forms"))
