@@ -43,11 +43,16 @@ class SharedTradeController extends Controller
                 'date'        => $entryLocal->format('D M j, Y'),
                 'owner_name'  => User::whereKey($trade->ownerId())->value('name'),
             ],
-            'screenshots' => $trade->screenshots()->oldest()->get()
+            'screenshots' => $trade->exitScreenshots()->get()
                 ->map(fn (TradeScreenshot $s) => [
                     'url'     => route('trades.shared.screenshot', [$trade, $s]),
                     'caption' => $s->caption,
                 ])->all(),
+            // Shown only behind an "Entry Image" link (#72); null when the AddOn sent none.
+            'entryImage' => ($entry = $trade->entryScreenshot) ? [
+                'id'  => $entry->id,
+                'url' => route('trades.shared.screenshot', [$trade, $entry]),
+            ] : null,
             'notes' => $trade->notes()->get()
                 ->map(fn (TradeNote $n) => [
                     'phase' => $n->phase->label(),

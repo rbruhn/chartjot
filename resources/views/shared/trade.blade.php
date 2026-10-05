@@ -1,5 +1,5 @@
 {{--
-    Shared-trade page. Receives only plain arrays ($trade, $screenshots,
+    Shared-trade page. Receives only plain arrays ($trade, $screenshots, $entryImage,
     $notes, $comments) built by SharedTradeController — no models.
 --}}
 @php
@@ -44,6 +44,12 @@
             @endif
         </figure>
     @endforeach
+
+    @if ($entryImage)
+        <div class="mt-1">
+            <x-entry-image :id="$entryImage['id']" :url="$entryImage['url']" />
+        </div>
+    @endif
 
     {{-- ── Trader's notes ── --}}
     @if ($notes)
