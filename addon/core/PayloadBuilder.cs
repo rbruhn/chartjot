@@ -12,6 +12,53 @@ namespace ChartJot.Core
 		{
 			return Array.IndexOf(All, value) >= 0;
 		}
+
+		/// <summary>The dropdown label for a submitted value (NT8.md, "Trade type selector"); null when unknown.</summary>
+		public static string Label(string value)
+		{
+			switch (value)
+			{
+				case "2ES": return "Second Entry Short";
+				case "2EL": return "Second Entry Long";
+				case "RS": return "Range Short";
+				case "RL": return "Range Long";
+				case "F2ES": return "Failed Second Entry Short";
+				case "F2EL": return "Failed Second Entry Long";
+				case "Other": return "Other type of entry";
+			}
+			return null;
+		}
+
+		/// <summary>
+		/// The direction a type is traded in, or null when it implies none (<c>Other</c>, unknown). A failed second
+		/// entry is traded the opposite way: <c>F2ES</c> is taken long and <c>F2EL</c> short (confirmed by the
+		/// trader, 2026-10-04).
+		/// </summary>
+		public static Direction? ImpliedDirection(string value)
+		{
+			switch (value)
+			{
+				case "2ES":
+				case "RS":
+				case "F2EL":
+					return Direction.Short;
+				case "2EL":
+				case "RL":
+				case "F2ES":
+					return Direction.Long;
+			}
+			return null;
+		}
+
+		/// <summary>The non-blocking warning shown when the chosen type implies the other direction; null otherwise.</summary>
+		public static string DirectionWarning(string value, Direction actual)
+		{
+			Direction? implied = ImpliedDirection(value);
+			if (!implied.HasValue || implied.Value == actual)
+				return null;
+			return Label(value) + " is usually a " + implied.Value.ToString().ToLowerInvariant()
+				+ " trade, but this trade was " + actual.ToString().ToLowerInvariant() + ".";
+		}
 	}
 
 	public static class NotePhases
