@@ -474,6 +474,9 @@ event handlers, or dispatcher while waiting for an HTTP response.
   to 3 attempts in all** (decided 2026-10-05: about 5s, then 10s apart). After
   the third, the delivery is Failed: the form says it could not be sent and
   offers **Retry**, which sends the same payload again with 3 fresh attempts.
+  Retry covers **every** failed trade, not only the last Submit, and any form
+  shows how many are waiting ("3 trades not sent ... Click Retry"; during a
+  trade, a short note), so a trade can never be left stuck out of sight.
   The failed payload and its images stay saved across NT8 restarts until then.
 - For HTTP `401` or `403`, stop automatic retries and show a configuration
   error; the trader must correct/replace the intake token.

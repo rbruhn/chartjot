@@ -523,6 +523,17 @@ namespace NinjaTrader.NinjaScript.AddOns
 				}
 				view.CanSubmit = state.CanSubmitForm(accountName, instrumentFullName);
 
+				IList<QueuedDelivery> failedDeliveries = state.Deliveries.FailedDeliveries;
+				view.FailedCount = failedDeliveries.Count;
+				view.FailedNeedsToken = failedDeliveries.Any(d => d.IsConfigurationError);
+				view.FailedUnreachable = failedDeliveries.Any(d => !d.LastStatusCode.HasValue || d.LastStatusCode.Value >= 500);
+				QueuedDelivery latestFailure = failedDeliveries.LastOrDefault();
+				if (latestFailure != null)
+				{
+					view.FailedStatusCode = latestFailure.LastStatusCode;
+					view.FailedDetail = DeliveryDetail(latestFailure);
+				}
+
 				foreach (string tradeId in form.LastSubmitted ?? new List<string>())
 				{
 					QueuedDelivery delivery = state.Deliveries.Find(tradeId);
@@ -641,18 +652,14 @@ namespace NinjaTrader.NinjaScript.AddOns
 		}
 
 		/// <summary>Retries every failed delivery among the form's last submission.</summary>
-		public static void RetryLastSubmission(string accountName, string instrumentFullName)
+		/// <summary>Retry on any form: every failed trade, not only that form's last Submit (one journal, one outage).</summary>
+		public static void RetryAllFailed()
 		{
-			List<string> failed;
+			IList<string> retried;
 			lock (sync)
-			{
-				failed = (state.FormFor(accountName, instrumentFullName).LastSubmitted ?? new List<string>())
-					.Where(id => { QueuedDelivery d = state.Deliveries.Find(id); return d != null && d.State == DeliveryState.Failed; })
-					.ToList();
-				foreach (string tradeId in failed)
-					state.Deliveries.RetryManually(tradeId, DateTimeOffset.Now);
-			}
+				retried = state.Deliveries.RetryAllFailed(DateTimeOffset.Now);
 			SaveState();
+			ChartJotLog.Write("DELIVERY", "retry requested for " + retried.Count.ToString(CultureInfo.InvariantCulture) + " failed trade(s)");
 			ChartJotDelivery.Kick();
 		}
 
@@ -1661,6 +1668,12 @@ namespace NinjaTrader.NinjaScript.AddOns
 		public bool HasExitImage;
 		public bool HasEntryImage;
 		public List<SubmittedView> LastSubmitted = new List<SubmittedView>();
+		/// <summary>Every failed trade in the queue, from any form or earlier Submit.</summary>
+		public int FailedCount;
+		public bool FailedNeedsToken;
+		public bool FailedUnreachable;
+		public int? FailedStatusCode;
+		public string FailedDetail;
 	}
 
 	/// <summary>
@@ -1904,8 +1917,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 
 			submit.IsEnabled = enabled && view.ClosedCount > 0 && TradeTypes.IsValid(SelectedType());
 			reset.IsEnabled = enabled;
-			bool failed = view.LastSubmitted.Any(d => d.State == DeliveryState.Failed);
-			retry.Visibility = failed && view.ClosedCount == 0 && !view.IsOpen ? Visibility.Visible : Visibility.Collapsed;
+			retry.Visibility = view.FailedCount > 0 ? Visibility.Visible : Visibility.Collapsed;
 			recapture.Visibility = view.ClosedCount > 0 ? Visibility.Visible : Visibility.Collapsed;
 			recapture.IsEnabled = enabled;
 			if (message != null && DateTime.UtcNow >= messageUntil)
@@ -1920,38 +1932,25 @@ namespace NinjaTrader.NinjaScript.AddOns
 			messageUntil = DateTime.UtcNow.AddSeconds(5);
 		}
 
-		/// <summary>Only the trade the form is working on now, plus a failed submission (it needs Retry).</summary>
+		/// <summary>The trade the form is working on now, plus any trade that failed to send (it needs Retry).</summary>
 		private string StatusText(FormView view)
 		{
 			if (busy)
 				return "Working...";
+			string stuck = view.FailedCount == 0 ? ""
+				: "  (" + view.FailedCount.ToString(CultureInfo.InvariantCulture) + (view.FailedCount == 1 ? " earlier trade" : " earlier trades") + " not sent: Retry)";
 			if (view.IsOpen)
 			{
 				TimeSpan elapsed = DateTimeOffset.Now - view.OpenEntryAt;
 				string time = elapsed < TimeSpan.Zero ? "" : ", " + ((int)elapsed.TotalMinutes).ToString(CultureInfo.InvariantCulture) + "m " + elapsed.Seconds.ToString("00", CultureInfo.InvariantCulture) + "s";
-				return "In trade: " + view.OpenDirection + " " + view.OpenQuantity.ToString(CultureInfo.InvariantCulture) + time;
+				return "In trade: " + view.OpenDirection + " " + view.OpenQuantity.ToString(CultureInfo.InvariantCulture) + time + stuck;
 			}
 			if (view.ClosedCount > 0)
 			{
 				string pnl = view.ClosedNetPnl.ToString("+0.00;-0.00;0.00", CultureInfo.InvariantCulture);
 				string what = (view.ClosedCount == 1 ? "Trade closed (" : "Trades closed (") + pnl + ")";
 				string images = view.HasExitImage ? "" : " No exit image yet: show " + instrument + " on this chart and click Recapture.";
-				return (TradeTypes.IsValid(SelectedType()) ? what + ": ready to submit." : what + ": choose a trade type, then Submit.") + images;
-			}
-			if (view.LastSubmitted.Any(d => d.State == DeliveryState.Failed && d.IsConfigurationError))
-			{
-				awaitingDelivery = false;
-				return "Last submission failed: check the intake token in Chart Jot Settings, then Retry.";
-			}
-			SubmittedView failed = view.LastSubmitted.FirstOrDefault(d => d.State == DeliveryState.Failed);
-			if (failed != null)
-			{
-				awaitingDelivery = false;
-				if (!failed.StatusCode.HasValue || failed.StatusCode.Value >= 500)
-					return "Not sent: the journal couldn't be reached after " + failed.Attempts.ToString(CultureInfo.InvariantCulture)
-						+ " tries" + (failed.Detail != null ? " (" + failed.Detail + ")" : "") + ". Click Retry to send it again.";
-				return "Not sent: the journal refused it (HTTP " + failed.StatusCode.Value.ToString(CultureInfo.InvariantCulture) + ")"
-					+ (failed.Detail != null ? ": " + failed.Detail : ".") + " Click Retry to send it again.";
+				return (TradeTypes.IsValid(SelectedType()) ? what + ": ready to submit." : what + ": choose a trade type, then Submit.") + images + stuck;
 			}
 			// A submission still on its way is the current trade too: say so until the journal has it.
 			if (view.LastSubmitted.Any(d => d.State == DeliveryState.Pending || d.State == DeliveryState.Sending || d.State == DeliveryState.QueuedForRetry))
@@ -1960,6 +1959,18 @@ namespace NinjaTrader.NinjaScript.AddOns
 				return view.LastSubmitted.Any(d => d.Attempts > 0)
 					? "Not sent yet: the journal can't be reached. Trying again (up to 3 tries)."
 					: "Sending...";
+			}
+			if (view.FailedCount > 0)
+			{
+				awaitingDelivery = false;
+				string trades = view.FailedCount.ToString(CultureInfo.InvariantCulture) + (view.FailedCount == 1 ? " trade" : " trades");
+				if (view.FailedNeedsToken)
+					return trades + " not sent: check the intake token in Chart Jot Settings, then click Retry.";
+				if (view.FailedUnreachable)
+					return trades + " not sent: the journal couldn't be reached" + (view.FailedDetail != null ? " (" + view.FailedDetail + ")" : "") + ". Click Retry to send.";
+				return trades + " not sent: the journal refused " + (view.FailedCount == 1 ? "it" : "them")
+					+ (view.FailedStatusCode.HasValue ? " (HTTP " + view.FailedStatusCode.Value.ToString(CultureInfo.InvariantCulture) + ")" : "")
+					+ (view.FailedDetail != null ? ": " + view.FailedDetail : ".") + " Click Retry to send again.";
 			}
 			if (awaitingDelivery)
 			{
@@ -2075,7 +2086,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 		{
 			if (!HasScope)
 				return;
-			ChartJotMonitor.RetryLastSubmission(account, instrument);
+			ChartJotMonitor.RetryAllFailed();
 			Render();
 		}
 	}

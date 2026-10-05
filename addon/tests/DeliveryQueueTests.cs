@@ -276,5 +276,68 @@ namespace ChartJot.Core.Tests
 			Assert.Equal(DeliveryState.Failed, reloaded.State);
 			Assert.Equal("{\"trade_id\":\"t1\"}", reloaded.PayloadJson);
 		}
+
+		// ---- several stuck deliveries
+
+		private static void FailAutomatically(DeliveryQueue queue, string tradeId)
+		{
+			for (int attempt = 1; attempt <= 3; attempt++)
+			{
+				queue.MarkSending(tradeId);
+				queue.RecordResult(tradeId, DeliveryOutcome.Retryable, Now, statusCode: 503);
+			}
+		}
+
+		[Fact]
+		public void FailedDeliveries_ListsEveryFailedOneInQueueOrder()
+		{
+			DeliveryQueue queue = new DeliveryQueue();
+			queue.Enqueue("t1", "{}");
+			queue.Enqueue("t2", "{}");
+			queue.Enqueue("t3", "{}");
+			FailAutomatically(queue, "t1");
+			queue.MarkSending("t2");
+			queue.RecordResult("t2", DeliveryOutcome.Accepted, Now, statusCode: 201);
+			FailAutomatically(queue, "t3");
+
+			Assert.Equal(new[] { "t1", "t3" }, queue.FailedDeliveries.Select(d => d.TradeId));
+		}
+
+		[Fact]
+		public void RetryAllFailed_ResendsEveryFailedDeliveryAndLeavesTheRest()
+		{
+			DeliveryQueue queue = new DeliveryQueue();
+			queue.Enqueue("t1", "{}");
+			queue.Enqueue("t2", "{}");
+			queue.Enqueue("t3", "{}");
+			FailAutomatically(queue, "t1");
+			queue.MarkSending("t2");
+			queue.RecordResult("t2", DeliveryOutcome.Accepted, Now, statusCode: 201);
+			queue.MarkSending("t3");
+			queue.RecordResult("t3", DeliveryOutcome.ValidationError, Now, statusCode: 422);
+
+			IList<string> retried = queue.RetryAllFailed(Now);
+
+			Assert.Equal(new[] { "t1", "t3" }, retried);
+			Assert.Equal(DeliveryState.Pending, queue.Find("t1").State);
+			Assert.Equal(0, queue.Find("t1").Attempts);
+			Assert.Equal(DeliveryState.Pending, queue.Find("t3").State);
+			Assert.Equal(DeliveryState.Sent, queue.Find("t2").State);
+			Assert.Equal(new[] { "t1", "t3" }, queue.Due(Now).Select(d => d.TradeId));
+		}
+
+		[Fact]
+		public void RetryAllFailed_LiftsAConfigurationHalt()
+		{
+			DeliveryQueue queue = new DeliveryQueue();
+			queue.Enqueue("t1", "{}");
+			queue.MarkSending("t1");
+			queue.RecordResult("t1", DeliveryOutcome.ConfigurationError, Now, statusCode: 401);
+
+			queue.RetryAllFailed(Now);
+
+			Assert.False(queue.ConfigurationErrorHalted);
+			Assert.Single(queue.Due(Now));
+		}
 	}
 }
