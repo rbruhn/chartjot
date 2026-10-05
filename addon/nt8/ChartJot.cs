@@ -47,9 +47,6 @@ namespace NinjaTrader.NinjaScript.AddOns
 	{
 		private const string ChartButtonName = "ChartJotFormButton";
 
-		private NTMenuItem newMenu;
-		private NTMenuItem settingsMenuItem;
-
 		protected override void OnStateChange()
 		{
 			if (State == State.SetDefaults)
@@ -69,28 +66,10 @@ namespace NinjaTrader.NinjaScript.AddOns
 			// plumbing is up by the time a window is created).
 			ChartJotMonitor.Start();
 
+			// Settings are opened from the form's Settings button, so nothing is added to Control Center.
 			NinjaTrader.Gui.Chart.Chart chart = window as NinjaTrader.Gui.Chart.Chart;
 			if (chart != null)
-			{
 				AddChartButton(chart);
-				return;
-			}
-
-			// Same Control Center menu technique spike/ChartJotSpike.cs verified.
-			ControlCenter cc = window as ControlCenter;
-			if (cc == null)
-				return;
-
-			newMenu = cc.FindFirst("ControlCenterMenuItemNew") as NTMenuItem;
-			if (newMenu == null)
-			{
-				ChartJotLog.Write("UI", "Control Center 'New' menu not found; Chart Jot Settings cannot be opened from the menu");
-				return;
-			}
-
-			settingsMenuItem = new NTMenuItem { Header = "Chart Jot Settings", Style = Application.Current.TryFindResource("MainMenuItem") as Style };
-			newMenu.Items.Add(settingsMenuItem);
-			settingsMenuItem.Click += OnSettingsClick;
 		}
 
 		protected override void OnWindowDestroyed(Window window)
@@ -100,15 +79,6 @@ namespace NinjaTrader.NinjaScript.AddOns
 			{
 				ChartJotCopier.Untrack(chart);
 				ChartJotFormWindow.CloseFor(chart);
-				return;
-			}
-
-			if (window is ControlCenter && settingsMenuItem != null)
-			{
-				if (newMenu != null && newMenu.Items.Contains(settingsMenuItem))
-					newMenu.Items.Remove(settingsMenuItem);
-				settingsMenuItem.Click -= OnSettingsClick;
-				settingsMenuItem = null;
 			}
 		}
 
@@ -201,11 +171,6 @@ namespace NinjaTrader.NinjaScript.AddOns
 					});
 				}
 			};
-		}
-
-		private void OnSettingsClick(object sender, RoutedEventArgs e)
-		{
-			NinjaTrader.Core.Globals.RandomDispatcher.BeginInvoke(new Action(() => new ChartJotSettingsWindow().Show()));
 		}
 	}
 
@@ -1728,6 +1693,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 		private bool busy;
 		private string message;
 		private DateTime messageUntil;
+		private bool awaitingDelivery;
 
 		/// <summary>Opens the chart's form, or brings the open one to the front. Call on the chart's dispatcher.</summary>
 		public static void ShowFor(NinjaTrader.Gui.Chart.Chart chart)
@@ -1973,11 +1939,31 @@ namespace NinjaTrader.NinjaScript.AddOns
 				return (TradeTypes.IsValid(SelectedType()) ? what + ": ready to submit." : what + ": choose a trade type, then Submit.") + images;
 			}
 			if (view.LastSubmitted.Any(d => d.State == DeliveryState.Failed && d.IsConfigurationError))
+			{
+				awaitingDelivery = false;
 				return "Last submission failed: check the intake token in Chart Jot Settings, then Retry.";
+			}
 			SubmittedView failed = view.LastSubmitted.FirstOrDefault(d => d.State == DeliveryState.Failed);
 			if (failed != null)
+			{
+				awaitingDelivery = false;
 				return "Last submission failed" + (failed.StatusCode.HasValue ? " (HTTP " + failed.StatusCode.Value.ToString(CultureInfo.InvariantCulture) + ")" : "")
 					+ (failed.Detail != null ? ": " + failed.Detail : ".") + " Retry to send it again.";
+			}
+			// A submission still on its way is the current trade too: say so until the journal has it.
+			if (view.LastSubmitted.Any(d => d.State == DeliveryState.Pending || d.State == DeliveryState.Sending))
+			{
+				awaitingDelivery = true;
+				return view.LastSubmitted.Any(d => d.State == DeliveryState.Pending && d.Attempts > 0)
+					? "Not sent yet: the journal can't be reached. Retrying automatically."
+					: "Sending...";
+			}
+			if (awaitingDelivery)
+			{
+				awaitingDelivery = false;
+				ShowMessage("Sent.");
+				return "Sent.";
+			}
 			return "Waiting for entry.";
 		}
 
@@ -2020,7 +2006,8 @@ namespace NinjaTrader.NinjaScript.AddOns
 				{
 					// Reading the copier visits other charts' dispatchers, so it runs off this one.
 					ChartJotMonitor.SubmitForm(master, market, ChartJotCopier.FollowersOf(master));
-					result = "Submitted.";
+					result = null;
+					awaitingDelivery = true;
 				}
 				catch (Exception ex)
 				{
@@ -2030,7 +2017,8 @@ namespace NinjaTrader.NinjaScript.AddOns
 				{
 					busy = false;
 					Load();
-					ShowMessage(result);
+					if (result != null)
+						ShowMessage(result);
 					Render();
 				});
 			});
