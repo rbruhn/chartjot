@@ -313,12 +313,12 @@ Capture **two** images per trade, both optional (a capture failure on either
 must never prevent the trader from submitting the trade):
 
 - **Entry screenshot**: captured shortly after the position opens (same short
-  render delay as exit, below, so the entry fill/marker is drawn). Sent to
-  the server with the trade, but the journal web UI is not required to
-  display it on the main trade view -- it exists so the trader can retrieve
-  it later via the API (for example, for outside analysis). No **Recapture**
-  for this one; it is a point-in-time record of what the setup looked like at
-  entry, not something to redo.
+  render delay as exit, below, so the entry fill/marker is drawn), **only when
+  "Entry image" is ticked in Chart Jot Settings** (off by default; decided
+  2026-10-04). Sent as `entry_screenshot_file` with an `entry_screenshot`
+  object (`captured_at`). The journal shows it behind an "Entry Image" link
+  under the exit image (#72). No **Recapture** for this one; it is a
+  point-in-time record of what the setup looked like at entry.
 - **Exit screenshot**: captured after a short render delay (default 1 second
   after flat) so the exit fill and execution markers are drawn. The trader
   can replace it with **Recapture** any time before submission -- this is the
@@ -334,15 +334,23 @@ must never prevent the trader from submitting the trade):
 Both captures use the same originating-chart logic (below) and the same
 threading rules.
 
+Images are written as PNG to `{Data folder}\images\{trade_id}.png` (exit) and
+`{trade_id}-entry.png` (entry). Copier followers send their master's images:
+at Submit the master's files are copied under each follower's trade_id
+(see "Copier followers").
+
 ### Originating chart
 
 The originating chart is chosen in this order:
 
-1. The chart window hosting the note panel whose visible tab shows the trade's
-   instrument.
-2. Otherwise, the most recently active chart window whose visible tab shows
+1. For Recapture, the chart window whose Chart Jot form was used, if its
+   visible tab shows the trade's instrument.
+2. Otherwise, a chart window whose visible tab shows the instrument and whose
+   Chart Trader account is the trade's account.
+3. Otherwise, the most recently active chart window whose visible tab shows
    that instrument.
-3. Otherwise, no screenshot; the trade is staged with "screenshot skipped".
+4. Otherwise, no screenshot; the trade is staged without it (logged as
+   "image skipped").
 
 "Visible tab shows the trade's instrument" is not a visual/title check --
 match on `ChartTab.Instrument` directly (confirmed 2026-09-30, issue #37):
