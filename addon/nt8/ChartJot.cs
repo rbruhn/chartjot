@@ -523,6 +523,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 				}
 				view.CanSubmit = state.CanSubmitForm(accountName, instrumentFullName);
 
+				view.MaxAttempts = state.Deliveries.MaxAutomaticAttempts;
 				IList<QueuedDelivery> failedDeliveries = state.Deliveries.FailedDeliveries;
 				view.FailedCount = failedDeliveries.Count;
 				view.FailedNeedsToken = failedDeliveries.Any(d => d.IsConfigurationError);
@@ -538,7 +539,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 				{
 					QueuedDelivery delivery = state.Deliveries.Find(tradeId);
 					if (delivery != null)
-						view.LastSubmitted.Add(new SubmittedView { TradeId = tradeId, State = delivery.State, Attempts = delivery.Attempts,
+						view.LastSubmitted.Add(new SubmittedView { TradeId = tradeId, State = delivery.State, Attempts = delivery.Attempts, NextAttemptAt = delivery.NextAttemptAt,
 							StatusCode = delivery.LastStatusCode, IsConfigurationError = delivery.IsConfigurationError, Detail = DeliveryDetail(delivery) });
 				}
 			}
@@ -1645,6 +1646,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 		public string TradeId;
 		public DeliveryState State;
 		public int Attempts;
+		public DateTimeOffset? NextAttemptAt;
 		public int? StatusCode;
 		public bool IsConfigurationError;
 		public string Detail;
@@ -1670,6 +1672,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 		public List<SubmittedView> LastSubmitted = new List<SubmittedView>();
 		/// <summary>Every failed trade in the queue, from any form or earlier Submit.</summary>
 		public int FailedCount;
+		public int MaxAttempts = 3;
 		public bool FailedNeedsToken;
 		public bool FailedUnreachable;
 		public int? FailedStatusCode;
@@ -1959,9 +1962,18 @@ namespace NinjaTrader.NinjaScript.AddOns
 			if (view.LastSubmitted.Any(d => d.State == DeliveryState.Pending || d.State == DeliveryState.Sending || d.State == DeliveryState.QueuedForRetry))
 			{
 				awaitingDelivery = true;
-				return view.LastSubmitted.Any(d => d.Attempts > 0)
-					? "Not sent yet: the journal can't be reached. Trying again (up to 3 tries)."
-					: "Sending...";
+				List<SubmittedView> unsent = view.LastSubmitted
+					.Where(d => d.State == DeliveryState.Pending || d.State == DeliveryState.Sending || d.State == DeliveryState.QueuedForRetry).ToList();
+				SubmittedView current = unsent[0];
+				string max = view.MaxAttempts.ToString(CultureInfo.InvariantCulture);
+				string what = unsent.Count == 1 ? "" : " " + unsent.Count.ToString(CultureInfo.InvariantCulture) + " trades";
+				if (current.State == DeliveryState.QueuedForRetry)
+				{
+					int wait = current.NextAttemptAt.HasValue ? Math.Max(0, (int)Math.Ceiling((current.NextAttemptAt.Value - DateTimeOffset.Now).TotalSeconds)) : 0;
+					return "Try " + current.Attempts.ToString(CultureInfo.InvariantCulture) + "/" + max + " failed: the journal can't be reached. Try "
+						+ (current.Attempts + 1).ToString(CultureInfo.InvariantCulture) + "/" + max + " in " + wait.ToString(CultureInfo.InvariantCulture) + "s...";
+				}
+				return "Sending" + what + " (try " + (current.Attempts + 1).ToString(CultureInfo.InvariantCulture) + "/" + max + ")...";
 			}
 			if (view.FailedCount > 0)
 			{

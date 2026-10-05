@@ -231,6 +231,7 @@ namespace ChartJot.Core.Tests
 			QueuedDelivery d = queue.Find("t1");
 			Assert.Equal(DeliveryState.Failed, d.State);
 			Assert.Equal(3, d.Attempts);
+			Assert.Equal(3, queue.MaxAutomaticAttempts);
 			Assert.Null(d.NextAttemptAt);
 			Assert.False(d.IsConfigurationError);
 			Assert.Equal("Connection refused", d.LastErrorMessage);

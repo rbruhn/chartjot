@@ -81,6 +81,12 @@ namespace ChartJot.Core
 			this.maxAutomaticAttempts = maxAutomaticAttempts;
 		}
 
+		/// <summary>Send attempts per delivery before it fails and waits for the trader's Retry.</summary>
+		public int MaxAutomaticAttempts
+		{
+			get { return maxAutomaticAttempts; }
+		}
+
 		/// <summary>
 		/// True once any queued delivery has hit a 401/403. While true, <see cref="Due"/> returns nothing: a bad
 		/// token fails every request, so there is no point retrying the rest of the queue automatically.

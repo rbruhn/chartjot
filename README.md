@@ -141,7 +141,11 @@ trade, only the master is sent.
      yet.
 - **Automatic retries.** If the journal can't be reached (timeout, connection
   error, server error), the AddOn tries **3 times in all**: about 5s, then 10s
-  apart. Meanwhile the status says "Not sent yet… trying again".
+  apart. The status line shows each try with a countdown: "Sending (try 1/3)…",
+  "Try 1/3 failed: the journal can't be reached. Try 2/3 in 4s…", and so on.
+- **You can keep trading.** Submit clears the form even if sending fails, so
+  the next trade can be taken and submitted normally. Reset never touches
+  submitted trades; a failed one stays in `state.json` until Retry sends it.
 - **After 3 failed tries**, the trade is **Failed**: "N trades not sent… Click
   **Retry**". Retry resends **every** failed trade, from any chart or earlier
   Submit, each with 3 fresh tries. Any chart's form shows the count and the
