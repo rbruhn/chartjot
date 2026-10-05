@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\ScreenshotKind;
 use App\Enums\ScreenshotSource;
 use App\Models\Trade;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -13,6 +14,8 @@ class TradeScreenshotFactory extends Factory
     {
         return [
             'trade_id'    => Trade::factory(),
+
+            'kind'        => ScreenshotKind::Exit,
             'disk'        => 'private',
             'path'        => 'screenshots/'.date('Y/m/').Str::random(40).'.png',
             'caption'     => $this->faker->optional()->sentence(6),
@@ -21,6 +24,11 @@ class TradeScreenshotFactory extends Factory
             'captured_at' => $this->faker->dateTimeBetween('-90 days', 'now'),
             'source'      => ScreenshotSource::Nt8,
         ];
+    }
+
+    public function entry(): static
+    {
+        return $this->state(['kind' => ScreenshotKind::Entry]);
     }
 
     public function manual(): static

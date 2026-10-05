@@ -177,7 +177,7 @@ new class extends Component {
     {
         if ($this->selectedUuid === '') return null;
         return $this->journal->trades()
-            ->with(['account', 'executions', 'notes', 'screenshots', 'legs'])
+            ->with(['account', 'executions', 'notes', 'exitScreenshots', 'entryScreenshot', 'legs'])
             ->where('uuid', $this->selectedUuid)
             ->first();
     }
@@ -1118,9 +1118,9 @@ new class extends Component {
                     <div class="mb-6">
                         <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Chart</h3>
 
-                        @if($t->screenshots->isNotEmpty())
+                        @if($t->exitScreenshots->isNotEmpty())
                             <div class="space-y-3">
-                                @foreach($t->screenshots as $shot)
+                                @foreach($t->exitScreenshots as $shot)
                                     <div style="position:relative;border-radius:0.5rem;overflow:hidden" class="bg-gray-50 dark:bg-gray-800"
                                         x-data="{ hover: false }" @mouseenter="hover=true" @mouseleave="hover=false">
                                         <img
@@ -1157,6 +1157,17 @@ new class extends Component {
                                     </div>
                                 @endforeach
                             </div>
+                        @endif
+
+                        @if($t->entryScreenshot)
+                            <x-entry-image :id="$t->entryScreenshot->id" :url="route('journal.screenshot', [$t, $t->entryScreenshot])">
+                                <button
+                                    type="button"
+                                    wire:click="deleteScreenshot({{ $t->entryScreenshot->id }})"
+                                    wire:confirm="Delete this image?"
+                                    class="text-xs px-3 py-1 rounded border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400"
+                                >Delete</button>
+                            </x-entry-image>
                         @endif
 
                         {{-- Upload area --}}

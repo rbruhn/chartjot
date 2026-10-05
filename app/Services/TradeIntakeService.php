@@ -8,6 +8,7 @@ use App\Enums\ExecutionAction;
 use App\Enums\ExecutionRole;
 use App\Enums\ExitReason;
 use App\Enums\NotePhase;
+use App\Enums\ScreenshotKind;
 use App\Enums\ScreenshotSource;
 use App\Enums\TradeType;
 use App\Models\Account;
@@ -46,9 +47,13 @@ class TradeIntakeService
         return $account;
     }
 
-    public function store(Journal $journal, array $data, ?UploadedFile $screenshotFile): Trade
+    /**
+     * Stores one AddOn trade. $screenshotFile is the exit image (the trade's main chart);
+     * $entryScreenshotFile is the optional image captured when the trade opened (#72).
+     */
+    public function store(Journal $journal, array $data, ?UploadedFile $screenshotFile, ?UploadedFile $entryScreenshotFile = null): Trade
     {
-        return DB::transaction(function () use ($journal, $data, $screenshotFile) {
+        return DB::transaction(function () use ($journal, $data, $screenshotFile, $entryScreenshotFile) {
             $account = $this->resolveAccount($journal, $data['account_name'], $data['connection'] ?? null);
 
             $instrument = $data['instrument'];
@@ -92,7 +97,7 @@ class TradeIntakeService
                 'excursion_max_adverse_price'   => $excursion['max_adverse_price'] ?? null,
                 'excursion_max_favorable_price' => $excursion['max_favorable_price'] ?? null,
                 'excursion_complete'            => $excursion['complete'],
-                'raw_payload'                   => collect($data)->except(['screenshot_file', 'trade'])->all(),
+                'raw_payload'                   => collect($data)->except(['screenshot_file', 'entry_screenshot_file', 'trade'])->all(),
             ]);
 
             foreach ($data['executions'] ?? [] as $exec) {
@@ -142,27 +147,36 @@ class TradeIntakeService
             }
 
             if ($screenshotFile) {
-                $ext  = $screenshotFile->extension();
-                $path = "trade-screenshots/{$journal->id}/{$trade->uuid}.{$ext}";
-                Storage::disk('local')->putFileAs(
-                    "trade-screenshots/{$journal->id}",
-                    $screenshotFile,
-                    "{$trade->uuid}.{$ext}"
-                );
+                $this->storeScreenshot($journal, $trade, $screenshotFile, ScreenshotKind::Exit,
+                    $data['screenshot']['captured_at'] ?? null, $data['screenshot']['caption'] ?? null);
+            }
 
-                TradeScreenshot::create([
-                    'trade_id'    => $trade->id,
-                    'disk'        => 'local',
-                    'path'        => $path,
-                    'caption'     => $data['screenshot']['caption'] ?? null,
-                    'mime_type'   => $screenshotFile->getMimeType(),
-                    'bytes'       => $screenshotFile->getSize(),
-                    'captured_at' => $data['screenshot']['captured_at'] ?? null,
-                    'source'      => ScreenshotSource::Nt8,
-                ]);
+            if ($entryScreenshotFile) {
+                $this->storeScreenshot($journal, $trade, $entryScreenshotFile, ScreenshotKind::Entry,
+                    $data['entry_screenshot']['captured_at'] ?? null, null);
             }
 
             return $trade;
         });
+    }
+
+    /** Saves an AddOn chart image next to the trade's other images and records it. */
+    private function storeScreenshot(Journal $journal, Trade $trade, UploadedFile $file, ScreenshotKind $kind, ?string $capturedAt, ?string $caption): void
+    {
+        $ext  = $file->extension();
+        $name = $kind === ScreenshotKind::Entry ? "{$trade->uuid}-entry.{$ext}" : "{$trade->uuid}.{$ext}";
+        Storage::disk('local')->putFileAs("trade-screenshots/{$journal->id}", $file, $name);
+
+        TradeScreenshot::create([
+            'trade_id'    => $trade->id,
+            'kind'        => $kind,
+            'disk'        => 'local',
+            'path'        => "trade-screenshots/{$journal->id}/{$name}",
+            'caption'     => $caption,
+            'mime_type'   => $file->getMimeType(),
+            'bytes'       => $file->getSize(),
+            'captured_at' => $capturedAt,
+            'source'      => ScreenshotSource::Nt8,
+        ]);
     }
 }

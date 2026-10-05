@@ -19,7 +19,8 @@ class TradeIntakeRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        // Support multipart: the AddOn sends a JSON `trade` field + `screenshot_file`.
+        // Support multipart: the AddOn sends a JSON `trade` field + `screenshot_file`
+        // (the exit image) and, optionally, `entry_screenshot_file` (#72).
         if ($this->has('trade') && is_string($this->input('trade'))) {
             $decoded = json_decode($this->input('trade'), true);
             if (is_array($decoded)) {
@@ -132,6 +133,11 @@ class TradeIntakeRequest extends FormRequest
 
             // Screenshot file (multipart)
             'screenshot_file' => ['nullable', 'file', 'mimes:png,jpeg,jpg', 'max:10240'],
+
+            // Entry image (#72): captured when the trade opened; optional, like the exit image.
+            'entry_screenshot'             => ['nullable', 'array'],
+            'entry_screenshot.captured_at' => ['nullable', 'date'],
+            'entry_screenshot_file'        => ['nullable', 'file', 'mimes:png,jpeg,jpg', 'max:10240'],
         ];
     }
 }

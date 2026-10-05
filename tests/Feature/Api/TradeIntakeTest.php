@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\ScreenshotKind;
 use App\Models\Account;
 use App\Models\Journal;
 use App\Models\Trade;
@@ -496,4 +497,84 @@ test('intake is rejected with 422 when journal has no timezone', function () {
         'Authorization' => "Bearer {$token}",
     ])->assertStatus(422)
       ->assertJsonPath('errors.timezone.0', fn ($msg) => str_contains($msg, 'timezone'));
+});
+
+// ---------------------------------------------------------------------------
+// Entry image (#72): an optional second image, captured when the trade opened
+// ---------------------------------------------------------------------------
+
+test('entry and exit images are stored as separate kinds', function () {
+    Storage::fake('local');
+    [$journal, $token] = journalWithToken();
+
+    test()->post('/api/v1/trades', [
+        'trade'                 => json_encode(minimalPayload(['entry_screenshot' => ['captured_at' => '2026-09-24T09:30:02-04:00']])),
+        'screenshot_file'       => UploadedFile::fake()->image('exit.png'),
+        'entry_screenshot_file' => UploadedFile::fake()->image('entry.png'),
+    ], ['Authorization' => "Bearer {$token}"])->assertStatus(201);
+
+    $trade = Trade::first();
+    expect($trade->screenshots)->toHaveCount(2)
+        ->and($trade->screenshot->kind)->toBe(ScreenshotKind::Exit)
+        ->and($trade->entryScreenshot->kind)->toBe(ScreenshotKind::Entry)
+        ->and($trade->entryScreenshot->captured_at->toIso8601String())->toBe('2026-09-24T13:30:02+00:00')
+        ->and($trade->entryScreenshot->path)->not->toBe($trade->screenshot->path);
+    Storage::disk('local')->assertExists($trade->entryScreenshot->path);
+    Storage::disk('local')->assertExists($trade->screenshot->path);
+});
+
+test('an entry image alone is stored without an exit image', function () {
+    Storage::fake('local');
+    [$journal, $token] = journalWithToken();
+
+    test()->post('/api/v1/trades', [
+        'trade'                 => json_encode(minimalPayload()),
+        'entry_screenshot_file' => UploadedFile::fake()->image('entry.png'),
+    ], ['Authorization' => "Bearer {$token}"])->assertStatus(201);
+
+    $trade = Trade::first();
+    expect($trade->entryScreenshot)->not->toBeNull()
+        ->and($trade->screenshot)->toBeNull();
+});
+
+test('a request with only screenshot_file stores it as the exit image, as before', function () {
+    Storage::fake('local');
+    [$journal, $token] = journalWithToken();
+
+    test()->post('/api/v1/trades', ['trade' => json_encode(minimalPayload()), 'screenshot_file' => UploadedFile::fake()->image('chart.png')], [
+        'Authorization' => "Bearer {$token}",
+    ])->assertStatus(201);
+
+    $trade = Trade::first();
+    expect($trade->screenshot->kind)->toBe(ScreenshotKind::Exit)
+        ->and($trade->entryScreenshot)->toBeNull();
+});
+
+test('entry_screenshot_file must be an image type', function () {
+    Storage::fake('local');
+    [$journal, $token] = journalWithToken();
+
+    test()->post('/api/v1/trades', [
+        'trade'                 => json_encode(minimalPayload()),
+        'entry_screenshot_file' => UploadedFile::fake()->create('notes.pdf', 10, 'application/pdf'),
+    ], ['Authorization' => "Bearer {$token}", 'Accept' => 'application/json'])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['entry_screenshot_file']);
+
+    expect(Trade::count())->toBe(0);
+});
+
+test('a retried delivery does not store a second entry image', function () {
+    Storage::fake('local');
+    [$journal, $token] = journalWithToken();
+    $payload = minimalPayload();
+    $send = fn () => test()->post('/api/v1/trades', [
+        'trade'                 => json_encode($payload),
+        'entry_screenshot_file' => UploadedFile::fake()->image('entry.png'),
+    ], ['Authorization' => "Bearer {$token}", 'Idempotency-Key' => $payload['trade_id']]);
+
+    $send()->assertStatus(201);
+    $send()->assertStatus(200);
+
+    expect(TradeScreenshot::where('kind', ScreenshotKind::Entry)->count())->toBe(1);
 });
