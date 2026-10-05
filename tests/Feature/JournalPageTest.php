@@ -831,14 +831,19 @@ function editTrade(User $user, Journal $journal, Trade $trade)
         ->call('startEditTrade');
 }
 
-test('the trade view shows the Other description next to the type', function () {
+test('the trade view shows Other with an info icon holding the description', function () {
     [$user, $journal] = journalUser();
     $trade = tradeInJournal($journal, ['trade_type' => TradeType::Other, 'trade_type_other' => 'breakout retest']);
 
-    Livewire::actingAs($user)
+    $html = Livewire::actingAs($user)
         ->test('journal.trade-journal', ['journal' => $journal])
         ->call('selectTrade', $trade->uuid)
-        ->assertSee('Other: breakout retest');
+        ->assertSeeHtml('aria-label="Other trade type description"')
+        ->html();
+
+    // The description is in the icon's tooltip, not printed after "Other".
+    expect($html)->toMatch('#role="tooltip"[^>]*>\s*breakout retest\s*</span>#')
+        ->and($html)->not->toContain('Other: breakout retest');
 });
 
 test('the trade view shows plain Other when there is no description', function () {
@@ -849,7 +854,7 @@ test('the trade view shows plain Other when there is no description', function (
         ->test('journal.trade-journal', ['journal' => $journal])
         ->call('selectTrade', $trade->uuid)
         ->assertSee('Other')
-        ->assertDontSee('Other:');
+        ->assertDontSeeHtml('aria-label="Other trade type description"');
 });
 
 test('the Other description is escaped on the trade view', function () {

@@ -1053,12 +1053,17 @@ new class extends Component {
                             ['ENTRY ORDER',  $t->entry_order_name ?: '—'],
                             ['EXIT ORDER',   $t->exit_order_name  ?: '—'],
                             ['ACCOUNT',      $t->account->name],
-                            ['TRADE TYPE',   ($t->trade_type?->label() ?: '—')
-                                . ($t->trade_type === \App\Enums\TradeType::Other && filled($t->trade_type_other) ? ': ' . $t->trade_type_other : '')],
+                            ['TRADE TYPE',   $t->trade_type?->label() ?: '—'],
                         ] as [$label, $value])
                             <div class="bg-gray-50 dark:bg-gray-800 px-3 py-2.5">
                                 <div class="text-xs text-gray-600 dark:text-gray-500 uppercase tracking-wide mb-0.5">{{ $label }}</div>
-                                <div class="text-gray-900 dark:text-gray-100 font-medium">{{ $value }}</div>
+                                <div class="text-gray-900 dark:text-gray-100 font-medium">
+                                    {{ $value }}
+                                    {{-- An Other trade's description (up to 64 characters) sits behind an info icon so the cell stays one line (#75) --}}
+                                    @if($label === 'TRADE TYPE' && $t->trade_type === \App\Enums\TradeType::Other && filled($t->trade_type_other))
+                                        <x-stats.info-tip label="Other trade type description" class="align-middle">{{ $t->trade_type_other }}</x-stats.info-tip>
+                                    @endif
+                                </div>
                             </div>
                         @endforeach
                     </div>
