@@ -1941,8 +1941,11 @@ namespace NinjaTrader.NinjaScript.AddOns
 				: "  (" + view.FailedCount.ToString(CultureInfo.InvariantCulture) + (view.FailedCount == 1 ? " earlier trade" : " earlier trades") + " not sent: Retry)";
 			if (view.IsOpen)
 			{
-				TimeSpan elapsed = DateTimeOffset.Now - view.OpenEntryAt;
-				string time = elapsed < TimeSpan.Zero ? "" : ", " + ((int)elapsed.TotalMinutes).ToString(CultureInfo.InvariantCulture) + "m " + elapsed.Seconds.ToString("00", CultureInfo.InvariantCulture) + "s";
+				// NT8's own clock: it follows the replay in Playback, where fill times are historical. Both it and the
+				// entry time are in NT8's configured time zone.
+				TimeSpan elapsed = NinjaTrader.Core.Globals.Now - view.OpenEntryAt.DateTime;
+				string time = elapsed < TimeSpan.Zero || elapsed > TimeSpan.FromDays(1) ? ""
+					: ", " + ((int)elapsed.TotalMinutes).ToString(CultureInfo.InvariantCulture) + "m " + elapsed.Seconds.ToString("00", CultureInfo.InvariantCulture) + "s";
 				return "In trade: " + view.OpenDirection + " " + view.OpenQuantity.ToString(CultureInfo.InvariantCulture) + time + stuck;
 			}
 			if (view.ClosedCount > 0)
