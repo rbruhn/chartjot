@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 
 namespace ChartJot.Core
 {
@@ -59,28 +58,6 @@ namespace ChartJot.Core
 				return new List<NoteRecord>();
 			buckets.Remove(key);
 			return bucket.Notes;
-		}
-
-		/// <summary>True when this exact note (by reference) is waiting here.</summary>
-		public bool Contains(NoteRecord note)
-		{
-			return buckets.Values.Any(b => b.Notes.Any(n => ReferenceEquals(n, note)));
-		}
-
-		/// <summary>Removes this exact note (by reference). False when it is not waiting here.</summary>
-		public bool Remove(NoteRecord note)
-		{
-			foreach (KeyValuePair<string, Bucket> entry in buckets)
-			{
-				int index = entry.Value.Notes.FindIndex(n => ReferenceEquals(n, note));
-				if (index < 0)
-					continue;
-				entry.Value.Notes.RemoveAt(index);
-				if (entry.Value.Notes.Count == 0)
-					buckets.Remove(entry.Key);
-				return true;
-			}
-			return false;
 		}
 
 		public bool IsEmpty { get { return buckets.Count == 0; } }

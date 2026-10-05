@@ -2,12 +2,14 @@
 //
 // Wires NT8's real account/execution/connection events into addon/core's
 // TradeTracker/AddonState (ChartJot.Core.dll). Closed trades are staged after
-// the commission settle period. The note panel takes notes (pre/in/post-trade),
-// lists staged trades with their delivery state, and submits a reviewed trade;
-// a background pump delivers it. No screenshot yet (#37/#52), and no live tick
-// subscription for MAE/MFE, so excursion stays incomplete.
+// the commission settle period. Each chart gets a Chart Jot form that follows its
+// Chart Trader account/instrument: one note and a trade type, Submit and Reset.
+// Submit sends the master trade plus each copier follower's own trade, all with
+// the master's note and type; a background pump delivers them. No screenshot
+// yet (#37/#52), and no live tick subscription for MAE/MFE, so excursion stays
+// incomplete.
 //
-// Notes:    Control Center -> New -> Chart Jot Notes
+// Form:     the "Chart Jot" button on each chart's toolbar
 // Settings: Control Center -> New -> Chart Jot Settings
 //           (stored in %USERPROFILE%\ChartJot\settings.json, token DPAPI-encrypted)
 // State:    <Data folder>\state.json (default %USERPROFILE%\ChartJot\)
@@ -39,8 +41,9 @@ namespace NinjaTrader.NinjaScript.AddOns
 {
 	public class ChartJot : AddOnBase
 	{
+		private const string ChartButtonName = "ChartJotFormButton";
+
 		private NTMenuItem newMenu;
-		private NTMenuItem notesMenuItem;
 		private NTMenuItem settingsMenuItem;
 
 		protected override void OnStateChange()
@@ -62,6 +65,13 @@ namespace NinjaTrader.NinjaScript.AddOns
 			// plumbing is up by the time a window is created).
 			ChartJotMonitor.Start();
 
+			NinjaTrader.Gui.Chart.Chart chart = window as NinjaTrader.Gui.Chart.Chart;
+			if (chart != null)
+			{
+				AddChartButton(chart);
+				return;
+			}
+
 			// Same Control Center menu technique spike/ChartJotSpike.cs verified.
 			ControlCenter cc = window as ControlCenter;
 			if (cc == null)
@@ -70,33 +80,26 @@ namespace NinjaTrader.NinjaScript.AddOns
 			newMenu = cc.FindFirst("ControlCenterMenuItemNew") as NTMenuItem;
 			if (newMenu == null)
 			{
-				ChartJotLog.Write("UI", "Control Center 'New' menu not found; Chart Jot cannot be opened from the menu");
+				ChartJotLog.Write("UI", "Control Center 'New' menu not found; Chart Jot Settings cannot be opened from the menu");
 				return;
 			}
 
-			Style style = Application.Current.TryFindResource("MainMenuItem") as Style;
-			notesMenuItem = new NTMenuItem { Header = "Chart Jot Notes", Style = style };
-			newMenu.Items.Add(notesMenuItem);
-			notesMenuItem.Click += OnNotesClick;
-
-			settingsMenuItem = new NTMenuItem { Header = "Chart Jot Settings", Style = style };
+			settingsMenuItem = new NTMenuItem { Header = "Chart Jot Settings", Style = Application.Current.TryFindResource("MainMenuItem") as Style };
 			newMenu.Items.Add(settingsMenuItem);
 			settingsMenuItem.Click += OnSettingsClick;
 		}
 
 		protected override void OnWindowDestroyed(Window window)
 		{
-			if (!(window is ControlCenter))
-				return;
-
-			if (notesMenuItem != null)
+			NinjaTrader.Gui.Chart.Chart chart = window as NinjaTrader.Gui.Chart.Chart;
+			if (chart != null)
 			{
-				if (newMenu != null && newMenu.Items.Contains(notesMenuItem))
-					newMenu.Items.Remove(notesMenuItem);
-				notesMenuItem.Click -= OnNotesClick;
-				notesMenuItem = null;
+				ChartJotCopier.Untrack(chart);
+				ChartJotFormWindow.CloseFor(chart);
+				return;
 			}
-			if (settingsMenuItem != null)
+
+			if (window is ControlCenter && settingsMenuItem != null)
 			{
 				if (newMenu != null && newMenu.Items.Contains(settingsMenuItem))
 					newMenu.Items.Remove(settingsMenuItem);
@@ -105,9 +108,32 @@ namespace NinjaTrader.NinjaScript.AddOns
 			}
 		}
 
-		private void OnNotesClick(object sender, RoutedEventArgs e)
+		/// <summary>A "Chart Jot" button on the chart's toolbar opens that chart's form.</summary>
+		private static void AddChartButton(NinjaTrader.Gui.Chart.Chart chart)
 		{
-			NinjaTrader.Core.Globals.RandomDispatcher.BeginInvoke(new Action(() => new ChartJotNotesWindow().Show()));
+			ChartJotCopier.Track(chart);
+			chart.Dispatcher.InvokeAsync(() =>
+			{
+				try
+				{
+					if (chart.MainMenu.OfType<FrameworkElement>().Any(e => e.Name == ChartButtonName))
+						return;
+					Button button = new Button
+					{
+						Name		= ChartButtonName,
+						Content		= "Chart Jot",
+						ToolTip		= "Open the Chart Jot note form for this chart's Chart Trader account",
+						Margin		= new Thickness(2, 0, 2, 0),
+						Padding		= new Thickness(6, 0, 6, 0)
+					};
+					button.Click += (s, e) => ChartJotFormWindow.ShowFor(chart);
+					chart.MainMenu.Add(button);
+				}
+				catch (Exception ex)
+				{
+					ChartJotLog.Write("UI", "Could not add the Chart Jot button to a chart: " + ex.Message);
+				}
+			});
 		}
 
 		private void OnSettingsClick(object sender, RoutedEventArgs e)
@@ -203,6 +229,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 
 			settings = LoadSettings();
 			state = LoadState();
+			PruneUnsubmitted();
 			SubscribeConnectionStatus();
 			SubscribeAccounts("startup");
 			ChartJotDelivery.Start();
@@ -324,7 +351,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 					{
 						FillCharges found;
 						refreshed = state.RefreshCharges(tradeId, id => charges.TryGetValue(id, out found) ? found : null);
-						state.Stage(tradeId);
+						state.Stage(tradeId, DateTimeOffset.Now);
 						staged = true;
 					}
 				}
@@ -423,162 +450,183 @@ namespace NinjaTrader.NinjaScript.AddOns
 				ChartJotLog.Write("DELIVERY", "removed from review list (sent): " + string.Join(", ", removed));
 		}
 
-		// ---- note panel access (ChartJotNotesWindow). Every read and write of the state happens under sync;
-		// the panel only ever gets copies, plus the NoteRecord references it hands back for edit/delete.
+		// ---- trade form access (ChartJotFormWindow). Every read and write of the state happens under sync;
+		// the window only ever gets copies.
 
-		public static PanelSnapshot Snapshot(string accountName, string instrumentFullName)
+		/// <summary>Staged trades nobody submitted are dropped after this long (wall clock since staging).</summary>
+		public static readonly TimeSpan UnsubmittedMaxAge = TimeSpan.FromHours(24);
+
+		public static FormView Form(string accountName, string instrumentFullName)
 		{
-			PanelSnapshot snapshot = new PanelSnapshot
-			{
-				OpenNotes = new List<PanelNote>(),
-				PendingNotes = new List<PanelNote>(),
-				Staged = new List<PanelStagedTrade>()
-			};
+			FormView view = new FormView();
 			lock (sync)
 			{
 				if (state == null)
-					return snapshot;
+					return view;
+
+				TradeForm form = state.FormFor(accountName, instrumentFullName);
+				view.Body = form.Body;
+				view.TradeType = form.TradeType;
+				view.TradeTypeOther = form.TradeTypeOther;
 
 				OpenTradeInfo open = state.Tracker.OpenTrades.FirstOrDefault(t => t.Account == accountName && t.Instrument.FullName == instrumentFullName);
 				if (open != null)
 				{
-					snapshot.OpenTradeId = open.TradeId;
-					snapshot.OpenDirection = open.Direction;
-					snapshot.OpenPosition = open.SignedPosition;
-					snapshot.OpenEntryAt = open.EntryAt;
-					snapshot.OpenNotes = state.NotesFor(open.TradeId).Select(ToPanelNote).ToList();
+					view.IsOpen = true;
+					view.OpenDirection = open.Direction;
+					view.OpenQuantity = Math.Abs(open.SignedPosition);
+					view.OpenEntryAt = open.EntryAt;
 				}
-				snapshot.PendingNotes = state.PendingNotes.For(accountName, instrumentFullName).Select(ToPanelNote).ToList();
 
-				foreach (StagedTrade staged in state.Staged.All)
+				IList<CompletedTrade> pending = state.PendingForForm(accountName, instrumentFullName);
+				view.ClosedCount = pending.Count;
+				if (pending.Count > 0)
 				{
-					string tradeId = staged.Trade.TradeId;
+					view.ClosedDirection = pending[pending.Count - 1].Direction;
+					view.ClosedNetPnl = pending.Sum(t => t.NetPnl);
+				}
+				view.CanSubmit = state.CanSubmitForm(accountName, instrumentFullName);
+
+				foreach (string tradeId in form.LastSubmitted ?? new List<string>())
+				{
 					QueuedDelivery delivery = state.Deliveries.Find(tradeId);
-					snapshot.Staged.Add(new PanelStagedTrade
-					{
-						TradeId			= tradeId,
-						Account			= staged.Trade.Account,
-						Instrument		= staged.Trade.Instrument.FullName,
-						Direction		= staged.Trade.Direction,
-						Quantity		= staged.Trade.Quantity,
-						EntryAt			= staged.Trade.EntryAt,
-						ExitAt			= staged.Trade.ExitAt,
-						NetPnl			= staged.Trade.NetPnl,
-						TradeType		= staged.TradeType,
-						TradeTypeOther	= staged.TradeTypeOther,
-						Status			= DeliveryStatus(delivery),
-						StatusDetail	= DeliveryDetail(delivery),
-						CanEdit			= state.CanEdit(tradeId),
-						CanSubmit		= state.CanSubmit(tradeId),
-						CanRetry		= delivery != null && delivery.State == DeliveryState.Failed,
-						Notes			= (staged.Notes ?? new List<NoteRecord>()).OrderBy(n => n.OccurredAt).Select(ToPanelNote).ToList()
-					});
+					if (delivery != null)
+						view.LastSubmitted.Add(new SubmittedView { TradeId = tradeId, State = delivery.State, Attempts = delivery.Attempts,
+							StatusCode = delivery.LastStatusCode, IsConfigurationError = delivery.IsConfigurationError, Detail = DeliveryDetail(delivery) });
 				}
 			}
-			return snapshot;
+			return view;
 		}
 
-		/// <summary>Instruments worth offering for an account: open positions, today's executions, and anything the
-		/// AddOn already holds for it.</summary>
-		public static IList<string> KnownInstruments(string accountName)
+		public static void UpdateForm(string accountName, string instrumentFullName, string body, string tradeType, string tradeTypeOther)
 		{
-			HashSet<string> names = new HashSet<string>(StringComparer.Ordinal);
-			Account account = Account.All.FirstOrDefault(a => a.Name == accountName);
-			if (account != null)
-			{
-				foreach (Position position in account.Positions)
-					names.Add(position.Instrument.FullName);
-				foreach (Execution execution in account.Executions)
-					names.Add(execution.Instrument.FullName);
-			}
+			lock (sync)
+				state.UpdateForm(accountName, instrumentFullName, body, tradeType, tradeTypeOther, DateTimeOffset.Now);
+			SaveState();
+		}
+
+		/// <summary>
+		/// Submit from a chart's form. Re-reads commissions, finds each copier follower's own trade for the master
+		/// trade(s) (<paramref name="followers"/> is the copier's follower list for this master; empty when no
+		/// copier is in use), and sends them all with the form's note and trade type. Returns a short summary for
+		/// the status line. Throws with a message fit for the form when Submit is not possible.
+		/// </summary>
+		public static string SubmitForm(string accountName, string instrumentFullName, IList<FollowerSetup> followers)
+		{
+			Dictionary<string, FillCharges> charges = CurrentCharges();
+			Dictionary<string, string> connections = ConnectionNames();
+
+			IList<QueuedDelivery> queued;
+			int followerCount;
 			lock (sync)
 			{
-				if (state != null)
+				FillCharges found;
+				Func<string, FillCharges> lookup = id => charges.TryGetValue(id, out found) ? found : null;
+
+				foreach (CompletedTrade pending in state.PendingForForm(accountName, instrumentFullName))
+					state.RefreshCharges(pending.TradeId, lookup);
+				IList<CompletedTrade> masters = state.PendingForForm(accountName, instrumentFullName);
+
+				List<string> followerIds = new List<string>();
+				if (followers != null && followers.Count > 0)
 				{
-					foreach (OpenTradeInfo open in state.Tracker.OpenTrades.Where(t => t.Account == accountName))
-						names.Add(open.Instrument.FullName);
-					foreach (StagedTrade staged in state.Staged.All.Where(s => s.Trade.Account == accountName))
-						names.Add(staged.Trade.Instrument.FullName);
+					IList<CompletedTrade> candidates = state.FollowerCandidates(accountName);
+					foreach (CompletedTrade master in masters)
+					{
+						foreach (CompletedTrade match in FollowerMatcher.Match(master, followers, candidates, FollowerMatcher.DefaultWindow))
+						{
+							if (followerIds.Contains(match.TradeId))
+								continue;
+							state.RefreshCharges(match.TradeId, lookup);
+							followerIds.Add(match.TradeId);
+						}
+					}
 				}
+
+				queued = state.SubmitForm(accountName, instrumentFullName, AddonVersion,
+					name => { string connection; return connections.TryGetValue(name, out connection) ? connection : null; },
+					followerIds, DateTimeOffset.Now);
+				followerCount = followerIds.Count;
 			}
-			return names.OrderBy(n => n, StringComparer.Ordinal).ToList();
-		}
-
-		public static void SaveNote(string accountName, string instrumentFullName, string body, string stagedTradeId)
-		{
-			NoteRecord note;
-			lock (sync)
-				note = state.SaveNote(accountName, instrumentFullName, body, DateTimeOffset.Now, stagedTradeId);
 			SaveState();
-			// Note text is not logged (NT8.md: only with verbose diagnostics, which does not exist yet).
-			ChartJotLog.Write("NOTE", "saved phase=" + note.Phase + " account=" + accountName + " instrument=" + instrumentFullName
-				+ (stagedTradeId != null && note.Phase == NotePhases.PostTrade ? " trade_id=" + stagedTradeId : ""));
+			ChartJotLog.Write("SUBMIT", string.Format(CultureInfo.InvariantCulture, "form account={0} instrument={1} trades={2} followers={3} trade_ids={4}",
+				accountName, instrumentFullName, queued.Count - followerCount, followerCount, string.Join(",", queued.Select(q => q.TradeId))));
+			ChartJotDelivery.Kick();
+
+			int masterCount = queued.Count - followerCount;
+			return "Submitted " + masterCount.ToString(CultureInfo.InvariantCulture) + (masterCount == 1 ? " trade" : " trades")
+				+ (followerCount > 0 ? " + " + followerCount.ToString(CultureInfo.InvariantCulture) + (followerCount == 1 ? " follower" : " followers") : "");
 		}
 
-		public static bool EditNote(NoteRecord note, string body)
+		/// <summary>Reset from a chart's form: clears it and drops that account/instrument's unsubmitted closed trades.</summary>
+		public static int ResetForm(string accountName, string instrumentFullName)
 		{
-			bool edited;
+			IList<string> dropped;
 			lock (sync)
-				edited = state.EditNote(note, body);
-			if (edited)
-				SaveState();
-			return edited;
-		}
-
-		public static bool DeleteNote(NoteRecord note)
-		{
-			bool deleted;
-			lock (sync)
-				deleted = state.DeleteNote(note);
-			if (deleted)
-				SaveState();
-			return deleted;
-		}
-
-		public static void SetTradeType(string tradeId, string tradeType, string tradeTypeOther)
-		{
-			lock (sync)
-				state.SetTradeType(tradeId, tradeType, tradeTypeOther);
+				dropped = state.ResetForm(accountName, instrumentFullName);
 			SaveState();
+			ChartJotLog.Write("FORM", "reset account=" + accountName + " instrument=" + instrumentFullName
+				+ (dropped.Count > 0 ? " dropped unsubmitted trade_ids=" + string.Join(",", dropped) : ""));
+			return dropped.Count;
 		}
 
-		private static PanelNote ToPanelNote(NoteRecord note)
+		/// <summary>Retries every failed delivery among the form's last submission.</summary>
+		public static void RetryLastSubmission(string accountName, string instrumentFullName)
 		{
-			return new PanelNote { Note = note, Body = note.Body, Phase = note.Phase, OccurredAt = note.OccurredAt };
-		}
-
-		// NT8.md, "Clear delivery state: pending, sending, sent, queued for retry, or failed."
-		private static string DeliveryStatus(QueuedDelivery delivery)
-		{
-			if (delivery == null)
-				return "Ready to review";
-			switch (delivery.State)
+			List<string> failed;
+			lock (sync)
 			{
-				case DeliveryState.Pending:
-					return delivery.Attempts > 0 ? "Queued for retry" : "Pending";
-				case DeliveryState.Sending:
-					return "Sending";
-				case DeliveryState.Sent:
-					return "Sent";
-				case DeliveryState.Failed:
-					return delivery.IsConfigurationError
-						? "Failed: check the intake token in Chart Jot Settings"
-						: "Failed" + (delivery.LastStatusCode.HasValue ? " (HTTP " + delivery.LastStatusCode.Value.ToString(CultureInfo.InvariantCulture) + ")" : "");
+				failed = (state.FormFor(accountName, instrumentFullName).LastSubmitted ?? new List<string>())
+					.Where(id => { QueuedDelivery d = state.Deliveries.Find(id); return d != null && d.State == DeliveryState.Failed; })
+					.ToList();
+				foreach (string tradeId in failed)
+					state.Deliveries.RetryManually(tradeId, DateTimeOffset.Now);
 			}
-			return delivery.State.ToString();
+			SaveState();
+			ChartJotDelivery.Kick();
+		}
+
+		private static void PruneUnsubmitted()
+		{
+			IList<string> dropped;
+			lock (sync)
+				dropped = state.PruneUnsubmitted(DateTimeOffset.Now, UnsubmittedMaxAge);
+			if (dropped.Count == 0)
+				return;
+			SaveState();
+			ChartJotLog.Write("STATE", "dropped " + dropped.Count.ToString(CultureInfo.InvariantCulture)
+				+ " closed trade(s) nobody submitted within " + UnsubmittedMaxAge.TotalHours.ToString(CultureInfo.InvariantCulture) + "h");
+		}
+
+		// Every account's current per-fill charges. Account.Executions can block, so never call this under sync.
+		private static Dictionary<string, FillCharges> CurrentCharges()
+		{
+			Dictionary<string, FillCharges> charges = new Dictionary<string, FillCharges>();
+			foreach (Account account in Account.All)
+			{
+				foreach (Execution execution in account.Executions)
+					charges[execution.ExecutionId] = new FillCharges { Commission = (decimal)execution.Commission, Fee = (decimal)execution.Fee };
+			}
+			return charges;
+		}
+
+		// Account name -> NT8 connection name, read before taking sync.
+		private static Dictionary<string, string> ConnectionNames()
+		{
+			Dictionary<string, string> names = new Dictionary<string, string>();
+			foreach (Account account in Account.All)
+				names[account.Name] = account.Connection != null && account.Connection.Options != null ? account.Connection.Options.Name : null;
+			return names;
 		}
 
 		private static string DeliveryDetail(QueuedDelivery delivery)
 		{
-			if (delivery == null)
-				return null;
 			string detail = delivery.LastErrorMessage ?? delivery.LastServerBody;
 			if (string.IsNullOrWhiteSpace(detail))
 				return null;
 			detail = detail.Trim();
-			return detail.Length > 400 ? detail.Substring(0, 400) + "..." : detail;
+			return detail.Length > 300 ? detail.Substring(0, 300) + "..." : detail;
 		}
-
 		// ---- account/instrument scan (startup and every reconnect)
 
 		private static void SubscribeAccounts(string reason)
@@ -1169,575 +1217,490 @@ namespace NinjaTrader.NinjaScript.AddOns
 		}
 	}
 
-	// ------------------------------------------------------- note panel
 
-	public sealed class PanelNote
+	// ------------------------------------------------------- trade copier (read-only)
+
+	/// <summary>
+	/// Reads the Affordable Indicators copier's follower setup for a master account from the copier indicator
+	/// (<c>aiDuplicateAccountActions</c>) on any open chart, the way spike/ChartJotSpike.cs verified. Read-only:
+	/// it never changes the copier. Returns an empty list when no copier instance names this master.
+	/// </summary>
+	public static class ChartJotCopier
 	{
-		public NoteRecord Note;
-		public string Body;
-		public string Phase;
-		public DateTimeOffset OccurredAt;
+		private const string CopierType = "NinjaTrader.NinjaScript.Indicators.aiDuplicateAccountActions";
+
+		private static readonly object sync = new object();
+		private static readonly List<NinjaTrader.Gui.Chart.Chart> charts = new List<NinjaTrader.Gui.Chart.Chart>();
+
+		public static void Track(NinjaTrader.Gui.Chart.Chart chart)
+		{
+			lock (sync)
+				if (!charts.Contains(chart))
+					charts.Add(chart);
+		}
+
+		public static void Untrack(NinjaTrader.Gui.Chart.Chart chart)
+		{
+			lock (sync)
+				charts.Remove(chart);
+		}
+
+		/// <summary>Call off any chart's UI thread: it visits each chart on that chart's dispatcher.</summary>
+		public static IList<FollowerSetup> FollowersOf(string masterAccount)
+		{
+			List<NinjaTrader.Gui.Chart.Chart> windows;
+			lock (sync)
+				windows = charts.ToList();
+
+			List<FollowerSetup> followers = new List<FollowerSetup>();
+			int copiers = 0;
+			foreach (NinjaTrader.Gui.Chart.Chart chart in windows)
+			{
+				try
+				{
+					chart.Dispatcher.Invoke(() =>
+					{
+						foreach (object chartControl in ChartControls(chart))
+						{
+							System.Collections.IEnumerable indicators = GetProp(chartControl, "Indicators") as System.Collections.IEnumerable;
+							if (indicators == null)
+								continue;
+							foreach (object indicator in indicators)
+							{
+								if (indicator == null || indicator.GetType().FullName != CopierType)
+									continue;
+								copiers++;
+								string master = Convert.ToString(GetProp(indicator, "ThisMasterAccount"), CultureInfo.InvariantCulture);
+								if (!string.Equals(master, masterAccount, StringComparison.OrdinalIgnoreCase))
+									continue;
+								System.Collections.IEnumerable rows = GetProp(indicator, "AllAccountData") as System.Collections.IEnumerable;
+								if (rows == null || rows is string)
+									continue;
+								List<string> lines = new List<string>();
+								foreach (object row in rows)
+									lines.Add(Convert.ToString(row, CultureInfo.InvariantCulture));
+								foreach (FollowerSetup follower in CopierSetup.Followers(masterAccount, lines))
+									if (!followers.Any(f => string.Equals(f.Account, follower.Account, StringComparison.OrdinalIgnoreCase)))
+										followers.Add(follower);
+							}
+						}
+					});
+				}
+				catch (Exception ex)
+				{
+					ChartJotLog.Write("COPIER", "reading a chart failed: " + ex.Message);
+				}
+			}
+
+			ChartJotLog.Write("COPIER", string.Format(CultureInfo.InvariantCulture, "master={0} copier instances={1} followers={2}",
+				masterAccount, copiers, string.Join(",", followers.Select(f => f.Account + (f.Fade ? "(fade)" : "")))));
+			return followers;
+		}
+
+		private static IEnumerable<object> ChartControls(NinjaTrader.Gui.Chart.Chart chart)
+		{
+			List<object> result = new List<object>();
+			TabControl tabs = chart.MainTabControl;
+			if (tabs != null)
+			{
+				foreach (object item in tabs.Items)
+				{
+					TabItem tabItem = item as TabItem;
+					object content = tabItem != null ? tabItem.Content : item;
+					object chartControl = GetProp(content, "ChartControl");
+					if (chartControl != null)
+						result.Add(chartControl);
+				}
+			}
+			if (result.Count == 0 && chart.ActiveChartControl != null)
+				result.Add(chart.ActiveChartControl);
+			return result;
+		}
+
+		private static object GetProp(object target, string name)
+		{
+			if (target == null)
+				return null;
+			try
+			{
+				PropertyInfo p = target.GetType().GetProperty(name, BindingFlags.Public | BindingFlags.Instance);
+				return p != null && p.GetIndexParameters().Length == 0 ? p.GetValue(target, null) : null;
+			}
+			catch
+			{
+				return null;
+			}
+		}
 	}
 
-	public sealed class PanelStagedTrade
+	// ------------------------------------------------------- trade form (one per chart)
+
+	public sealed class SubmittedView
 	{
 		public string TradeId;
-		public string Account;
-		public string Instrument;
-		public Direction Direction;
-		public int Quantity;
-		public DateTimeOffset EntryAt;
-		public DateTimeOffset ExitAt;
-		public decimal NetPnl;
-		public string TradeType;
-		public string TradeTypeOther;
-		public string Status;
-		public string StatusDetail;
-		public bool CanEdit;
-		public bool CanSubmit;
-		public bool CanRetry;
-		public IList<PanelNote> Notes;
+		public DeliveryState State;
+		public int Attempts;
+		public int? StatusCode;
+		public bool IsConfigurationError;
+		public string Detail;
 	}
 
-	/// <summary>A copy of what the panel shows for one account/instrument, taken under the monitor's lock.</summary>
-	public sealed class PanelSnapshot
+	/// <summary>A copy of the form and its trade state for one account/instrument, taken under the monitor's lock.</summary>
+	public sealed class FormView
 	{
-		public string OpenTradeId;
+		public string Body;
+		public string TradeType;
+		public string TradeTypeOther;
+		public bool IsOpen;
 		public Direction OpenDirection;
-		public int OpenPosition;
+		public int OpenQuantity;
 		public DateTimeOffset OpenEntryAt;
-		public IList<PanelNote> OpenNotes;
-		public IList<PanelNote> PendingNotes;
-		public IList<PanelStagedTrade> Staged;
+		public int ClosedCount;
+		public Direction ClosedDirection;
+		public decimal ClosedNetPnl;
+		public bool CanSubmit;
+		public List<SubmittedView> LastSubmitted = new List<SubmittedView>();
 	}
 
 	/// <summary>
-	/// Control Center -> New -> Chart Jot Notes (NT8.md, "Note panel"). Non-blocking: notes, the active trade, the
-	/// staged-trades list with delivery state, and the review form (trade type, Submit trade, Retry). All rules live
-	/// in addon/core; this window only shows a snapshot (refreshed every second) and calls ChartJotMonitor.
+	/// The Chart Jot form for one chart, opened from the chart's toolbar button. It follows the chart's Chart Trader
+	/// account and instrument: one note box (write before, during and after the trade), the trade type, Submit and
+	/// Reset, and a status line. Lives on the chart's own dispatcher so it can read Chart Trader directly.
 	/// </summary>
-	public class ChartJotNotesWindow : NTWindow
+	public class ChartJotFormWindow : NTWindow
 	{
-		private readonly ComboBox accountBox;
-		private readonly ComboBox instrumentBox;
-		private readonly TextBlock tradeState;
-		private readonly StackPanel targetPanel;
-		private readonly RadioButton postTradeTarget;
-		private readonly RadioButton preTradeTarget;
-		private readonly TextBox noteText;
-		private readonly Button addNote;
-		private readonly Button cancelEdit;
-		private readonly TextBlock notesHeader;
-		private readonly StackPanel notesList;
-		private readonly ListBox stagedList;
-		private readonly TextBlock reviewHeader;
-		private readonly ComboBox tradeTypeBox;
+		private static readonly Dictionary<NinjaTrader.Gui.Chart.Chart, ChartJotFormWindow> open = new Dictionary<NinjaTrader.Gui.Chart.Chart, ChartJotFormWindow>();
+
+		private readonly NinjaTrader.Gui.Chart.Chart chart;
+		private readonly TextBlock scope;
+		private readonly TextBlock status;
+		private readonly TextBox note;
+		private readonly ComboBox tradeType;
 		private readonly TextBox tradeTypeOther;
-		private readonly TextBlock directionWarning;
+		private readonly TextBlock warning;
 		private readonly Button submit;
+		private readonly Button reset;
 		private readonly Button retry;
-		private readonly TextBlock statusText;
-		private readonly System.Windows.Threading.DispatcherTimer timer;
+		private readonly System.Windows.Threading.DispatcherTimer refresh;
+		private readonly System.Windows.Threading.DispatcherTimer saveDelay;
 
-		private PanelSnapshot snapshot;
-		private string renderedNotes;
-		private string renderedStaged;
-		private NoteRecord editing;
-		private bool updatingReview;
+		private string account;
+		private string instrument;
+		private bool loading;
+		private bool busy;
+		private string message;
 
-		public ChartJotNotesWindow()
+		/// <summary>Opens the chart's form, or brings the open one to the front. Call on the chart's dispatcher.</summary>
+		public static void ShowFor(NinjaTrader.Gui.Chart.Chart chart)
 		{
-			Caption	= "Chart Jot Notes";
-			Width	= 760;
-			Height	= 620;
+			ChartJotFormWindow window;
+			if (open.TryGetValue(chart, out window))
+			{
+				window.Activate();
+				return;
+			}
+			window = new ChartJotFormWindow(chart);
+			open[chart] = window;
+			window.Closed += (s, e) => open.Remove(chart);
+			window.Show();
+		}
 
-			accountBox		= new ComboBox { MinWidth = 180, Margin = new Thickness(4) };
-			instrumentBox	= new ComboBox { MinWidth = 140, Margin = new Thickness(4), IsEditable = true };
-			tradeState		= new TextBlock { Margin = new Thickness(4), FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
+		/// <summary>Closes the chart's form when the chart itself closes.</summary>
+		public static void CloseFor(NinjaTrader.Gui.Chart.Chart chart)
+		{
+			ChartJotFormWindow window;
+			if (open.TryGetValue(chart, out window))
+				window.Close();
+		}
 
-			postTradeTarget	= new RadioButton { Margin = new Thickness(4), IsChecked = true, GroupName = "target" };
-			preTradeTarget	= new RadioButton { Margin = new Thickness(4), Content = "Pre-trade note for next trade", GroupName = "target" };
-			targetPanel		= new StackPanel { Orientation = Orientation.Horizontal };
-			targetPanel.Children.Add(postTradeTarget);
-			targetPanel.Children.Add(preTradeTarget);
+		private ChartJotFormWindow(NinjaTrader.Gui.Chart.Chart chart)
+		{
+			this.chart = chart;
+			Caption	= "Chart Jot";
+			Width	= 460;
+			Height	= 520;
+			Owner	= chart;
 
-			noteText	= new TextBox { Margin = new Thickness(4), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 60, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-			addNote		= new Button { Content = "Add note", Margin = new Thickness(4), Padding = new Thickness(10, 2, 10, 2) };
-			cancelEdit	= new Button { Content = "Cancel edit", Margin = new Thickness(4), Padding = new Thickness(10, 2, 10, 2), Visibility = Visibility.Collapsed };
-			notesHeader	= new TextBlock { Margin = new Thickness(4, 8, 4, 0), FontWeight = FontWeights.SemiBold };
-			notesList	= new StackPanel();
+			// NinjaTrader's own text colour, so the form follows the skin (WPF's default is black).
+			System.Windows.Media.Brush text = Application.Current.TryFindResource("FontControlBrush") as System.Windows.Media.Brush
+				?? Application.Current.TryFindResource("FontLabelBrush") as System.Windows.Media.Brush;
+			if (text != null)
+				Foreground = text;
 
-			stagedList		= new ListBox { Margin = new Thickness(4), MinHeight = 120 };
-			reviewHeader	= new TextBlock { Margin = new Thickness(4, 8, 4, 0), FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
-			tradeTypeBox	= new ComboBox { Margin = new Thickness(4), MinWidth = 220 };
-			tradeTypeOther	= new TextBox { Margin = new Thickness(4), MinWidth = 220, Visibility = Visibility.Collapsed };
-			directionWarning = new TextBlock { Margin = new Thickness(4), TextWrapping = TextWrapping.Wrap, Foreground = System.Windows.Media.Brushes.Orange };
-			submit			= new Button { Content = "Submit trade", Margin = new Thickness(4), Padding = new Thickness(16, 4, 16, 4), FontWeight = FontWeights.SemiBold };
-			retry			= new Button { Content = "Retry delivery", Margin = new Thickness(4), Padding = new Thickness(10, 2, 10, 2), Visibility = Visibility.Collapsed };
-			statusText		= new TextBlock { Margin = new Thickness(4), TextWrapping = TextWrapping.Wrap };
+			scope		= new TextBlock { Margin = new Thickness(6, 6, 6, 2), FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
+			status		= new TextBlock { Margin = new Thickness(6, 2, 6, 6), TextWrapping = TextWrapping.Wrap };
+			note		= new TextBox { Margin = new Thickness(6), AcceptsReturn = true, AcceptsTab = true, TextWrapping = TextWrapping.Wrap,
+							VerticalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalContentAlignment = VerticalAlignment.Top, FontSize = 14 };
+			tradeType	= new ComboBox { Margin = new Thickness(6, 2, 6, 2) };
+			tradeTypeOther = new TextBox { Margin = new Thickness(6, 2, 6, 2), Visibility = Visibility.Collapsed };
+			warning		= new TextBlock { Margin = new Thickness(6, 2, 6, 2), TextWrapping = TextWrapping.Wrap, Foreground = System.Windows.Media.Brushes.Orange };
+			submit		= new Button { Content = "Submit", Margin = new Thickness(6), Padding = new Thickness(18, 4, 18, 4), FontWeight = FontWeights.SemiBold };
+			reset		= new Button { Content = "Reset", Margin = new Thickness(6), Padding = new Thickness(18, 4, 18, 4) };
+			retry		= new Button { Content = "Retry", Margin = new Thickness(6), Padding = new Thickness(12, 4, 12, 4), Visibility = Visibility.Collapsed };
 
-			tradeTypeBox.Items.Add(new ComboBoxItem { Content = "(choose a trade type)", Tag = null });
+			tradeType.Items.Add(new ComboBoxItem { Content = "Trade type...", Tag = null });
 			foreach (string value in TradeTypes.All)
-				tradeTypeBox.Items.Add(new ComboBoxItem { Content = TradeTypes.Label(value) + " (" + value + ")", Tag = value });
+				tradeType.Items.Add(new ComboBoxItem { Content = value == "Other" ? "Other" : value + "  -  " + TradeTypes.Label(value), Tag = value });
+			tradeType.SelectedIndex = 0;
 
-			accountBox.SelectionChanged		+= (s, e) => OnAccountChanged();
-			instrumentBox.SelectionChanged	+= (s, e) => Dispatcher.BeginInvoke(new Action(RefreshNow));
-			instrumentBox.LostFocus			+= (s, e) => RefreshNow();
-			postTradeTarget.Checked			+= (s, e) => RefreshNow();
-			preTradeTarget.Checked			+= (s, e) => RefreshNow();
-			addNote.Click					+= (s, e) => OnAddNote();
-			cancelEdit.Click				+= (s, e) => StopEditing();
-			stagedList.SelectionChanged		+= (s, e) => OnStagedSelected();
-			tradeTypeBox.SelectionChanged	+= (s, e) => OnTradeTypeChanged();
-			tradeTypeOther.LostFocus		+= (s, e) => OnTradeTypeChanged();
+			note.TextChanged				+= (s, e) => { if (!loading) { saveDelay.Stop(); saveDelay.Start(); } };
+			note.LostFocus					+= (s, e) => SaveNow();
+			tradeType.SelectionChanged		+= (s, e) => { if (!loading) { SaveNow(); Render(); } };
+			tradeTypeOther.LostFocus		+= (s, e) => SaveNow();
 			submit.Click					+= (s, e) => OnSubmit();
+			reset.Click						+= (s, e) => OnReset();
 			retry.Click						+= (s, e) => OnRetry();
 
-			Content = BuildLayout();
+			StackPanel buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+			buttons.Children.Add(retry);
+			buttons.Children.Add(reset);
+			buttons.Children.Add(submit);
 
-			foreach (Account account in Account.All.OrderBy(a => a.Name))
-				accountBox.Items.Add(account.Name);
-			if (accountBox.Items.Count > 0)
-				accountBox.SelectedIndex = 0;
+			StackPanel bottom = new StackPanel();
+			bottom.Children.Add(tradeType);
+			bottom.Children.Add(tradeTypeOther);
+			bottom.Children.Add(warning);
+			bottom.Children.Add(buttons);
 
-			timer = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Background, Dispatcher)
-			{
-				Interval = TimeSpan.FromSeconds(1)
-			};
-			timer.Tick += (s, e) => RefreshNow();
-			timer.Start();
-			Closed += (s, e) => timer.Stop();
-			RefreshNow();
+			DockPanel root = new DockPanel { Margin = new Thickness(4) };
+			DockPanel.SetDock(scope, Dock.Top);
+			DockPanel.SetDock(status, Dock.Top);
+			DockPanel.SetDock(bottom, Dock.Bottom);
+			root.Children.Add(scope);
+			root.Children.Add(status);
+			root.Children.Add(bottom);
+			root.Children.Add(note);	// fills the rest, and grows with the window
+			Content = root;
+
+			saveDelay = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Background, Dispatcher) { Interval = TimeSpan.FromMilliseconds(600) };
+			saveDelay.Tick += (s, e) => { saveDelay.Stop(); SaveNow(); };
+			refresh = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Background, Dispatcher) { Interval = TimeSpan.FromSeconds(1) };
+			refresh.Tick += (s, e) => Tick();
+			Closed += (s, e) => { SaveNow(); refresh.Stop(); saveDelay.Stop(); };
+
+			Tick();
+			refresh.Start();
+			note.Focus();
 		}
 
-		private UIElement BuildLayout()
-		{
-			StackPanel scope = new StackPanel { Orientation = Orientation.Horizontal };
-			scope.Children.Add(new TextBlock { Text = "Account", Margin = new Thickness(4), VerticalAlignment = VerticalAlignment.Center });
-			scope.Children.Add(accountBox);
-			scope.Children.Add(new TextBlock { Text = "Instrument", Margin = new Thickness(4), VerticalAlignment = VerticalAlignment.Center });
-			scope.Children.Add(instrumentBox);
+		// ---- scope: follow the chart's Chart Trader account and instrument
 
-			StackPanel noteButtons = new StackPanel { Orientation = Orientation.Horizontal };
-			noteButtons.Children.Add(addNote);
-			noteButtons.Children.Add(cancelEdit);
-
-			StackPanel left = new StackPanel();
-			left.Children.Add(scope);
-			left.Children.Add(tradeState);
-			left.Children.Add(targetPanel);
-			left.Children.Add(noteText);
-			left.Children.Add(noteButtons);
-			left.Children.Add(notesHeader);
-			left.Children.Add(notesList);
-
-			StackPanel reviewButtons = new StackPanel { Orientation = Orientation.Horizontal };
-			reviewButtons.Children.Add(submit);
-			reviewButtons.Children.Add(retry);
-
-			StackPanel right = new StackPanel();
-			right.Children.Add(new TextBlock { Text = "Staged trades", Margin = new Thickness(4, 4, 4, 0), FontWeight = FontWeights.SemiBold });
-			right.Children.Add(stagedList);
-			right.Children.Add(reviewHeader);
-			right.Children.Add(new TextBlock { Text = "Trade type", Margin = new Thickness(4, 4, 4, 0) });
-			right.Children.Add(tradeTypeBox);
-			right.Children.Add(tradeTypeOther);
-			right.Children.Add(directionWarning);
-			right.Children.Add(reviewButtons);
-			right.Children.Add(statusText);
-
-			Grid grid = new Grid { Margin = new Thickness(6) };
-			grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-			grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-			ScrollViewer leftScroll = new ScrollViewer { Content = left, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-			ScrollViewer rightScroll = new ScrollViewer { Content = right, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-			Grid.SetColumn(rightScroll, 1);
-			grid.Children.Add(leftScroll);
-			grid.Children.Add(rightScroll);
-			return grid;
-		}
-
-		// ---- scope
-
-		private string AccountName
-		{
-			get { return accountBox.SelectedItem as string; }
-		}
-
-		private string InstrumentName
-		{
-			get { return string.IsNullOrWhiteSpace(instrumentBox.Text) ? null : instrumentBox.Text.Trim(); }
-		}
-
-		private PanelStagedTrade SelectedStaged
-		{
-			get
-			{
-				ListBoxItem item = stagedList.SelectedItem as ListBoxItem;
-				string tradeId = item == null ? null : item.Tag as string;
-				return tradeId == null || snapshot == null ? null : snapshot.Staged.FirstOrDefault(t => t.TradeId == tradeId);
-			}
-		}
-
-		private void OnAccountChanged()
-		{
-			string current = instrumentBox.Text;
-			instrumentBox.Items.Clear();
-			if (AccountName != null)
-			{
-				foreach (string name in ChartJotMonitor.KnownInstruments(AccountName))
-					instrumentBox.Items.Add(name);
-			}
-			if (!string.IsNullOrWhiteSpace(current))
-				instrumentBox.Text = current;
-			else if (instrumentBox.Items.Count > 0)
-				instrumentBox.SelectedIndex = 0;
-			StopEditing();
-			RefreshNow();
-		}
-
-		// ---- refresh
-
-		private void RefreshNow()
+		private void Tick()
 		{
 			try
 			{
-				snapshot = AccountName == null || InstrumentName == null
-					? new PanelSnapshot { OpenNotes = new List<PanelNote>(), PendingNotes = new List<PanelNote>(), Staged = ChartJotMonitor.Snapshot(null, null).Staged }
-					: ChartJotMonitor.Snapshot(AccountName, InstrumentName);
+				string newAccount = null;
+				string newInstrument = null;
+				if (chart.ChartTrader != null)
+				{
+					if (chart.ChartTrader.Account != null)
+						newAccount = chart.ChartTrader.Account.Name;
+					if (chart.ChartTrader.Instrument != null)
+						newInstrument = chart.ChartTrader.Instrument.FullName;
+				}
+				if (newInstrument == null && chart.ActiveChartControl != null && chart.ActiveChartControl.Instrument != null)
+					newInstrument = chart.ActiveChartControl.Instrument.FullName;
 
-				RenderTradeState();
-				RenderStaged();
-				RenderNotes();
-				RenderReview();
+				if (newAccount != account || newInstrument != instrument)
+				{
+					SaveNow();
+					account = newAccount;
+					instrument = newInstrument;
+					message = null;
+					Load();
+				}
+				Render();
 			}
 			catch (Exception ex)
 			{
-				ChartJotLog.Write("ERROR", "Notes panel refresh: " + ex);
+				ChartJotLog.Write("ERROR", "Chart Jot form: " + ex);
 			}
 		}
 
-		private void RenderTradeState()
+		private bool HasScope
 		{
-			if (AccountName == null || InstrumentName == null)
-			{
-				tradeState.Text = "Choose an account and instrument.";
-				targetPanel.Visibility = Visibility.Collapsed;
-				return;
-			}
-
-			if (snapshot.OpenTradeId != null)
-			{
-				TimeSpan elapsed = DateTimeOffset.Now - snapshot.OpenEntryAt;
-				tradeState.Text = string.Format(CultureInfo.InvariantCulture, "{0} {1} {2} on {3} - open {4}",
-					snapshot.OpenDirection, Math.Abs(snapshot.OpenPosition), InstrumentName, AccountName,
-					elapsed < TimeSpan.Zero ? "" : ((int)elapsed.TotalMinutes).ToString(CultureInfo.InvariantCulture) + "m " + elapsed.Seconds.ToString("00", CultureInfo.InvariantCulture) + "s");
-				targetPanel.Visibility = Visibility.Collapsed;
-				return;
-			}
-
-			tradeState.Text = "Flat on " + InstrumentName + " (" + AccountName + ")";
-			PanelStagedTrade target = PostTradeTargetCandidate();
-			targetPanel.Visibility = target != null ? Visibility.Visible : Visibility.Collapsed;
-			if (target != null)
-				postTradeTarget.Content = "Post-trade note for " + Describe(target);
+			get { return account != null && instrument != null; }
 		}
 
-		/// <summary>The staged trade a post-trade note would go to: the selected one, if it is in scope and editable.</summary>
-		private PanelStagedTrade PostTradeTargetCandidate()
+		private void Load()
 		{
-			PanelStagedTrade selected = SelectedStaged;
-			return selected != null && selected.CanEdit && selected.Account == AccountName && selected.Instrument == InstrumentName
-				? selected
-				: null;
-		}
-
-		/// <summary>Null means the note goes to the open trade (if any) or the pending pre-trade buffer.</summary>
-		private string NoteTargetTradeId()
-		{
-			if (snapshot == null || snapshot.OpenTradeId != null)
-				return null;
-			PanelStagedTrade target = PostTradeTargetCandidate();
-			return target != null && postTradeTarget.IsChecked == true ? target.TradeId : null;
-		}
-
-		private void RenderNotes()
-		{
-			IList<PanelNote> notes;
-			string header;
-			string targetId = NoteTargetTradeId();
-			if (snapshot.OpenTradeId != null)
-			{
-				notes = snapshot.OpenNotes;
-				header = "Notes for the open trade";
-			}
-			else if (targetId != null)
-			{
-				PanelStagedTrade target = snapshot.Staged.First(t => t.TradeId == targetId);
-				notes = target.Notes;
-				header = "Notes for " + Describe(target);
-			}
-			else
-			{
-				notes = snapshot.PendingNotes;
-				header = "Pre-trade notes for the next trade";
-			}
-
-			string signature = header + "|" + string.Join("|", notes.Select(n => n.OccurredAt.UtcTicks.ToString(CultureInfo.InvariantCulture) + n.Body));
-			if (signature == renderedNotes)
-				return;
-			renderedNotes = signature;
-
-			notesHeader.Text = header + (notes.Count == 0 ? " (none yet)" : "");
-			notesList.Children.Clear();
-			foreach (PanelNote note in notes)
-				notesList.Children.Add(NoteRow(note));
-		}
-
-		private UIElement NoteRow(PanelNote note)
-		{
-			PanelNote captured = note;
-			Button edit = new Button { Content = "Edit", Margin = new Thickness(2), Padding = new Thickness(6, 0, 6, 0) };
-			Button delete = new Button { Content = "Delete", Margin = new Thickness(2), Padding = new Thickness(6, 0, 6, 0) };
-			edit.Click += (s, e) => StartEditing(captured);
-			delete.Click += (s, e) => OnDeleteNote(captured);
-
-			StackPanel buttons = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Top };
-			buttons.Children.Add(edit);
-			buttons.Children.Add(delete);
-
-			TextBlock text = new TextBlock
-			{
-				Text = note.OccurredAt.ToString("HH:mm:ss", CultureInfo.InvariantCulture) + "  [" + note.Phase + "]  " + note.Body,
-				TextWrapping = TextWrapping.Wrap,
-				Margin = new Thickness(4, 2, 4, 2)
-			};
-
-			DockPanel row = new DockPanel { Margin = new Thickness(2) };
-			DockPanel.SetDock(buttons, Dock.Right);
-			row.Children.Add(buttons);
-			row.Children.Add(text);
-			return row;
-		}
-
-		private void RenderStaged()
-		{
-			string selectedId = SelectedStaged == null ? null : SelectedStaged.TradeId;
-			string signature = string.Join("|", snapshot.Staged.Select(t => t.TradeId + t.Status + t.TradeType));
-			if (signature == renderedStaged)
-				return;
-			renderedStaged = signature;
-
-			updatingReview = true;
+			loading = true;
 			try
 			{
-				stagedList.Items.Clear();
-				foreach (PanelStagedTrade trade in snapshot.Staged)
-				{
-					ListBoxItem item = new ListBoxItem
-					{
-						Tag = trade.TradeId,
-						Content = Describe(trade) + "   " + trade.NetPnl.ToString("+0.00;-0.00;0.00", CultureInfo.InvariantCulture) + "   " + trade.Status
-					};
-					stagedList.Items.Add(item);
-					if (trade.TradeId == selectedId)
-						stagedList.SelectedItem = item;
-				}
-				if (stagedList.SelectedItem == null && stagedList.Items.Count > 0)
-					stagedList.SelectedIndex = 0;
+				FormView view = HasScope ? ChartJotMonitor.Form(account, instrument) : new FormView();
+				note.Text = view.Body ?? "";
+				SelectType(view.TradeType);
+				tradeTypeOther.Text = view.TradeTypeOther ?? "";
 			}
 			finally
 			{
-				updatingReview = false;
+				loading = false;
 			}
 		}
 
-		private void RenderReview()
+		private void SaveNow()
 		{
-			PanelStagedTrade trade = SelectedStaged;
-			bool hasTrade = trade != null;
-
-			reviewHeader.Text = hasTrade
-				? "Review: " + Describe(trade) + " on " + trade.Account + ", " + trade.EntryAt.ToString("HH:mm:ss", CultureInfo.InvariantCulture) + " - " + trade.ExitAt.ToString("HH:mm:ss", CultureInfo.InvariantCulture)
-				: (snapshot.Staged.Count == 0 ? "No closed trades waiting for review." : "Select a staged trade to review it.");
-
-			updatingReview = true;
+			saveDelay.Stop();
+			if (loading || !HasScope)
+				return;
 			try
 			{
-				tradeTypeBox.IsEnabled = hasTrade && trade.CanEdit;
-				tradeTypeOther.IsEnabled = hasTrade && trade.CanEdit;
-				if (hasTrade && !tradeTypeBox.IsKeyboardFocusWithin)
-					SelectTradeType(trade.TradeType);
-				bool isOther = hasTrade && trade.TradeType == "Other";
-				tradeTypeOther.Visibility = isOther ? Visibility.Visible : Visibility.Collapsed;
-				if (isOther && !tradeTypeOther.IsKeyboardFocusWithin)
-					tradeTypeOther.Text = trade.TradeTypeOther ?? "";
+				string type = SelectedType();
+				ChartJotMonitor.UpdateForm(account, instrument, note.Text, type, type == "Other" ? tradeTypeOther.Text : null);
 			}
-			finally
+			catch (Exception ex)
 			{
-				updatingReview = false;
+				message = ex.Message;
 			}
-
-			string warning = hasTrade ? TradeTypes.DirectionWarning(trade.TradeType, trade.Direction) : null;
-			directionWarning.Text = warning == null ? "" : warning + " You can still submit.";
-			submit.IsEnabled = hasTrade && trade.CanSubmit;
-			retry.Visibility = hasTrade && trade.CanRetry ? Visibility.Visible : Visibility.Collapsed;
-			statusText.Text = hasTrade ? "Delivery: " + trade.Status + (trade.StatusDetail == null ? "" : Environment.NewLine + trade.StatusDetail) : "";
 		}
 
-		private void SelectTradeType(string value)
+		// ---- rendering
+
+		private void Render()
 		{
-			foreach (ComboBoxItem item in tradeTypeBox.Items)
+			scope.Text = HasScope
+				? account + "  ·  " + instrument
+				: "Choose an account in Chart Trader to start a note.";
+
+			bool enabled = HasScope && !busy;
+			note.IsEnabled = HasScope;
+			tradeType.IsEnabled = HasScope;
+			tradeTypeOther.Visibility = SelectedType() == "Other" ? Visibility.Visible : Visibility.Collapsed;
+
+			if (!HasScope)
+			{
+				status.Text = "";
+				warning.Text = "";
+				submit.IsEnabled = reset.IsEnabled = false;
+				retry.Visibility = Visibility.Collapsed;
+				return;
+			}
+
+			FormView view = ChartJotMonitor.Form(account, instrument);
+			Direction? direction = view.IsOpen ? view.OpenDirection : (view.ClosedCount > 0 ? view.ClosedDirection : (Direction?)null);
+			string mismatch = direction.HasValue ? TradeTypes.DirectionWarning(SelectedType(), direction.Value) : null;
+			warning.Text = mismatch == null ? "" : mismatch + " You can still submit.";
+
+			submit.IsEnabled = enabled && view.ClosedCount > 0 && TradeTypes.IsValid(SelectedType());
+			reset.IsEnabled = enabled;
+			bool failed = view.LastSubmitted.Any(d => d.State == DeliveryState.Failed);
+			retry.Visibility = failed && view.ClosedCount == 0 && !view.IsOpen ? Visibility.Visible : Visibility.Collapsed;
+			status.Text = message ?? StatusText(view);
+		}
+
+		private string StatusText(FormView view)
+		{
+			if (busy)
+				return "Submitting...";
+			if (view.IsOpen)
+			{
+				TimeSpan elapsed = DateTimeOffset.Now - view.OpenEntryAt;
+				string time = elapsed < TimeSpan.Zero ? "" : ", " + ((int)elapsed.TotalMinutes).ToString(CultureInfo.InvariantCulture) + "m " + elapsed.Seconds.ToString("00", CultureInfo.InvariantCulture) + "s";
+				return "In trade: " + view.OpenDirection + " " + view.OpenQuantity.ToString(CultureInfo.InvariantCulture) + time
+					+ (view.ClosedCount > 0 ? "  (an earlier trade is closed and waiting)" : "");
+			}
+			if (view.ClosedCount > 0)
+			{
+				string pnl = view.ClosedNetPnl.ToString("+0.00;-0.00;0.00", CultureInfo.InvariantCulture);
+				string what = view.ClosedCount == 1 ? "Trade closed (" + pnl + ")" : view.ClosedCount.ToString(CultureInfo.InvariantCulture) + " trades closed (" + pnl + ")";
+				return TradeTypes.IsValid(SelectedType()) ? what + ": ready to submit." : what + ": choose a trade type, then Submit.";
+			}
+			if (view.LastSubmitted.Count > 0)
+			{
+				SubmittedView configuration = view.LastSubmitted.FirstOrDefault(d => d.State == DeliveryState.Failed && d.IsConfigurationError);
+				if (configuration != null)
+					return "Last submission failed: check the intake token in Chart Jot Settings, then Retry.";
+				SubmittedView failed = view.LastSubmitted.FirstOrDefault(d => d.State == DeliveryState.Failed);
+				if (failed != null)
+					return "Last submission failed" + (failed.StatusCode.HasValue ? " (HTTP " + failed.StatusCode.Value.ToString(CultureInfo.InvariantCulture) + ")" : "")
+						+ (failed.Detail != null ? ": " + failed.Detail : ".");
+				if (view.LastSubmitted.Any(d => d.State != DeliveryState.Sent))
+					return view.LastSubmitted.Any(d => d.Attempts > 0 && d.State == DeliveryState.Pending)
+						? "Last submission queued for retry (the journal could not be reached)."
+						: "Sending last submission...";
+				return "Last submission sent (" + view.LastSubmitted.Count.ToString(CultureInfo.InvariantCulture) + (view.LastSubmitted.Count == 1 ? " trade" : " trades") + "). Waiting for the next entry.";
+			}
+			return "Waiting for entry.";
+		}
+
+		private string SelectedType()
+		{
+			ComboBoxItem item = tradeType.SelectedItem as ComboBoxItem;
+			return item == null ? null : item.Tag as string;
+		}
+
+		private void SelectType(string value)
+		{
+			foreach (ComboBoxItem item in tradeType.Items)
 			{
 				if ((item.Tag as string) == value)
 				{
-					tradeTypeBox.SelectedItem = item;
+					tradeType.SelectedItem = item;
 					return;
 				}
 			}
-		}
-
-		private static string Describe(PanelStagedTrade trade)
-		{
-			return trade.Direction + " " + trade.Quantity.ToString(CultureInfo.InvariantCulture) + " " + trade.Instrument
-				+ " (" + trade.ExitAt.ToString("HH:mm", CultureInfo.InvariantCulture) + ")";
+			tradeType.SelectedIndex = 0;
 		}
 
 		// ---- actions
 
-		private void OnAddNote()
-		{
-			try
-			{
-				if (editing != null)
-				{
-					if (!ChartJotMonitor.EditNote(editing, noteText.Text))
-						statusText.Text = "That note can no longer be edited (its trade was submitted).";
-					StopEditing();
-				}
-				else
-				{
-					if (AccountName == null || InstrumentName == null)
-					{
-						statusText.Text = "Choose an account and instrument first.";
-						return;
-					}
-					ChartJotMonitor.SaveNote(AccountName, InstrumentName, noteText.Text, NoteTargetTradeId());
-					noteText.Clear();
-				}
-				renderedNotes = null;
-				RefreshNow();
-			}
-			catch (Exception ex)
-			{
-				statusText.Text = ex.Message;
-			}
-		}
-
-		private void StartEditing(PanelNote note)
-		{
-			editing = note.Note;
-			noteText.Text = note.Body;
-			addNote.Content = "Save edit";
-			cancelEdit.Visibility = Visibility.Visible;
-			noteText.Focus();
-		}
-
-		private void StopEditing()
-		{
-			editing = null;
-			noteText.Clear();
-			addNote.Content = "Add note";
-			cancelEdit.Visibility = Visibility.Collapsed;
-		}
-
-		private void OnDeleteNote(PanelNote note)
-		{
-			if (MessageBox.Show("Delete this note?" + Environment.NewLine + Environment.NewLine + note.Body, "Chart Jot", MessageBoxButton.YesNo) != MessageBoxResult.Yes)
-				return;
-			if (!ChartJotMonitor.DeleteNote(note.Note))
-				statusText.Text = "That note can no longer be deleted (its trade was submitted).";
-			if (editing == note.Note)
-				StopEditing();
-			renderedNotes = null;
-			RefreshNow();
-		}
-
-		private void OnStagedSelected()
-		{
-			if (updatingReview)
-				return;
-			PanelStagedTrade trade = SelectedStaged;
-			// Selecting a trade from another account/instrument moves the panel's scope to it.
-			if (trade != null && (trade.Account != AccountName || trade.Instrument != InstrumentName))
-			{
-				accountBox.SelectedItem = trade.Account;
-				instrumentBox.Text = trade.Instrument;
-			}
-			postTradeTarget.IsChecked = true;
-			renderedNotes = null;
-			RefreshNow();
-		}
-
-		private void OnTradeTypeChanged()
-		{
-			if (updatingReview)
-				return;
-			PanelStagedTrade trade = SelectedStaged;
-			ComboBoxItem item = tradeTypeBox.SelectedItem as ComboBoxItem;
-			if (trade == null || !trade.CanEdit || item == null)
-				return;
-			try
-			{
-				string value = item.Tag as string;
-				ChartJotMonitor.SetTradeType(trade.TradeId, value, value == "Other" ? tradeTypeOther.Text : null);
-				renderedStaged = null;
-				RefreshNow();
-			}
-			catch (Exception ex)
-			{
-				statusText.Text = ex.Message;
-			}
-		}
-
 		private void OnSubmit()
 		{
-			PanelStagedTrade trade = SelectedStaged;
-			if (trade == null)
+			if (!HasScope || busy)
 				return;
-			try
+			SaveNow();
+			busy = true;
+			message = null;
+			Render();
+
+			string master = account;
+			string market = instrument;
+			Task.Run(() =>
 			{
-				if (trade.TradeType == "Other")
-					ChartJotMonitor.SetTradeType(trade.TradeId, "Other", tradeTypeOther.Text);
-				ChartJotMonitor.Submit(trade.TradeId);
-				// NT8.md: a successful submission clears the note field and starts a fresh pre-trade note buffer.
-				StopEditing();
-				preTradeTarget.IsChecked = true;
-				renderedStaged = null;
-				renderedNotes = null;
-				RefreshNow();
-			}
-			catch (Exception ex)
-			{
-				statusText.Text = "Not submitted: " + ex.Message;
-			}
+				string result;
+				try
+				{
+					// Reading the copier visits other charts' dispatchers, so it runs off this one.
+					result = ChartJotMonitor.SubmitForm(master, market, ChartJotCopier.FollowersOf(master)) + ".";
+				}
+				catch (Exception ex)
+				{
+					result = "Not submitted: " + ex.Message;
+				}
+				Dispatcher.InvokeAsync(() =>
+				{
+					busy = false;
+					Load();
+					message = result;
+					Render();
+					message = null;	// show it once; the status line takes over on the next refresh
+				});
+			});
+		}
+
+		private void OnReset()
+		{
+			if (!HasScope)
+				return;
+			FormView view = ChartJotMonitor.Form(account, instrument);
+			if (view.ClosedCount > 0 && MessageBox.Show(
+				"Reset clears the note and trade type, and the closed trade will not be journaled. Continue?",
+				"Chart Jot", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+				return;
+
+			ChartJotMonitor.ResetForm(account, instrument);
+			Load();
+			message = null;
+			Render();
+			note.Focus();
 		}
 
 		private void OnRetry()
 		{
-			PanelStagedTrade trade = SelectedStaged;
-			if (trade == null)
+			if (!HasScope)
 				return;
-			try
-			{
-				ChartJotMonitor.RetryDelivery(trade.TradeId);
-				renderedStaged = null;
-				RefreshNow();
-			}
-			catch (Exception ex)
-			{
-				statusText.Text = ex.Message;
-			}
+			ChartJotMonitor.RetryLastSubmission(account, instrument);
+			Render();
 		}
 	}
 }

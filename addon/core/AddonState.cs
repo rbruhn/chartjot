@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 
 namespace ChartJot.Core
@@ -59,6 +60,7 @@ namespace ChartJot.Core
 		private readonly Dictionary<string, List<NoteRecord>> tradeNotes = new Dictionary<string, List<NoteRecord>>();
 		private readonly Dictionary<string, CompletedTrade> awaiting = new Dictionary<string, CompletedTrade>();
 		private readonly List<string> awaitingOrder = new List<string>();
+		private readonly Dictionary<string, TradeForm> forms = new Dictionary<string, TradeForm>();
 
 		public AddonState(TimeSpan? initialBackoff = null, TimeSpan? maxBackoff = null)
 			: this(new PendingNotes(), new StagedTrades(), new DeliveryQueue(initialBackoff, maxBackoff))
@@ -139,11 +141,18 @@ namespace ChartJot.Core
 		/// <summary>Moves a closed trade and its notes into the review list.</summary>
 		public StagedTrade Stage(string tradeId)
 		{
+			return Stage(tradeId, null);
+		}
+
+		/// <summary>Moves a closed trade and its notes into the review list, stamped with <paramref name="stagedAt"/>
+		/// (wall clock) for <see cref="PruneUnsubmitted"/>.</summary>
+		public StagedTrade Stage(string tradeId, DateTimeOffset? stagedAt)
+		{
 			CompletedTrade trade;
 			if (!awaiting.TryGetValue(tradeId, out trade))
 				throw new InvalidOperationException("Trade " + tradeId + " is not waiting to be staged.");
 
-			StagedTrade staged = new StagedTrade { Trade = trade, Notes = NotesFor(tradeId) };
+			StagedTrade staged = new StagedTrade { Trade = trade, Notes = NotesFor(tradeId), StagedAt = stagedAt };
 			Staged.Add(staged);
 			Forget(tradeId);
 			return staged;
@@ -246,144 +255,165 @@ namespace ChartJot.Core
 			};
 		}
 
-		// ---- note panel (NT8.md, "Note targeting" and "Note phases")
+		// ---- trade form (one note form per Chart Trader account + instrument)
+
+		private static string FormKey(string account, string instrumentFullName)
+		{
+			return account + "|" + instrumentFullName;
+		}
+
+		/// <summary>The form for an account/instrument. An empty, unsaved one when nothing was written there yet.</summary>
+		public TradeForm FormFor(string account, string instrumentFullName)
+		{
+			TradeForm form;
+			return forms.TryGetValue(FormKey(account, instrumentFullName), out form)
+				? form
+				: new TradeForm { Account = account, Instrument = instrumentFullName, LastSubmitted = new List<string>() };
+		}
 
 		/// <summary>
-		/// Saves a note the trader explicitly added for an account/instrument:
-		/// <list type="bullet">
-		/// <item>while a position is open there, an <c>in_trade</c> note on that trade (a staged target is ignored);</item>
-		/// <item>while flat with <paramref name="stagedTradeId"/> set, a <c>post_trade</c> note on that staged trade,
-		/// which must be on the same account/instrument and still editable;</item>
-		/// <item>otherwise a pending <c>pre_trade</c> note for the next trade there.</item>
-		/// </list>
-		/// <paramref name="now"/> becomes the note's <c>occurred_at</c>, kept through any later edit.
+		/// Saves what the form shows. The body is kept as typed (null when empty). The first time it gets text,
+		/// <paramref name="now"/> is remembered as when the note was started; clearing the text forgets it.
+		/// <c>trade_type_other</c> is kept only for <c>Other</c>.
 		/// </summary>
-		public NoteRecord SaveNote(string account, string instrumentFullName, string body, DateTimeOffset now, string stagedTradeId)
+		public void UpdateForm(string account, string instrumentFullName, string body, string tradeType, string tradeTypeOther, DateTimeOffset now)
 		{
-			if (string.IsNullOrWhiteSpace(body))
-				throw new ArgumentException("A note needs some text.", "body");
-
-			NoteRecord note = new NoteRecord { Body = body.Trim(), OccurredAt = now };
-
-			OpenTradeInfo open = FindOpen(account, instrumentFullName);
-			if (open != null)
-			{
-				note.Phase = NotePhases.InTrade;
-				AddTradeNote(open.TradeId, note);
-				return note;
-			}
-
-			if (stagedTradeId != null)
-			{
-				StagedTrade staged = Staged.Find(stagedTradeId);
-				if (staged == null)
-					throw new InvalidOperationException("Trade " + stagedTradeId + " is not staged for review.");
-				if (staged.Trade.Account != account || staged.Trade.Instrument.FullName != instrumentFullName)
-					throw new ArgumentException("Trade " + stagedTradeId + " belongs to another account or instrument.", "stagedTradeId");
-				if (!CanEdit(stagedTradeId))
-					throw new InvalidOperationException("Trade " + stagedTradeId + " has already been submitted.");
-
-				note.Phase = NotePhases.PostTrade;
-				EditableNotes(staged).Add(note);
-				return note;
-			}
-
-			note.Phase = NotePhases.PreTrade;
-			PendingNotes.Add(account, instrumentFullName, note);
-			return note;
-		}
-
-		/// <summary>Changes a note's text, keeping its original time. False when the state does not hold the note or
-		/// it belongs to a trade that can no longer be edited (already submitted).</summary>
-		public bool EditNote(NoteRecord note, string body)
-		{
-			if (note == null)
-				throw new ArgumentNullException("note");
-			if (string.IsNullOrWhiteSpace(body))
-				throw new ArgumentException("A note needs some text.", "body");
-			if (!IsEditableNote(note))
-				return false;
-
-			note.Body = body.Trim();
-			return true;
-		}
-
-		/// <summary>Deletes a note. False when the state does not hold it or its trade was already submitted.</summary>
-		public bool DeleteNote(NoteRecord note)
-		{
-			if (note == null)
-				throw new ArgumentNullException("note");
-
-			if (PendingNotes.Remove(note))
-				return true;
-
-			foreach (List<NoteRecord> notes in tradeNotes.Values)
-			{
-				if (RemoveByReference(notes, note))
-					return true;
-			}
-
-			StagedTrade staged = StagedHolding(note);
-			if (staged == null || !CanEdit(staged.Trade.TradeId))
-				return false;
-			return RemoveByReference(EditableNotes(staged), note);
-		}
-
-		/// <summary>The trader picked a trade type in the review form. Null clears it. <c>trade_type_other</c> is kept
-		/// only for <c>Other</c>. Refused once submitted.</summary>
-		public void SetTradeType(string tradeId, string tradeType, string tradeTypeOther)
-		{
-			StagedTrade staged = Staged.Find(tradeId);
-			if (staged == null)
-				throw new InvalidOperationException("Trade " + tradeId + " is not staged for review.");
-			if (!CanEdit(tradeId))
-				throw new InvalidOperationException("Trade " + tradeId + " has already been submitted.");
 			if (tradeType != null && !TradeTypes.IsValid(tradeType))
 				throw new ArgumentException("Unknown trade type '" + tradeType + "'.", "tradeType");
 
-			staged.TradeType = tradeType;
-			staged.TradeTypeOther = tradeType == "Other" && !string.IsNullOrWhiteSpace(tradeTypeOther) ? tradeTypeOther.Trim() : null;
-		}
-
-		/// <summary>Whether Submit trade is enabled: a staged, still-editable trade with a valid trade type.</summary>
-		public bool CanSubmit(string tradeId)
-		{
-			StagedTrade staged = Staged.Find(tradeId);
-			return staged != null && CanEdit(tradeId) && TradeTypes.IsValid(staged.TradeType);
-		}
-
-		private bool IsEditableNote(NoteRecord note)
-		{
-			if (PendingNotes.Contains(note) || tradeNotes.Values.Any(notes => notes.Any(n => ReferenceEquals(n, note))))
-				return true;
-			StagedTrade staged = StagedHolding(note);
-			return staged != null && CanEdit(staged.Trade.TradeId);
-		}
-
-		private StagedTrade StagedHolding(NoteRecord note)
-		{
-			return Staged.All.FirstOrDefault(s => s.Notes != null && s.Notes.Any(n => ReferenceEquals(n, note)));
-		}
-
-		// Staged notes may have been handed in as any IList (an array, a read-only list); make them a List we own.
-		private static IList<NoteRecord> EditableNotes(StagedTrade staged)
-		{
-			if (staged.Notes == null || staged.Notes.IsReadOnly)
-				staged.Notes = new List<NoteRecord>(staged.Notes ?? new List<NoteRecord>());
-			return staged.Notes;
-		}
-
-		private static bool RemoveByReference(IList<NoteRecord> notes, NoteRecord note)
-		{
-			for (int i = 0; i < notes.Count; i++)
+			string key = FormKey(account, instrumentFullName);
+			TradeForm form;
+			if (!forms.TryGetValue(key, out form))
 			{
-				if (ReferenceEquals(notes[i], note))
-				{
-					notes.RemoveAt(i);
-					return true;
-				}
+				form = FormFor(account, instrumentFullName);
+				forms[key] = form;
 			}
-			return false;
+
+			bool hasText = !string.IsNullOrWhiteSpace(body);
+			if (!hasText)
+				form.StartedAt = null;
+			else if (!form.StartedAt.HasValue)
+				form.StartedAt = now;
+
+			form.Body = string.IsNullOrEmpty(body) ? null : body;
+			form.TradeType = tradeType;
+			form.TradeTypeOther = tradeType == "Other" && !string.IsNullOrWhiteSpace(tradeTypeOther) ? tradeTypeOther.Trim() : null;
+		}
+
+		/// <summary>The account/instrument's closed trades not submitted yet, oldest first: what Submit sends.</summary>
+		public IList<CompletedTrade> PendingForForm(string account, string instrumentFullName)
+		{
+			return Unsubmitted()
+				.Where(t => t.Account == account && t.Instrument.FullName == instrumentFullName)
+				.OrderBy(t => t.ExitAt)
+				.ToList();
+		}
+
+		/// <summary>Submit is enabled once a trade has closed there and a trade type is chosen.</summary>
+		public bool CanSubmitForm(string account, string instrumentFullName)
+		{
+			return TradeTypes.IsValid(FormFor(account, instrumentFullName).TradeType) && PendingForForm(account, instrumentFullName).Count > 0;
+		}
+
+		/// <summary>Closed, unsubmitted trades on every other account: where a master's followers are looked for.</summary>
+		public IList<CompletedTrade> FollowerCandidates(string masterAccount)
+		{
+			return Unsubmitted().Where(t => t.Account != masterAccount).ToList();
+		}
+
+		/// <summary>
+		/// Submit: every closed, unsubmitted trade of the account/instrument (the master), then each follower trade
+		/// in <paramref name="followerTradeIds"/>, is frozen into the delivery queue. Each sends its own trade data;
+		/// all carry the form's note (one <c>general</c> note, timed when the trader started it; none when the form
+		/// has no text) and trade type. The form is then cleared. Throws, changing nothing, when nothing has closed,
+		/// no valid trade type is chosen, or a follower trade is not a closed, unsubmitted trade of another account.
+		/// </summary>
+		public IList<QueuedDelivery> SubmitForm(string account, string instrumentFullName, string addonVersion,
+			Func<string, string> connectionFor, IEnumerable<string> followerTradeIds, DateTimeOffset now)
+		{
+			TradeForm form = FormFor(account, instrumentFullName);
+			List<CompletedTrade> masters = PendingForForm(account, instrumentFullName).ToList();
+			if (masters.Count == 0)
+				throw new InvalidOperationException("No closed trade to submit yet.");
+			if (!TradeTypes.IsValid(form.TradeType))
+				throw new InvalidOperationException("Choose a trade type first.");
+
+			Dictionary<string, CompletedTrade> candidates = FollowerCandidates(account).ToDictionary(t => t.TradeId);
+			List<CompletedTrade> followers = new List<CompletedTrade>();
+			foreach (string id in followerTradeIds ?? Enumerable.Empty<string>())
+			{
+				CompletedTrade follower;
+				if (!candidates.TryGetValue(id, out follower))
+					throw new InvalidOperationException("Follower trade " + id + " is not a closed, unsubmitted trade of another account.");
+				if (!followers.Contains(follower))
+					followers.Add(follower);
+			}
+
+			List<QueuedDelivery> queued = new List<QueuedDelivery>();
+			foreach (CompletedTrade trade in masters.Concat(followers))
+			{
+				StagedTrade staged = Staged.Find(trade.TradeId) ?? Stage(trade.TradeId, now);
+				staged.Notes = string.IsNullOrWhiteSpace(form.Body)
+					? new List<NoteRecord>()
+					: new List<NoteRecord> { new NoteRecord { Body = form.Body.Trim(), Phase = NotePhases.General, OccurredAt = form.StartedAt ?? now } };
+				staged.TradeType = form.TradeType;
+				staged.TradeTypeOther = form.TradeTypeOther;
+				queued.Add(Submit(trade.TradeId, addonVersion, connectionFor == null ? null : connectionFor(trade.Account)));
+			}
+
+			forms[FormKey(account, instrumentFullName)] = new TradeForm
+			{
+				Account = account,
+				Instrument = instrumentFullName,
+				LastSubmitted = queued.Select(d => d.TradeId).ToList()
+			};
+			return queued;
+		}
+
+		/// <summary>Reset: clears the form and drops the account/instrument's closed, unsubmitted trades (the trader
+		/// chose not to journal them). Submitted trades are untouched. Returns the dropped trade_ids.</summary>
+		public IList<string> ResetForm(string account, string instrumentFullName)
+		{
+			List<string> dropped = PendingForForm(account, instrumentFullName).Select(t => t.TradeId).ToList();
+			foreach (string tradeId in dropped)
+			{
+				Staged.Remove(tradeId);
+				Forget(tradeId);
+			}
+
+			TradeForm old = FormFor(account, instrumentFullName);
+			forms[FormKey(account, instrumentFullName)] = new TradeForm
+			{
+				Account = account,
+				Instrument = instrumentFullName,
+				LastSubmitted = old.LastSubmitted ?? new List<string>()
+			};
+			return dropped;
+		}
+
+		/// <summary>
+		/// Drops staged trades nobody submitted within <paramref name="maxAge"/> of staging: closed trades on
+		/// accounts that are neither a form's master nor a submitted master's follower, or trades the trader never
+		/// got to. A staged trade with no staged time (an older state file) counts as old. Returns the dropped ids.
+		/// </summary>
+		public IList<string> PruneUnsubmitted(DateTimeOffset now, TimeSpan maxAge)
+		{
+			List<string> dropped = Staged.All
+				.Where(s => Deliveries.Find(s.Trade.TradeId) == null)
+				.Where(s => !s.StagedAt.HasValue || now - s.StagedAt.Value > maxAge)
+				.Select(s => s.Trade.TradeId)
+				.ToList();
+			foreach (string tradeId in dropped)
+				Staged.Remove(tradeId);
+			return dropped;
+		}
+
+		// Closed trades not yet frozen into the delivery queue: waiting to be staged, or staged and not submitted.
+		private IEnumerable<CompletedTrade> Unsubmitted()
+		{
+			return awaitingOrder.Select(id => awaiting[id])
+				.Concat(Staged.All.Select(s => s.Trade))
+				.Where(t => Deliveries.Find(t.TradeId) == null);
 		}
 
 		// ---- submission
@@ -610,6 +640,24 @@ namespace ChartJot.Core
 			w.Name("pending_notes").Raw(PendingNotes.Serialize());
 			w.Name("staged_trades").Raw(Staged.Serialize());
 			w.Name("deliveries").Raw(Deliveries.Serialize());
+
+			w.Name("forms").BeginArray();
+			foreach (TradeForm form in forms.Values)
+			{
+				w.BeginObject();
+				w.Property("account", form.Account);
+				w.Property("instrument_full_name", form.Instrument);
+				w.Property("body", form.Body);
+				w.Property("trade_type", form.TradeType);
+				w.Property("trade_type_other", form.TradeTypeOther);
+				w.Property("started_at", form.StartedAt.HasValue ? PayloadBuilder.Timestamp(form.StartedAt.Value) : null);
+				w.Name("last_submitted").BeginArray();
+				foreach (string tradeId in form.LastSubmitted ?? new List<string>())
+					w.String(tradeId);
+				w.EndArray();
+				w.EndObject();
+			}
+			w.EndArray();
 			w.EndObject();
 			return w.ToString();
 		}
@@ -652,6 +700,25 @@ namespace ChartJot.Core
 
 			foreach (JsonValue item in root["awaiting_stage"].Items)
 				state.RecordClosed(StagedTrades.ReadCompletedTrade(item));
+
+			// Missing in state files written before the form existed.
+			if (root.Has("forms"))
+			{
+				foreach (JsonValue item in root["forms"].Items)
+				{
+					TradeForm form = new TradeForm
+					{
+						Account = item["account"].AsString(),
+						Instrument = item["instrument_full_name"].AsString(),
+						Body = item["body"].AsString(),
+						TradeType = item["trade_type"].AsString(),
+						TradeTypeOther = item["trade_type_other"].AsString(),
+						StartedAt = item["started_at"].IsNull ? (DateTimeOffset?)null : DateTimeOffset.Parse(item["started_at"].AsString(), CultureInfo.InvariantCulture, DateTimeStyles.None),
+						LastSubmitted = item["last_submitted"].IsNull ? new List<string>() : item["last_submitted"].Items.Select(v => v.AsString()).ToList()
+					};
+					state.forms[FormKey(form.Account, form.Instrument)] = form;
+				}
+			}
 
 			return state;
 		}
