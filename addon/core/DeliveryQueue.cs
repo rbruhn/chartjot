@@ -24,7 +24,7 @@ namespace ChartJot.Core
 		/// <summary>HTTP 200: the server already had this trade_id and accepted the retry idempotently.</summary>
 		AcceptedIdempotent,
 
-		/// <summary>Timeout, connection error, or HTTP 5xx. Keep the same payload and back off.</summary>
+		/// <summary>Timeout, connection error, or HTTP 5xx. Keep the same payload and back off; after the last automatic attempt the delivery fails and waits for a manual retry.</summary>
 		Retryable,
 
 		/// <summary>HTTP 401 or 403. The intake token is wrong; automatic retries stop for the whole queue.</summary>
@@ -68,11 +68,17 @@ namespace ChartJot.Core
 		private readonly List<QueuedDelivery> order = new List<QueuedDelivery>();
 		private readonly TimeSpan initialBackoff;
 		private readonly TimeSpan maxBackoff;
+		private readonly int maxAutomaticAttempts;
 
-		public DeliveryQueue(TimeSpan? initialBackoff = null, TimeSpan? maxBackoff = null)
+		/// <param name="maxAutomaticAttempts">Send attempts before a timeout, connection error or 5xx stops being
+		/// retried automatically and the delivery fails (the trader retries it by hand). Default 3.</param>
+		public DeliveryQueue(TimeSpan? initialBackoff = null, TimeSpan? maxBackoff = null, int maxAutomaticAttempts = 3)
 		{
+			if (maxAutomaticAttempts < 1)
+				throw new ArgumentOutOfRangeException("maxAutomaticAttempts");
 			this.initialBackoff = initialBackoff ?? TimeSpan.FromSeconds(5);
 			this.maxBackoff = maxBackoff ?? TimeSpan.FromMinutes(5);
+			this.maxAutomaticAttempts = maxAutomaticAttempts;
 		}
 
 		/// <summary>
@@ -173,6 +179,14 @@ namespace ChartJot.Core
 
 				case DeliveryOutcome.Retryable:
 					d.Attempts++;
+					if (d.Attempts >= maxAutomaticAttempts)
+					{
+						// Out of automatic attempts: keep the payload and wait for the trader's Retry.
+						d.State = DeliveryState.Failed;
+						d.NextAttemptAt = null;
+						d.IsConfigurationError = false;
+						break;
+					}
 					d.State = DeliveryState.QueuedForRetry;
 					d.NextAttemptAt = now + NextBackoff(d.Attempts, initialBackoff, maxBackoff);
 					break;
@@ -196,8 +210,8 @@ namespace ChartJot.Core
 		}
 
 		/// <summary>
-		/// The trader asked to retry a Failed delivery (token corrected, or validation issue resolved) with its
-		/// existing payload unchanged. Also lifts <see cref="ConfigurationErrorHalted"/>, since acting on it is
+		/// The trader asked to retry a Failed delivery (journal reachable again, token corrected, or validation issue
+		/// resolved) with its existing payload unchanged, with a fresh set of automatic attempts. Also lifts <see cref="ConfigurationErrorHalted"/>, since acting on it is
 		/// the trader's signal that the token is fixed.
 		/// </summary>
 		public void RetryManually(string tradeId, DateTimeOffset now)
@@ -207,6 +221,7 @@ namespace ChartJot.Core
 				throw new InvalidOperationException("Trade " + tradeId + " is not Failed (state: " + d.State + ").");
 
 			d.State = DeliveryState.Pending;
+			d.Attempts = 0;
 			d.NextAttemptAt = null;
 			ConfigurationErrorHalted = false;
 		}
