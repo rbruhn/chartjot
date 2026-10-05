@@ -212,8 +212,9 @@ fills say −2 pt; the excursion shows the trade was +3 pt at its best.
 
 ### Trade form (decided 2026-10-04, #64)
 
-One form per chart, opened from a **Chart Jot** button on the chart's toolbar.
-It follows that chart's **Chart Trader** account and instrument; there is no
+One form per chart, opened from a **Chart Jot** button at the bottom of the
+chart's Chart Trader panel (or, when that panel's layout is not available, at
+the very end of the chart toolbar). It follows that chart's **Chart Trader** account and instrument; there is no
 account or instrument picker. It has:
 
 - One large note box. The trader writes in it before, during and after the
@@ -221,15 +222,23 @@ account or instrument picker. It has:
   typed (never transmitted until Submit) and survives an NT8 restart.
 - A **Trade type** dropdown (see below), with the `Other` description field.
 - **Submit**: enabled once a trade on that account/instrument has closed and a
-  trade type is chosen. It sends every closed, unsubmitted trade there (the
-  master) plus each copier follower's own trade (see "Copier followers"), all
+  trade type is chosen. It sends the trade(s) that closed there since the form
+  was opened or last submitted/reset (the master) plus each copier follower's own trade (see "Copier followers"), all
   with the form's note and trade type, then clears the form.
 - **Reset**: clears the note and type for the next idea. If a trade has closed
   and not been submitted, Reset drops it without journaling it (after a
   confirmation).
-- One status line: waiting for entry, in trade (direction, size, time open),
-  closed and ready to submit, sending, sent, queued for retry, or failed (with
-  **Retry**).
+- One status line about the current trade only: waiting for entry, in trade
+  (direction, size, time open), closed and ready to submit, and, after Submit,
+  "Submitted." for a few seconds. Past submissions are not listed; only a
+  failed one is shown, with **Retry**, because it needs action.
+- A **Settings** button that opens Chart Jot Settings.
+
+The form only cares about trades that close after it is first opened in an NT
+session, or after its last Submit/Reset (decided 2026-10-05). The AddOn still
+tracks every account's fills (it needs them for followers), but trades taken
+before the form was opened are never offered, warned about, or sent; the 24-hour
+prune drops them.
 
 There is no staged-trades list and no separate pre/in/post-trade notes. The
 note is sent as a single `general` note whose `occurred_at` is when the trader

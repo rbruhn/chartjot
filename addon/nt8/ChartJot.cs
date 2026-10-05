@@ -112,32 +112,95 @@ namespace NinjaTrader.NinjaScript.AddOns
 			}
 		}
 
-		/// <summary>A "Chart Jot" button on the chart's toolbar opens that chart's form.</summary>
+		/// <summary>
+		/// A "Chart Jot" button opens the chart's form: placed at the bottom of the Chart Trader panel, or, when that
+		/// panel's layout is not available, at the very end of the chart toolbar.
+		/// </summary>
 		private static void AddChartButton(NinjaTrader.Gui.Chart.Chart chart)
 		{
 			ChartJotCopier.Track(chart);
+			PlaceChartButton(chart, 0);
+		}
+
+		// Chart Trader is built after the chart window, so try a few times before falling back to the toolbar.
+		private static void PlaceChartButton(NinjaTrader.Gui.Chart.Chart chart, int attempt)
+		{
 			chart.Dispatcher.InvokeAsync(() =>
 			{
 				try
 				{
+					Grid panel = chart.ChartTrader == null ? null : chart.ChartTrader.Content as Grid;
+					if (panel != null && panel.Children.OfType<FrameworkElement>().Any(e => e.Name == ChartButtonName))
+						return;
 					if (chart.MainMenu.OfType<FrameworkElement>().Any(e => e.Name == ChartButtonName))
 						return;
-					Button button = new Button
+
+					// Only a grid laid out in rows can take one more row without overlapping what is there.
+					if (panel != null && panel.RowDefinitions.Count > 0)
 					{
-						Name		= ChartButtonName,
-						Content		= "Chart Jot",
-						ToolTip		= "Open the Chart Jot note form for this chart's Chart Trader account",
-						Margin		= new Thickness(2, 0, 2, 0),
-						Padding		= new Thickness(6, 0, 6, 0)
-					};
-					button.Click += (s, e) => ChartJotFormWindow.ShowFor(chart);
-					chart.MainMenu.Add(button);
+						Button button = NewChartButton(chart);
+						button.Margin = new Thickness(4, 6, 4, 4);
+						button.Padding = new Thickness(6, 3, 6, 3);
+						panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+						Grid.SetRow(button, panel.RowDefinitions.Count - 1);
+						Grid.SetColumn(button, 0);
+						Grid.SetColumnSpan(button, Math.Max(1, panel.ColumnDefinitions.Count));
+						panel.Children.Add(button);
+						ChartJotLog.Write("UI", "Chart Jot button added to the Chart Trader panel");
+						return;
+					}
+
+					if (attempt < 5)
+					{
+						Task.Delay(TimeSpan.FromSeconds(1)).ContinueWith(t => PlaceChartButton(chart, attempt + 1));
+						return;
+					}
+
+					ChartJotLog.Write("UI", "Chart Trader panel layout not available (content: "
+						+ (chart.ChartTrader == null || chart.ChartTrader.Content == null ? "none" : chart.ChartTrader.Content.GetType().Name)
+						+ "); Chart Jot button added to the end of the toolbar");
+					Button toolbarButton = NewChartButton(chart);
+					toolbarButton.Margin = new Thickness(2, 0, 2, 0);
+					toolbarButton.Padding = new Thickness(6, 0, 6, 0);
+					chart.MainMenu.Add(toolbarButton);
+					KeepLast(chart, toolbarButton);
 				}
 				catch (Exception ex)
 				{
 					ChartJotLog.Write("UI", "Could not add the Chart Jot button to a chart: " + ex.Message);
 				}
 			});
+		}
+
+		private static Button NewChartButton(NinjaTrader.Gui.Chart.Chart chart)
+		{
+			Button button = new Button
+			{
+				Name	= ChartButtonName,
+				Content	= "Chart Jot",
+				ToolTip	= "Open the Chart Jot note form for this chart's Chart Trader account"
+			};
+			button.Click += (s, e) => ChartJotFormWindow.ShowFor(chart);
+			return button;
+		}
+
+		/// <summary>Other add-ons and indicators add toolbar items later; move the button back to the end each time.</summary>
+		private static void KeepLast(NinjaTrader.Gui.Chart.Chart chart, Button button)
+		{
+			chart.MainMenu.CollectionChanged += (s, e) =>
+			{
+				int index = chart.MainMenu.IndexOf(button);
+				if (index >= 0 && index != chart.MainMenu.Count - 1)
+				{
+					// The collection cannot change inside its own change event.
+					chart.Dispatcher.InvokeAsync(() =>
+					{
+						int now = chart.MainMenu.IndexOf(button);
+						if (now >= 0 && now != chart.MainMenu.Count - 1)
+							chart.MainMenu.Move(now, chart.MainMenu.Count - 1);
+					});
+				}
+			};
 		}
 
 		private void OnSettingsClick(object sender, RoutedEventArgs e)
@@ -517,6 +580,24 @@ namespace NinjaTrader.NinjaScript.AddOns
 			return recorded;
 		}
 
+		// Forms already opened in this NT session (account|instrument).
+		private static readonly HashSet<string> formCyclesStarted = new HashSet<string>(StringComparer.Ordinal);
+
+		/// <summary>
+		/// The first time a form opens for an account/instrument in this NT session, it starts caring about trades
+		/// from now: trades closed before it was opened are never offered or sent.
+		/// </summary>
+		public static void StartFormCycleOnce(string accountName, string instrumentFullName)
+		{
+			lock (sync)
+			{
+				if (state == null || !formCyclesStarted.Add(accountName + "|" + instrumentFullName))
+					return;
+				state.StartFormCycle(accountName, instrumentFullName, DateTimeOffset.Now);
+			}
+			SaveState();
+		}
+
 		public static void UpdateForm(string accountName, string instrumentFullName, string body, string tradeType, string tradeTypeOther)
 		{
 			lock (sync)
@@ -587,7 +668,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 		{
 			IList<string> dropped;
 			lock (sync)
-				dropped = state.ResetForm(accountName, instrumentFullName);
+				dropped = state.ResetForm(accountName, instrumentFullName, DateTimeOffset.Now);
 			SaveState();
 			ChartJotLog.Write("FORM", "reset account=" + accountName + " instrument=" + instrumentFullName
 				+ (dropped.Count > 0 ? " dropped unsubmitted trade_ids=" + string.Join(",", dropped) : ""));
@@ -1637,6 +1718,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 		private readonly Button reset;
 		private readonly Button retry;
 		private readonly Button recapture;
+		private readonly Button settings;
 		private readonly System.Windows.Threading.DispatcherTimer refresh;
 		private readonly System.Windows.Threading.DispatcherTimer saveDelay;
 
@@ -1645,6 +1727,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 		private bool loading;
 		private bool busy;
 		private string message;
+		private DateTime messageUntil;
 
 		/// <summary>Opens the chart's form, or brings the open one to the front. Call on the chart's dispatcher.</summary>
 		public static void ShowFor(NinjaTrader.Gui.Chart.Chart chart)
@@ -1696,6 +1779,9 @@ namespace NinjaTrader.NinjaScript.AddOns
 			recapture	= new Button { Content = "Recapture", ToolTip = "Replace the exit image with what this chart shows now (e.g. after marking it up)",
 							Margin = new Thickness(6), Padding = new Thickness(12, 4, 12, 4), Visibility = Visibility.Collapsed };
 
+			settings	= new Button { Content = "Settings", ToolTip = "Chart Jot Settings", Margin = new Thickness(6), Padding = new Thickness(10, 4, 10, 4) };
+			settings.Click += (s, e) => NinjaTrader.Core.Globals.RandomDispatcher.BeginInvoke(new Action(() => new ChartJotSettingsWindow().Show()));
+
 			tradeType.Items.Add(new ComboBoxItem { Content = "Trade type...", Tag = null });
 			foreach (string value in TradeTypes.All)
 				tradeType.Items.Add(new ComboBoxItem { Content = value == "Other" ? "Other" : value + "  -  " + TradeTypes.Label(value), Tag = value });
@@ -1716,11 +1802,17 @@ namespace NinjaTrader.NinjaScript.AddOns
 			buttons.Children.Add(reset);
 			buttons.Children.Add(submit);
 
+			DockPanel actions = new DockPanel { LastChildFill = false };
+			DockPanel.SetDock(settings, Dock.Left);
+			DockPanel.SetDock(buttons, Dock.Right);
+			actions.Children.Add(settings);
+			actions.Children.Add(buttons);
+
 			StackPanel bottom = new StackPanel();
 			bottom.Children.Add(tradeType);
 			bottom.Children.Add(tradeTypeOther);
 			bottom.Children.Add(warning);
-			bottom.Children.Add(buttons);
+			bottom.Children.Add(actions);
 
 			DockPanel root = new DockPanel { Margin = new Thickness(4) };
 			DockPanel.SetDock(scope, Dock.Top);
@@ -1787,6 +1879,8 @@ namespace NinjaTrader.NinjaScript.AddOns
 			loading = true;
 			try
 			{
+				if (HasScope)
+					ChartJotMonitor.StartFormCycleOnce(account, instrument);
 				FormView view = HasScope ? ChartJotMonitor.Form(account, instrument) : new FormView();
 				note.Text = view.Body ?? "";
 				SelectType(view.TradeType);
@@ -1810,7 +1904,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 			}
 			catch (Exception ex)
 			{
-				message = ex.Message;
+				ShowMessage(ex.Message);
 			}
 		}
 
@@ -1848,43 +1942,42 @@ namespace NinjaTrader.NinjaScript.AddOns
 			retry.Visibility = failed && view.ClosedCount == 0 && !view.IsOpen ? Visibility.Visible : Visibility.Collapsed;
 			recapture.Visibility = view.ClosedCount > 0 ? Visibility.Visible : Visibility.Collapsed;
 			recapture.IsEnabled = enabled;
+			if (message != null && DateTime.UtcNow >= messageUntil)
+				message = null;
 			status.Text = message ?? StatusText(view);
 		}
 
+		/// <summary>Shows <paramref name="text"/> on the status line for a few seconds.</summary>
+		private void ShowMessage(string text)
+		{
+			message = text;
+			messageUntil = DateTime.UtcNow.AddSeconds(5);
+		}
+
+		/// <summary>Only the trade the form is working on now, plus a failed submission (it needs Retry).</summary>
 		private string StatusText(FormView view)
 		{
 			if (busy)
-				return "Submitting...";
+				return "Working...";
 			if (view.IsOpen)
 			{
 				TimeSpan elapsed = DateTimeOffset.Now - view.OpenEntryAt;
 				string time = elapsed < TimeSpan.Zero ? "" : ", " + ((int)elapsed.TotalMinutes).ToString(CultureInfo.InvariantCulture) + "m " + elapsed.Seconds.ToString("00", CultureInfo.InvariantCulture) + "s";
-				return "In trade: " + view.OpenDirection + " " + view.OpenQuantity.ToString(CultureInfo.InvariantCulture) + time
-					+ (view.ClosedCount > 0 ? "  (an earlier trade is closed and waiting)" : "");
+				return "In trade: " + view.OpenDirection + " " + view.OpenQuantity.ToString(CultureInfo.InvariantCulture) + time;
 			}
 			if (view.ClosedCount > 0)
 			{
 				string pnl = view.ClosedNetPnl.ToString("+0.00;-0.00;0.00", CultureInfo.InvariantCulture);
-				string what = view.ClosedCount == 1 ? "Trade closed (" + pnl + ")" : view.ClosedCount.ToString(CultureInfo.InvariantCulture) + " trades closed (" + pnl + ")";
-				string images = view.HasExitImage ? (view.HasEntryImage ? " Entry and exit images captured." : " Exit image captured.")
-					: " No exit image yet: show " + instrument + " on this chart and click Recapture.";
+				string what = (view.ClosedCount == 1 ? "Trade closed (" : "Trades closed (") + pnl + ")";
+				string images = view.HasExitImage ? "" : " No exit image yet: show " + instrument + " on this chart and click Recapture.";
 				return (TradeTypes.IsValid(SelectedType()) ? what + ": ready to submit." : what + ": choose a trade type, then Submit.") + images;
 			}
-			if (view.LastSubmitted.Count > 0)
-			{
-				SubmittedView configuration = view.LastSubmitted.FirstOrDefault(d => d.State == DeliveryState.Failed && d.IsConfigurationError);
-				if (configuration != null)
-					return "Last submission failed: check the intake token in Chart Jot Settings, then Retry.";
-				SubmittedView failed = view.LastSubmitted.FirstOrDefault(d => d.State == DeliveryState.Failed);
-				if (failed != null)
-					return "Last submission failed" + (failed.StatusCode.HasValue ? " (HTTP " + failed.StatusCode.Value.ToString(CultureInfo.InvariantCulture) + ")" : "")
-						+ (failed.Detail != null ? ": " + failed.Detail : ".");
-				if (view.LastSubmitted.Any(d => d.State != DeliveryState.Sent))
-					return view.LastSubmitted.Any(d => d.Attempts > 0 && d.State == DeliveryState.Pending)
-						? "Last submission queued for retry (the journal could not be reached)."
-						: "Sending last submission...";
-				return "Last submission sent (" + view.LastSubmitted.Count.ToString(CultureInfo.InvariantCulture) + (view.LastSubmitted.Count == 1 ? " trade" : " trades") + "). Waiting for the next entry.";
-			}
+			if (view.LastSubmitted.Any(d => d.State == DeliveryState.Failed && d.IsConfigurationError))
+				return "Last submission failed: check the intake token in Chart Jot Settings, then Retry.";
+			SubmittedView failed = view.LastSubmitted.FirstOrDefault(d => d.State == DeliveryState.Failed);
+			if (failed != null)
+				return "Last submission failed" + (failed.StatusCode.HasValue ? " (HTTP " + failed.StatusCode.Value.ToString(CultureInfo.InvariantCulture) + ")" : "")
+					+ (failed.Detail != null ? ": " + failed.Detail : ".") + " Retry to send it again.";
 			return "Waiting for entry.";
 		}
 
@@ -1926,7 +2019,8 @@ namespace NinjaTrader.NinjaScript.AddOns
 				try
 				{
 					// Reading the copier visits other charts' dispatchers, so it runs off this one.
-					result = ChartJotMonitor.SubmitForm(master, market, ChartJotCopier.FollowersOf(master)) + ".";
+					ChartJotMonitor.SubmitForm(master, market, ChartJotCopier.FollowersOf(master));
+					result = "Submitted.";
 				}
 				catch (Exception ex)
 				{
@@ -1936,9 +2030,8 @@ namespace NinjaTrader.NinjaScript.AddOns
 				{
 					busy = false;
 					Load();
-					message = result;
+					ShowMessage(result);
 					Render();
-					message = null;	// show it once; the status line takes over on the next refresh
 				});
 			});
 		}
@@ -1981,9 +2074,8 @@ namespace NinjaTrader.NinjaScript.AddOns
 				Dispatcher.InvokeAsync(() =>
 				{
 					busy = false;
-					message = result;
+					ShowMessage(result);
 					Render();
-					message = null;
 				});
 			});
 		}
