@@ -230,9 +230,10 @@ account or instrument picker. It has:
   confirmation).
 - One status line about the current trade only: waiting for entry, in trade
   (direction, size, time open), closed and ready to submit, and, after Submit,
-  "Sending..." until the journal has it ("Not sent yet ... trying again" while
-  it cannot be reached, up to 3 tries), then "Sent." for a few seconds, or
-  "Not sent ... Click Retry" once the tries run out. Past submissions are not listed; only a
+  "Sending (try 1/3)..." until the journal has it. While it cannot be reached,
+  each try is shown with a countdown ("Try 1/3 failed: the journal can't be
+  reached. Try 2/3 in 4s..."). Then "Sent." for a few seconds, or "Not sent ...
+  Click Retry" once the 3 tries run out. Past submissions are not listed; only a
   failed one is shown, with **Retry**, because it needs action.
 - A **Settings** button that opens Chart Jot Settings (the only way in; there
   is no Control Center menu item).
