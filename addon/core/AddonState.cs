@@ -307,10 +307,32 @@ namespace ChartJot.Core
 		/// <summary>The account/instrument's closed trades not submitted yet, oldest first: what Submit sends.</summary>
 		public IList<CompletedTrade> PendingForForm(string account, string instrumentFullName)
 		{
-			return Unsubmitted()
+			DateTimeOffset? since = FormFor(account, instrumentFullName).CycleStartedAt;
+			IEnumerable<CompletedTrade> waiting = awaitingOrder.Select(id => awaiting[id]);
+			IEnumerable<CompletedTrade> staged = Staged.All
+				.Where(s => !since.HasValue || (s.StagedAt.HasValue && s.StagedAt.Value >= since.Value))
+				.Select(s => s.Trade);
+			return waiting.Concat(staged)
 				.Where(t => t.Account == account && t.Instrument.FullName == instrumentFullName)
+				.Where(t => Deliveries.Find(t.TradeId) == null)
 				.OrderBy(t => t.ExitAt)
 				.ToList();
+		}
+
+		/// <summary>
+		/// The form starts caring about trades from <paramref name="now"/>: called when it is first opened in an NT
+		/// session, so trades closed before (never meant for it) are not offered, warned about, or sent.
+		/// </summary>
+		public void StartFormCycle(string account, string instrumentFullName, DateTimeOffset now)
+		{
+			string key = FormKey(account, instrumentFullName);
+			TradeForm form;
+			if (!forms.TryGetValue(key, out form))
+			{
+				form = FormFor(account, instrumentFullName);
+				forms[key] = form;
+			}
+			form.CycleStartedAt = now;
 		}
 
 		/// <summary>Submit is enabled once a trade has closed there and a trade type is chosen.</summary>
@@ -390,7 +412,8 @@ namespace ChartJot.Core
 			{
 				Account = account,
 				Instrument = instrumentFullName,
-				LastSubmitted = queued.Select(d => d.TradeId).ToList()
+				LastSubmitted = queued.Select(d => d.TradeId).ToList(),
+				CycleStartedAt = now
 			};
 			return queued;
 		}
@@ -398,6 +421,12 @@ namespace ChartJot.Core
 		/// <summary>Reset: clears the form and drops the account/instrument's closed, unsubmitted trades (the trader
 		/// chose not to journal them). Submitted trades are untouched. Returns the dropped trade_ids.</summary>
 		public IList<string> ResetForm(string account, string instrumentFullName)
+		{
+			return ResetForm(account, instrumentFullName, null);
+		}
+
+		/// <summary>As above, and the form's next cycle starts at <paramref name="now"/> (null keeps the current start).</summary>
+		public IList<string> ResetForm(string account, string instrumentFullName, DateTimeOffset? now)
 		{
 			List<string> dropped = PendingForForm(account, instrumentFullName).Select(t => t.TradeId).ToList();
 			foreach (string tradeId in dropped)
@@ -411,7 +440,8 @@ namespace ChartJot.Core
 			{
 				Account = account,
 				Instrument = instrumentFullName,
-				LastSubmitted = old.LastSubmitted ?? new List<string>()
+				LastSubmitted = old.LastSubmitted ?? new List<string>(),
+				CycleStartedAt = now ?? old.CycleStartedAt
 			};
 			return dropped;
 		}
@@ -748,6 +778,7 @@ namespace ChartJot.Core
 				w.Property("trade_type", form.TradeType);
 				w.Property("trade_type_other", form.TradeTypeOther);
 				w.Property("started_at", form.StartedAt.HasValue ? PayloadBuilder.Timestamp(form.StartedAt.Value) : null);
+				w.Property("cycle_started_at", form.CycleStartedAt.HasValue ? PayloadBuilder.Timestamp(form.CycleStartedAt.Value) : null);
 				w.Name("last_submitted").BeginArray();
 				foreach (string tradeId in form.LastSubmitted ?? new List<string>())
 					w.String(tradeId);
@@ -824,6 +855,7 @@ namespace ChartJot.Core
 						TradeType = item["trade_type"].AsString(),
 						TradeTypeOther = item["trade_type_other"].AsString(),
 						StartedAt = item["started_at"].IsNull ? (DateTimeOffset?)null : DateTimeOffset.Parse(item["started_at"].AsString(), CultureInfo.InvariantCulture, DateTimeStyles.None),
+						CycleStartedAt = item["cycle_started_at"].IsNull ? (DateTimeOffset?)null : DateTimeOffset.Parse(item["cycle_started_at"].AsString(), CultureInfo.InvariantCulture, DateTimeStyles.None),
 						LastSubmitted = item["last_submitted"].IsNull ? new List<string>() : item["last_submitted"].Items.Select(v => v.AsString()).ToList()
 					};
 					state.forms[FormKey(form.Account, form.Instrument)] = form;

@@ -197,5 +197,12 @@ namespace ChartJot.Core
 
 		/// <summary>The trade_ids the last Submit sent (master first, then followers), for the status line.</summary>
 		public IList<string> LastSubmitted { get; set; }
+
+		/// <summary>
+		/// When the form started caring about trades (wall clock): when it was first opened in this NT session, or
+		/// the last Submit/Reset. Only trades staged at or after it are the form's; null means no limit (older
+		/// state files).
+		/// </summary>
+		public DateTimeOffset? CycleStartedAt { get; set; }
 	}
 }
