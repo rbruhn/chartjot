@@ -71,8 +71,8 @@ time.
   source of truth.
 - Determine flat vs. open from a running signed sum of fills per
   account/instrument. Use `PositionUpdate` only as a consistency check, not as
-  the trigger, because its ordering relative to execution events is not
-  guaranteed **(verify)**.
+  the trigger. (Spike: `ExecutionUpdate` arrives before `PositionUpdate`; see
+  [Spike to Verify](#spike-to-verify), item 2.)
 - Detect transition from flat to non-flat as a trade opening.
 - Detect transition from non-flat to flat as a trade closing.
 - Support long and short positions.
@@ -560,14 +560,50 @@ frozen payload with the same `trade_id`.
   has no menu bar at all, only icons; look for one with a package/cube icon,
   confirmed to open a window titled "References" with an `add`/`remove` list
   and an "Applied" list of currently-referenced assemblies). Add the DLL there
-  explicitly.
+  explicitly. (Before #88. Since then the AddOn ships as one compiled
+  `ChartJot.dll`; see "Packaging" below.)
 - **A netstandard2.0 library referenced this way also needs an explicit
   reference to `netstandard.dll` itself** (confirmed 2026-09-30), or every
   framework type it exposes in its public surface (`Object`, `Decimal`,
   `Enum`, `IList<>`, `Nullable<>`, ...) fails with CS0012 ("defined in an
   assembly that is not referenced"). The working copy on this machine:
   `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\netstandard.dll`. Add it
-  through the same References window.
+  through the same References window. (Before #88; the compiled
+  `ChartJot.dll` needs no `netstandard` reference.)
+- **Packaging (#88, confirmed 2026-10-06).** The AddOn ships the way vendors
+  ship add-ons: `addon/nt8/ChartJot.NT8.csproj` compiles `ChartJot.cs` and
+  `addon/core` into one `ChartJot.dll`. `addon/package.sh` zips it with an
+  `Info.xml` as a NinjaScript archive.
+  - **Install:** Tools → Import → NinjaScript. NinjaTrader logs "Vendor
+    assembly 'ChartJot' version='…' loaded" and adds the reference itself.
+  - **Uninstall:** Tools → Remove NinjaScript Assembly → ChartJot.
+  - **What didn't work:** NinjaTrader's own source export records a
+    `ChartJot.Core.dll` reference in `AdditionalReferences.txt` but leaves the
+    DLL out. A source-plus-library package installs, but then needs a two-step
+    uninstall (delete the script in the NinjaScript Editor, then Remove
+    Assembly; NinjaTrader refuses Remove Assembly while the script still uses
+    the library).
+- **Framework versions (confirmed 2026-10-06, #88).** NinjaScript compiles
+  against the real runtime assemblies in
+  `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\`, all version 4.0.0.0,
+  and so does `ChartJot.NT8.csproj`. A DLL built against the `net48` reference
+  assemblies (all net471+ packs) references `System.Net.Http` **4.2.0.0**, and
+  NinjaTrader then fails with CS1705 ("uses 'System.Net.Http, Version=4.2.0.0'
+  which has a higher version than referenced assembly ... 4.0.0.0"). A vendor
+  DLL is referenced by every script's compile, so this would break all of them.
+  A modern `csc` accepts the mismatch, so a build outside NT8 doesn't catch it.
+  `package.sh` checks the DLL's references with Windows' .NET and refuses any
+  framework assembly above 4.0.0.0 or any `netstandard`.
+- **Because it needs NinjaTrader's DLLs**, `ChartJot.dll` builds only on a PC
+  with NinjaTrader 8 installed, never on GitHub's runners. `addon/release.sh`
+  attaches the package to a release from there. It's compiled against the
+  installed NinjaTrader version (8.1.8.3 at #88), as vendor DLLs are.
+- **Deleting files behind NinjaTrader's back (confirmed 2026-10-06).** Deleting
+  an add-on's DLL on disk while NinjaTrader's compiled build
+  (`NinjaTrader.Custom.dll`) still references it stops NinjaTrader from
+  starting ("Unable to retrieve type info for
+  'NinjaTrader.NinjaScript.AddOnBase'"). Restoring the DLL recovers it. Always
+  uninstall through NinjaTrader.
 - Keep trade reconstruction (fill aggregation, reversal splitting, averages,
   legs, excursion tracking), payload building, and the retry queue in plain C#
   classes with no NinjaTrader types, covered by unit tests outside NT8.
@@ -584,14 +620,14 @@ reproduce NT8's Trade Performance report.
 exports. They are reference material for a possible later CSV import that
 fills gaps. The AddOn does not send those columns. A later import can match
 Executions rows to AddOn trades exactly by the execution `ID` column, which the
-AddOn sends as `executions[].execution_id` **(verify)**.
+AddOn sends as `executions[].execution_id` (confirmed by the spike, item 5).
 
 ## Provisional Payload Contract
 
 All numeric price and currency values must be serialized as strings, never
 binary floating-point JSON numbers. Timestamps must be ISO 8601 with UTC
 offset, using NT8's configured time zone (**Tools -> Options -> General**),
-which may differ from the Windows time zone **(verify)**.
+which may differ from the Windows time zone (confirmed by the spike, item 3).
 
 Worked example: a 3-contract long with a runner. Commission is $1.29 per
 contract per side, and ES is $50 per point.
@@ -778,7 +814,7 @@ contract per side, and ES is $50 per point.
 | `performance.ticks` | Required integer: `points` ÷ tick size, rounded to the nearest tick |
 | `performance.gross_pnl` | Required: sum over exit fills of (price difference × point value × allocated quantity), signed by direction |
 | `performance.commission` | Required: sum of allocated fill commissions (pro-rated by quantity for a split reversal fill) |
-| `performance.fees` | Decimal string when NT8 exposes fees separately from commission, otherwise `null` **(verify)** |
+| `performance.fees` | Decimal string when NT8 exposes fees separately from commission, otherwise `null`. `Execution.Fee` (exchange and regulatory fees, separate from the commission template's `Commission`) is `0` on Sim and Playback; whether a live Rithmic fill reports it separately is still **(verify)** |
 | `performance.net_pnl` | Required: `gross_pnl` − `commission` − `fees` |
 | `excursion` | Required object; values `null` when no price data was observed; `complete` is `false` if the price feed was interrupted |
 | `stop_price` | Optional decimal string; `null` when there was no stop or it is unknown. Never required, never blocks submission |
@@ -838,46 +874,122 @@ unless verbose diagnostics is enabled, or raw image bytes.
 
 ## Acceptance Checklist
 
-- [ ] A manual long trade with one entry and one exit posts exactly once.
-- [ ] A manual short trade posts exactly once.
-- [ ] Partial entries/exits produce correct weighted averages and include all
-  fills.
-- [ ] A scale-out trade produces one leg per exit order, with later legs
-  marked as runners and correct per-leg points and P&L.
-- [ ] `performance.net_pnl` equals `gross_pnl` − `commission` − `fees`, and the
-  leg gross P&L values sum to `gross_pnl`.
-- [ ] MAE/MFE are recorded for the trade and each leg from live prices; an
-  interrupted feed sets `excursion.complete` to `false`.
-- [ ] A reversal produces two separate completed trades, with the flipping
-  fill's quantity split via `allocated_quantity`.
-- [ ] Replayed/duplicate execution events do not create duplicate fills or
-  trades.
-- [ ] The form follows the chart's Chart Trader account and instrument, and its
+Reviewed 2026-10-06 against AddOn 0.6.0. Each ticked item names its evidence:
+**unit** is a test in `addon/tests`, **Laravel** a test in the Laravel suite,
+**NT8** something seen in NinjaTrader (Sim, Playback or a live Rithmic
+connection) in the AddOn log or the journal. Unticked items still need a check
+in NinjaTrader; see [Remaining NT8 checks](#remaining-nt8-checks).
+
+- [x] A manual long trade with one entry and one exit posts exactly once.
+  *Unit:* `DuplicateExecutionId_IsIgnored`, `RecordClosed_IgnoresATradeAlreadyStagedOrQueued`,
+  `Enqueue_SameTradeIdAlreadySent_IsNoOp`. *NT8:* every Sim/Playback submission
+  was accepted once (201).
+- [x] A manual short trade posts exactly once.
+  *Unit:* `Short_TradeGrossAndExcursionAreSignedByDirection`. *NT8:* short
+  Playback trades (2ES) journaled once.
+- [x] Partial entries/exits produce correct weighted averages and include all
+  fills. *Unit:* `WorkedExample_MatchesTheSpecNumbers`,
+  `ScalingInAfterAPartialExit_QuantityIsMaxOpen_TotalEntryIsAll`,
+  `OneExitOrderFillingInPieces_IsOneLeg`.
+- [x] A scale-out trade produces one leg per exit order, with later legs
+  marked as runners and correct per-leg points and P&L. *Unit:*
+  `WorkedExample_LegsAndRunner`, `TwoExitOrdersFillingTogether_AreTwoLegs_LaterOneIsRunner`.
+- [x] `performance.net_pnl` equals `gross_pnl` − `commission` − `fees`, and the
+  leg gross P&L values sum to `gross_pnl`. *Unit:* the worked example (225.00
+  gross, 7.74 commission, 217.26 net; legs 100.00 + 125.00).
+- [x] MAE/MFE are recorded for the trade and each leg from live prices; an
+  interrupted feed sets `excursion.complete` to `false`. *Unit:* `ExcursionTests`,
+  `RestoreExcursionTests`. *NT8:* spike item 4 (Sim and Playback, disconnect).
+- [x] A reversal produces two separate completed trades, with the flipping
+  fill's quantity split via `allocated_quantity`. *Unit:*
+  `Reversal_SplitsTheFlippingFillAcrossTwoTrades`,
+  `RefreshCharges_ProRatesAReversalFillByTheQuantityAllocatedToThisTrade`;
+  *Laravel:* the `reversal-second-trade` contract fixture. Not yet seen in NT8.
+- [x] Replayed/duplicate execution events do not create duplicate fills or
+  trades. *Unit:* `DuplicateExecutionId_IsIgnored`, `Reconcile_RunTwice_LeavesTheSameState`.
+  *NT8:* reconnect and startup reconciles logged `consistent=True` with no
+  duplicates.
+- [x] The form follows the chart's Chart Trader account and instrument, and its
   note (written before, during and after the trade) arrives as one note.
-- [ ] A closed trade is staged for review and does not post until the trader
-  clicks **Submit trade**.
-- [ ] A copier follower's own trade is sent with the master's note and type.
-- [ ] Reset clears the form; a closed, unsubmitted trade is then not journaled.
-- [ ] A user must select one valid trade type before submission; a
-  direction mismatch shows a non-blocking warning.
-- [ ] Selecting `Other` permits an optional custom entry description.
-- [ ] A successful submission clears the form for the next trade.
-- [ ] A failed submission preserves the staged trade and notes for retry.
-- [ ] A submitted trade posts without a screenshot if screenshot capture fails.
-- [ ] Screenshot capture occurs on the chart dispatcher, includes drawings and
-  the exit fill, and can be recaptured before submission.
-- [ ] Network delivery never freezes the NT8 UI.
-- [ ] Restarting NT8 while a position is open preserves its notes, excursion
-  values observed so far, and yields the same `trade_id`.
+  *Unit:* `TradeFormTests`. *NT8:* Sim and Playback submissions.
+- [x] A closed trade is staged for review and does not post until the trader
+  clicks **Submit trade**. *Unit:* `CanSubmitForm_NeedsAClosedTradeAndAValidType`,
+  `PendingForForm_IsTheScopesClosedUnsubmittedTrades`. *NT8:* as used.
+- [x] A copier follower's own trade is sent with the master's note and type.
+  *Unit:* `SubmitForm_SendsEachFollowersOwnTradeWithTheMastersNoteAndType`,
+  `CopierMasterLinkTests`. *NT8:* Playback copier test (#79): followers
+  journaled with the master's type, linked to the master.
+- [x] Reset clears the form; a closed, unsubmitted trade is then not journaled.
+  *Unit:* `ResetForm_ClearsTheFormAndDropsTheScopesUnsubmittedTrades`,
+  `ResetForm_LeavesSubmittedTradesAlone`.
+- [x] A user must select one valid trade type before submission; a
+  direction mismatch shows a non-blocking warning. *Unit:*
+  `SubmitForm_WithoutATradeType_IsRefusedAndQueuesNothing`,
+  `DirectionWarning_WhenTheTypeImpliesTheOtherDirection`.
+- [x] Selecting `Other` permits an optional custom entry description.
+  *Unit:* `UpdateForm_KeepsTheOtherDescriptionOnlyForOther`. *Laravel:* #75.
+- [x] A successful submission clears the form for the next trade.
+  *Unit:* `SubmitForm_SendsTheMasterTradeWithTheNoteAndType_ThenClearsTheForm`.
+- [x] A failed submission preserves the staged trade and notes for retry.
+  *Unit:* `DeliveryQueueTests` (3 tries, then Failed, Retry). *NT8:* journal
+  unreachable on 2026-10-05: three failed tries, then Retry sent it.
+- [x] A submitted trade posts without a screenshot if screenshot capture fails.
+  *Unit:* `SendDueAsync_WhenTheScreenshotCannotBeLoaded_SendsTheTradeWithoutIt`,
+  `Submit_WithoutImages_SendsNeitherObject`. *NT8:* trades sent with no image.
+- [x] Screenshot capture occurs on the chart dispatcher, includes drawings and
+  the exit fill, and can be recaptured before submission. *Unit:*
+  `Recapture_ReplacesTheExitImageOfAStagedTrade`. *NT8:* spike item 7
+  (drawings), exit and entry images in Playback.
+- [x] Network delivery never freezes the NT8 UI. *NT8:* with the endpoint
+  pointed at an address that didn't answer (2026-10-05), the chart stayed
+  usable through all three tries and the Retry.
+- [x] Restarting NT8 while a position is open preserves its notes, excursion
+  values observed so far, and yields the same `trade_id`. *Unit:*
+  `Reconcile_AfterRestartMidTrade_*`. *NT8:* Sim restart mid-trade logged
+  `resumed=True` (2026-09-30).
 - [ ] A failed request is retained across NT8 restart and retries with the same
-  idempotency key.
-- [ ] Replaying an already accepted request does not create a duplicate.
+  idempotency key. *Unit:* `AFailedDelivery_SurvivesARestartAsFailed`,
+  `SubmittedTrade_SurvivesARestartWithItsFrozenPayload`; the trade_id is the
+  `Idempotency-Key`. Not yet done in NT8.
+- [x] Replaying an already accepted request does not create a duplicate.
+  *Laravel:* `treats a re-sent AddOn payload as the same trade`. *Unit:*
+  `Enqueue_SameTradeIdAlreadySent_IsNoOp`.
 - [ ] Invalid/expired credentials are clearly reported without exposing the
-  token; the token is stored only DPAPI-encrypted.
-- [ ] The AddOn never mixes trades, notes, or screenshots across accounts or
-  instruments.
-- [ ] Trade reconstruction, legs, excursion, and payload building pass unit
-  tests outside NT8.
+  token; the token is stored only DPAPI-encrypted. *Unit:*
+  `Token_IsStoredOnlyInProtectedForm_AndReadsBackThroughTheProtector`,
+  `RecordResult_ConfigurationError_FailsAndHaltsWholeQueue`. *NT8:* the token
+  box clears after Save. The rejected-token message hasn't been seen yet.
+- [x] The AddOn never mixes trades, notes, or screenshots across accounts or
+  instruments. *Unit:* `AccountsAndInstrumentsAreTrackedSeparately`,
+  `Forms_AreSeparatePerAccountAndInstrument`,
+  `DifferentInstrumentsOnTheSameAccount_AreKeptSeparate`,
+  `Reconcile_OnlyTouchesTheGivenAccountAndInstrument`.
+- [x] Trade reconstruction, legs, excursion, and payload building pass unit
+  tests outside NT8. *Unit:* 391 pass (`dotnet test addon/tests`).
+
+### Remaining NT8 checks
+
+One Sim or Playback session covers both unticked items, plus two optional
+ones:
+
+1. **A failed trade survives a restart.** Point the endpoint at an address
+   that doesn't answer, for example `https://localhost:9/api/v1/trades`. Take
+   a trade and Submit, and let it reach "Failed". Close NinjaTrader, restore
+   the real endpoint, start NT, and click Retry. It should be sent once, and
+   appear once in the journal.
+2. **A rejected token.** In Settings, paste a made-up token and Save. Submit a
+   trade. The status line should say the token was rejected, without showing
+   it. Generate a real token, save it, click Retry, and it should send.
+3. *(Optional)* **A reversal:** reverse a position in one order. The journal
+   should get two trades, with the flipping fill split between them.
+4. *(Optional, live Rithmic only)* **Fees:** NT8 reports two charges per
+   fill. `Commission` comes from the account's commission template, which is
+   why Sim and Playback trades show commission. `Fee` is for exchange and
+   regulatory fees, and Sim and Playback leave it at 0. After a live trade,
+   compare the journal's commission and fees with NT8's Executions tab, to see
+   whether Rithmic reports exchange fees in `Fee` or folds them into
+   `Commission`. Net P&L is right either way. This settles the
+   `performance.fees` **(verify)** above.
 
 ## Spike to Verify
 

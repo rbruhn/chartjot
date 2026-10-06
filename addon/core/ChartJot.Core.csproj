@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <!--
+      For the tests (net8.0). NinjaTrader never loads this build: addon/nt8/ChartJot.NT8.csproj compiles these
+      sources together with the AddOn into ChartJot.dll (#88).
+    -->
     <TargetFramework>netstandard2.0</TargetFramework>
     <!-- NinjaScript's compiler is older than the SDK's. Stay on what it accepts. -->
     <LangVersion>7.3</LangVersion>
