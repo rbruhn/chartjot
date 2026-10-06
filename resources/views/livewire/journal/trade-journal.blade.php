@@ -45,6 +45,9 @@ new class extends Component {
     #[Url(as: 'needs_note')]
     public bool $needsNote = false;
 
+    /** #79: masters whose follower rows are shown in the list, by uuid. */
+    public array $expandedMasters = [];
+
     #[Url(as: 'trade')]
     public string $selectedUuid = '';
 
@@ -113,9 +116,10 @@ new class extends Component {
     public function trades(): Collection
     {
         return $this->journal->trades()
-            ->with(['account.journal', 'notes', 'screenshot'])
+            ->with(['account.journal', 'notes', 'screenshot', 'followers.account.journal'])
             ->withCount([
                 'comments',
+                'followers',
                 'invitations as active_invitations_count' => fn ($q) => $q->active(),
             ])
             ->when($this->dateFrom, fn ($q) => $q->where('entry_at', '>=', Carbon::parse($this->dateFrom)->startOfDay()))
@@ -140,6 +144,8 @@ new class extends Component {
                 ? $q->whereRaw('0 = 1')
                 : $q->whereIn('account_id', $this->selectedAccountIds)
             )
+            // #79: a follower is listed under its master, so each setup counts once in the list and the summary
+            ->countedOnce($this->selectedAccountIds)
             ->when($this->needsNote, fn ($q) => $q->doesntHave('notes'))
             ->orderBy('entry_at', 'desc')
             ->get();
@@ -179,8 +185,17 @@ new class extends Component {
         if ($this->selectedUuid === '') return null;
         return $this->journal->trades()
             ->with(['account', 'executions', 'notes', 'exitScreenshots', 'entryScreenshot', 'legs'])
+            ->withCount('followers')
             ->where('uuid', $this->selectedUuid)
             ->first();
+    }
+
+    /** #79: shows or hides a master's follower rows in the list. */
+    public function toggleFollowers(string $uuid): void
+    {
+        $this->expandedMasters = in_array($uuid, $this->expandedMasters, true)
+            ? array_values(array_diff($this->expandedMasters, [$uuid]))
+            : [...$this->expandedMasters, $uuid];
     }
 
     public function selectTrade(string $uuid): void
@@ -802,6 +817,51 @@ new class extends Component {
                                 </div>
                             </div>
                         </button>
+                        {{-- Copier followers (#79): listed under their master, indented, when expanded --}}
+                        @if($trade->followers_count > 0)
+                            @php $expanded = in_array($trade->uuid, $expandedMasters, true); @endphp
+                            <button type="button" wire:click="toggleFollowers('{{ $trade->uuid }}')" aria-expanded="{{ $expanded ? 'true' : 'false' }}"
+                                class="w-full flex items-center gap-1 text-left pl-[5.5rem] pr-4 py-1 border-b border-gray-100 dark:border-gray-700/40 text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:bg-gray-100 dark:hover:bg-gray-800/50">
+                                <svg class="w-3 h-3 flex-shrink-0 transition-transform {{ $expanded ? 'rotate-90' : '' }}" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                                    <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/>
+                                </svg>
+                                <span>Followers ({{ $trade->followers_count }})</span>
+                            </button>
+                            @if($expanded)
+                                @foreach($trade->followers as $follower)
+                                    @php
+                                        $followerPnl = (float) $follower->net_pnl;
+                                        $followerWin = $followerPnl > 0;
+                                    @endphp
+                                    <button
+                                        wire:click="selectTrade('{{ $follower->uuid }}')"
+                                        class="w-full text-left pl-10 pr-4 py-2 border-b border-gray-100 dark:border-gray-700/40 transition-colors
+                                            {{ $selectedUuid === $follower->uuid
+                                                ? 'bg-indigo-50 dark:bg-indigo-950/40 border-l-[3px] border-l-indigo-500'
+                                                : 'border-l-[3px] border-l-transparent hover:bg-gray-100 dark:hover:bg-gray-800/50' }}"
+                                    >
+                                        <div class="flex items-center gap-3 border-l-2 border-gray-200 dark:border-gray-700 pl-3">
+                                            <div class="flex-1 min-w-0">
+                                                <div class="flex items-baseline justify-between gap-2">
+                                                    <div class="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
+                                                        {{ $follower->instrument_symbol }} &times; {{ $follower->quantity }}
+                                                    </div>
+                                                    <div class="text-xs font-semibold flex-shrink-0 {{ $followerWin ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400' }}">
+                                                        {{ $this->ptsDisplay($follower) }}
+                                                    </div>
+                                                </div>
+                                                <div class="flex items-center justify-between gap-2 mt-0.5">
+                                                    <div class="text-xs text-gray-600 dark:text-gray-500 truncate">{{ $follower->account->name }}</div>
+                                                    <div class="text-xs flex-shrink-0 {{ $followerWin ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400' }}">
+                                                        {{ $this->pnlDisplay($followerPnl) }}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </button>
+                                @endforeach
+                            @endif
+                        @endif
                     @endforeach
                 @endforeach
             @endif
@@ -1059,6 +1119,12 @@ new class extends Component {
                                 <div class="text-xs text-gray-600 dark:text-gray-500 uppercase tracking-wide mb-0.5">{{ $label }}</div>
                                 <div class="text-gray-900 dark:text-gray-100 font-medium">
                                     {{ $value }}
+                                    {{-- Copier role (#79): a follower has a master; a master has followers --}}
+                                    @if($label === 'ACCOUNT' && ($t->master_trade_id !== null || $t->followers_count > 0))
+                                        @php $copierRole = $t->master_trade_id !== null ? 'follower' : 'master'; @endphp
+                                        <span data-copier-role="{{ $copierRole }}" class="ml-1 inline-block px-1.5 py-px rounded text-[10px] font-semibold uppercase tracking-wide align-middle
+                                            {{ $copierRole === 'master' ? 'bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300' }}">{{ $copierRole === 'master' ? 'Master' : 'Follower' }}</span>
+                                    @endif
                                     {{-- An Other trade's description (up to 64 characters) sits behind an info icon so the cell stays one line (#75) --}}
                                     @if($label === 'TRADE TYPE' && $t->trade_type === \App\Enums\TradeType::Other && filled($t->trade_type_other))
                                         <x-stats.info-tip label="Other trade type description" class="align-middle">{{ $t->trade_type_other }}</x-stats.info-tip>

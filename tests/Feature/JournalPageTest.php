@@ -940,3 +940,109 @@ test('search matches the Other description, only in this journal', function () {
 
     expect($component->get('summary')['total'])->toBe(1);
 });
+
+// ---------------------------------------------------------------------------
+// Copier masters and followers (#79)
+// ---------------------------------------------------------------------------
+
+/**
+ * A master trade (+$100) with two followers (+$10 and +$100), each on its own account, plus the accounts.
+ *
+ * @return array{0: Trade, 1: Trade, 2: Trade}
+ */
+function copierSetup(Journal $journal): array
+{
+    $master = tradeInJournal($journal, ['instrument_symbol' => 'MSTR', 'net_pnl' => 100, 'points' => 2]);
+    $small  = tradeInJournal($journal, ['instrument_symbol' => 'FOLA', 'net_pnl' => 10, 'points' => 2, 'master_trade_id' => $master->id]);
+    $large  = tradeInJournal($journal, ['instrument_symbol' => 'FOLB', 'net_pnl' => 100, 'points' => 2, 'master_trade_id' => $master->id]);
+
+    return [$master, $small, $large];
+}
+
+test('the list shows a master with a Followers link and hides its followers', function () {
+    [$user, $journal] = journalUser();
+    copierSetup($journal);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->assertSee('MSTR')
+        ->assertSee('Followers (2)')
+        ->assertDontSee('FOLA')
+        ->assertDontSee('FOLB');
+});
+
+test('the Followers link expands the follower rows under the master and collapses them again', function () {
+    [$user, $journal] = journalUser();
+    [$master, $small] = copierSetup($journal);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('toggleFollowers', $master->uuid)
+        ->assertSeeInOrder(['MSTR', 'Followers (2)', 'FOLA', 'FOLB'])
+        ->assertSeeHtml("selectTrade('{$small->uuid}')")
+        ->call('toggleFollowers', $master->uuid)
+        ->assertDontSee('FOLA');
+});
+
+test('a trade without followers has no Followers link', function () {
+    [$user, $journal] = journalUser();
+    tradeInJournal($journal);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->assertDontSee('Followers (');
+});
+
+test('the summary counts a master and its followers as one trade', function () {
+    [$user, $journal] = journalUser();
+    copierSetup($journal);
+    tradeInJournal($journal, ['net_pnl' => -20, 'points' => -1]);
+
+    $summary = Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->get('summary');
+
+    expect($summary['total'])->toBe(2)
+        ->and($summary['net_pnl'])->toBe(80.0)
+        ->and($summary['win_rate'])->toBe(50);
+});
+
+test('filtering to a follower account shows its trades as normal rows with their own P&L', function () {
+    [$user, $journal] = journalUser();
+    [, $small] = copierSetup($journal);
+
+    $component = Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->set('selectedAccountIds', [$small->account_id])
+        ->assertSee('FOLA')
+        ->assertDontSee('MSTR');
+
+    expect($component->get('summary')['total'])->toBe(1)
+        ->and($component->get('summary')['net_pnl'])->toBe(10.0);
+});
+
+test('a follower whose master is also selected is not listed twice', function () {
+    [$user, $journal] = journalUser();
+    [$master, $small] = copierSetup($journal);
+
+    $component = Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->set('selectedAccountIds', [$master->account_id, $small->account_id])
+        ->assertSee('MSTR')
+        ->assertDontSee('FOLA');
+
+    expect($component->get('summary')['total'])->toBe(1)
+        ->and($component->get('summary')['net_pnl'])->toBe(100.0);
+});
+
+test('the trade view labels a master and a follower next to the account', function () {
+    [$user, $journal] = journalUser();
+    [$master, $small] = copierSetup($journal);
+    $normal = tradeInJournal($journal);
+
+    $component = Livewire::actingAs($user)->test('journal.trade-journal', ['journal' => $journal]);
+
+    $component->call('selectTrade', $master->uuid)->assertSeeHtml('data-copier-role="master"')->assertSee('Master');
+    $component->call('selectTrade', $small->uuid)->assertSeeHtml('data-copier-role="follower"')->assertSee('Follower');
+    $component->call('selectTrade', $normal->uuid)->assertDontSeeHtml('data-copier-role');
+});

@@ -67,6 +67,7 @@ class TradeIntakeService
                 'journal_id'                    => $journal->id,
                 'account_id'                    => $account->id,
                 'source_trade_id'               => $data['trade_id'],
+                'copier_master_source_trade_id' => $data['copier_master_trade_id'] ?? null,
                 'source'                        => $data['source'],
                 'addon_version'                 => $data['addon_version'],
                 'trade_type'                    => TradeType::from($data['trade_type']),
@@ -156,8 +157,42 @@ class TradeIntakeService
                     $data['entry_screenshot']['captured_at'] ?? null, null);
             }
 
+            $this->linkCopier($journal, $trade);
+
             return $trade;
         });
+    }
+
+    /**
+     * #79: links a copier follower to its master in the same journal, whichever of the two arrives first. Links
+     * stay one level deep: a trade that names a master is never itself a master, and a trade never names itself.
+     */
+    private function linkCopier(Journal $journal, Trade $trade): void
+    {
+        $masterSourceId = $trade->copier_master_source_trade_id;
+
+        if ($masterSourceId === null) {
+            // A master or a normal trade: pick up any followers that arrived before it.
+            Trade::where('journal_id', $journal->id)
+                ->where('copier_master_source_trade_id', $trade->source_trade_id)
+                ->whereNull('master_trade_id')
+                ->update(['master_trade_id' => $trade->id]);
+
+            return;
+        }
+
+        if ($masterSourceId === $trade->source_trade_id) {
+            return;
+        }
+
+        $masterId = Trade::where('journal_id', $journal->id)
+            ->where('source_trade_id', $masterSourceId)
+            ->whereNull('copier_master_source_trade_id')
+            ->value('id');
+
+        if ($masterId !== null) {
+            $trade->forceFill(['master_trade_id' => $masterId])->save();
+        }
     }
 
     /** Saves an AddOn chart image next to the trade's other images and records it. */
