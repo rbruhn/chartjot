@@ -43,6 +43,7 @@
     "complete": true
   },
   "stop_price": null,
+  "copier_master_trade_id": "NT8-TEST_ACCT_001-ES_12_26-ca8c47b6eda5db93",
   "legs": [
     {
       "sequence": 1,
