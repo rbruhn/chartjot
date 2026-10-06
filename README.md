@@ -134,8 +134,9 @@ places, moves or cancels orders):
   Target 1, a trail, or by hand), it stops updating. Example: long 7700, ATM
   stop 7696, loosened to 7694, later moved to breakeven: the trade records
   7694.
-- **Sent with the trade.** It's sent as `stop_price` and shown on the trade
-  page, where you can still correct or add it.
+- **Sent with the trade.** It's sent as `stop_price` and shown in the trade
+  page's **STOP PRICE** cell. Click it to correct or add it (Enter saves,
+  Escape cancels, blank clears).
 - **No stop at risk:** nothing is sent.
 - **Followers** record their own stop order when the copier is in Orders
   mode. In Executions mode (fills only, no stop orders) they take the
