@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# Builds the NT8 AddOn as a NinjaScript archive that NinjaTrader imports with
-# Tools > Import > NinjaScript (#88):
+# Builds the NT8 AddOn as a NinjaScript archive, the way vendors ship add-ons (#88):
 #
-#   AddOns\ChartJot.cs          the AddOn source, compiled by NinjaTrader on import
-#   ChartJot.Core.dll           addon/core built for .NET Framework 4.6.2: no netstandard reference, System.Net.Http 4.0.0.0
-#   AdditionalReferences.txt    tells NinjaTrader to reference ChartJot.Core.dll
-#   Info.xml                    NinjaTrader's export header
+#   ChartJot.dll   the AddOn (addon/nt8/ChartJot.cs) and addon/core compiled into one assembly
+#   Info.xml       NinjaTrader's export header
 #
-# NinjaTrader's own source export records the ChartJot.Core reference but leaves the DLL
-# out, so this script builds the archive itself, in the same layout and encoding.
+# Traders install it with Tools > Import > NinjaScript and remove it with
+# Tools > Remove NinjaScript Assembly > ChartJot.
+#
+# ChartJot.dll compiles against NinjaTrader's own DLLs and the real .NET Framework runtime assemblies, so this
+# runs on a Windows PC with NinjaTrader 8 installed, from WSL (see addon/nt8/ChartJot.NT8.csproj). It then checks
+# the DLL with Windows' own .NET: every framework reference must be version 4.0.0.0 (what NinjaScript compiles
+# against; 4.2.0.0 breaks every script's compile with CS1705) and nothing may reference netstandard.
 #
 # Usage: addon/package.sh [output-dir]   (default: addon/dist)
 set -euo pipefail
@@ -23,20 +25,33 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
-"$DOTNET" build "$ADDON_DIR/core" -c Release -f net462 --nologo -v:q -o "$ADDON_DIR/core/bin/package"
-DLL="$ADDON_DIR/core/bin/package/ChartJot.Core.dll"
+BUILD_DIR="$ADDON_DIR/nt8/bin/package"
+rm -rf "$BUILD_DIR"
+"$DOTNET" build "$ADDON_DIR/nt8/ChartJot.NT8.csproj" -c Release --nologo -v:q -clp:ErrorsOnly \
+    -p:AddonVersion="$VERSION" -o "$BUILD_DIR" >&2
+DLL="$BUILD_DIR/ChartJot.dll"
+
+# Check the DLL with Windows' .NET Framework, the runtime NinjaTrader uses.
+WIN_DLL="$(wslpath -w "$DLL")"
+powershell.exe -NoProfile -NonInteractive -Command "
+    \$a = [Reflection.Assembly]::ReflectionOnlyLoad([IO.File]::ReadAllBytes('$WIN_DLL'))
+    \$bad = \$a.GetReferencedAssemblies() | Where-Object {
+        \$_.Name -eq 'netstandard' -or (\$_.Name -notlike 'NinjaTrader.*' -and \$_.Version -gt [Version]'4.0.0.0') }
+    if (\$bad) { \$bad | ForEach-Object { [Console]::Error.WriteLine('package.sh: ChartJot.dll references ' + \$_.Name + ' ' + \$_.Version) }; exit 1 }
+    if (\$a.GetName().Version -ne [Version]'$VERSION.0') { [Console]::Error.WriteLine('package.sh: ChartJot.dll version is ' + \$a.GetName().Version); exit 1 }
+" | tr -d '\r' >&2
 
 mkdir -p "$OUT_DIR"
 ZIP="$OUT_DIR/ChartJot-AddOn-$VERSION.zip"
 rm -f "$ZIP"
 
-python3 - "$ZIP" "$ADDON_DIR/nt8/ChartJot.cs" "$DLL" <<'PY'
+python3 - "$ZIP" "$DLL" <<'PY'
 import sys, time, zipfile
 
-zip_path, source, dll = sys.argv[1:4]
+zip_path, dll = sys.argv[1:3]
 
-# Byte for byte what NinjaTrader 8.1.8.3 writes in an export: Info.xml has a BOM and CRLF line endings,
-# AdditionalReferences.txt has CRLF and no BOM, and entry names use backslashes.
+# As NinjaTrader 8.1.8.3 writes Info.xml in an export: a BOM and CRLF line endings. Agile is the
+# copy-protection version; Chart Jot isn't protected.
 info = ('﻿<?xml version="1.0" encoding="utf-8"?>\r\n'
         '<NinjaTrader>\r\n'
         '  <Export>\r\n'
@@ -44,7 +59,6 @@ info = ('﻿<?xml version="1.0" encoding="utf-8"?>\r\n'
         '    <Agile>None</Agile>\r\n'
         '  </Export>\r\n'
         '</NinjaTrader>').encode('utf-8')
-references = '*MyDocuments*\\NinjaTrader 8\\bin\\Custom\\ChartJot.Core.dll\r\n'.encode('utf-8')
 
 def entry(name):
     zi = zipfile.ZipInfo(name, time.localtime()[:6])
@@ -53,21 +67,13 @@ def entry(name):
     return zi
 
 with zipfile.ZipFile(zip_path, 'w') as z:
-    with open(source, 'rb') as f:
-        z.writestr(entry('AddOns\\ChartJot.cs'), f.read())
-    with open(dll, 'rb') as f:
-        z.writestr(entry('ChartJot.Core.dll'), f.read())
-    z.writestr(entry('AdditionalReferences.txt'), references)
     z.writestr(entry('Info.xml'), info)
+    with open(dll, 'rb') as f:
+        z.writestr(entry('ChartJot.dll'), f.read())
 
-# Check the result: exactly these entries, and the DLL is the .NET Framework 4.6.2 build.
 with zipfile.ZipFile(zip_path) as z:
-    names = sorted(z.namelist())
-    expected = sorted(['AddOns\\ChartJot.cs', 'ChartJot.Core.dll', 'AdditionalReferences.txt', 'Info.xml'])
-    if names != expected:
-        sys.exit('package.sh: unexpected entries %r' % names)
-    if b'.NETFramework,Version=v4.6.2' not in z.read('ChartJot.Core.dll'):
-        sys.exit('package.sh: ChartJot.Core.dll is not the net462 build')
+    if sorted(z.namelist()) != ['ChartJot.dll', 'Info.xml']:
+        sys.exit('package.sh: unexpected entries %r' % z.namelist())
 PY
 
 echo "$ZIP"

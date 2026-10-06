@@ -560,35 +560,50 @@ frozen payload with the same `trade_id`.
   has no menu bar at all, only icons; look for one with a package/cube icon,
   confirmed to open a window titled "References" with an `add`/`remove` list
   and an "Applied" list of currently-referenced assemblies). Add the DLL there
-  explicitly. The packaged AddOn (`addon/package.sh`, #88) does this on import:
-  its `AdditionalReferences.txt` names `ChartJot.Core.dll`, the same file
-  NinjaTrader's own export writes.
+  explicitly. (Before #88. Since then the AddOn ships as one compiled
+  `ChartJot.dll`; see "Packaging" below.)
 - **A netstandard2.0 library referenced this way also needs an explicit
   reference to `netstandard.dll` itself** (confirmed 2026-09-30), or every
   framework type it exposes in its public surface (`Object`, `Decimal`,
   `Enum`, `IList<>`, `Nullable<>`, ...) fails with CS0012 ("defined in an
   assembly that is not referenced"). The working copy on this machine:
   `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\netstandard.dll`. Add it
-  through the same References window. **Since #88 this no longer applies:**
-  `addon/core` also builds for .NET Framework 4.6.2 (`net462`), and that is the
-  DLL installed in NinjaTrader (it runs on NT8's 4.8 runtime). It needs no
-  `netstandard` reference. The netstandard2.0 build remains for the unit tests.
+  through the same References window. (Before #88; the compiled
+  `ChartJot.dll` needs no `netstandard` reference.)
+- **Packaging (#88, confirmed 2026-10-06).** The AddOn ships the way vendors
+  ship add-ons: `addon/nt8/ChartJot.NT8.csproj` compiles `ChartJot.cs` and
+  `addon/core` into one `ChartJot.dll`. `addon/package.sh` zips it with an
+  `Info.xml` as a NinjaScript archive.
+  - **Install:** Tools → Import → NinjaScript. NinjaTrader logs "Vendor
+    assembly 'ChartJot' version='…' loaded" and adds the reference itself.
+  - **Uninstall:** Tools → Remove NinjaScript Assembly → ChartJot.
+  - **What didn't work:** NinjaTrader's own source export records a
+    `ChartJot.Core.dll` reference in `AdditionalReferences.txt` but leaves the
+    DLL out. A source-plus-library package installs, but then needs a two-step
+    uninstall (delete the script in the NinjaScript Editor, then Remove
+    Assembly; NinjaTrader refuses Remove Assembly while the script still uses
+    the library).
 - **Framework versions (confirmed 2026-10-06, #88).** NinjaScript compiles
   against the real runtime assemblies in
-  `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\`, which are all version
-  4.0.0.0. A DLL built against the `net48` reference assemblies references
-  `System.Net.Http` **4.2.0.0** (as do all net471+ packs), and NinjaTrader's
-  import then fails with CS1705 ("uses 'System.Net.Http, Version=4.2.0.0' which
-  has a higher version than referenced assembly ... 4.0.0.0"). A modern `csc`
-  accepts the mismatch, so a compile check outside NT8 doesn't catch it.
-  `NinjaTraderBuildTests` reads the net462 DLL's references and fails on any
-  framework assembly above 4.0.0.0.
-- **Uninstalling (confirmed 2026-10-06).** The normal uninstall is deleting
-  the AddOn in the NinjaScript Editor, which recompiles without it; the
-  leftover `ChartJot.Core.dll` is harmless. Deleting `ChartJot.Core.dll` on
-  disk while NinjaTrader's compiled build (`NinjaTrader.Custom.dll`) still
-  contains the AddOn stops NinjaTrader from starting ("Unable to retrieve type
-  info for 'NinjaTrader.NinjaScript.AddOnBase'"). See README, "Uninstalling".
+  `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\`, all version 4.0.0.0,
+  and so does `ChartJot.NT8.csproj`. A DLL built against the `net48` reference
+  assemblies (all net471+ packs) references `System.Net.Http` **4.2.0.0**, and
+  NinjaTrader then fails with CS1705 ("uses 'System.Net.Http, Version=4.2.0.0'
+  which has a higher version than referenced assembly ... 4.0.0.0"). A vendor
+  DLL is referenced by every script's compile, so this would break all of them.
+  A modern `csc` accepts the mismatch, so a build outside NT8 doesn't catch it.
+  `package.sh` checks the DLL's references with Windows' .NET and refuses any
+  framework assembly above 4.0.0.0 or any `netstandard`.
+- **Because it needs NinjaTrader's DLLs**, `ChartJot.dll` builds only on a PC
+  with NinjaTrader 8 installed, never on GitHub's runners. `addon/release.sh`
+  attaches the package to a release from there. It's compiled against the
+  installed NinjaTrader version (8.1.8.3 at #88), as vendor DLLs are.
+- **Deleting files behind NinjaTrader's back (confirmed 2026-10-06).** Deleting
+  an add-on's DLL on disk while NinjaTrader's compiled build
+  (`NinjaTrader.Custom.dll`) still references it stops NinjaTrader from
+  starting ("Unable to retrieve type info for
+  'NinjaTrader.NinjaScript.AddOnBase'"). Restoring the DLL recovers it. Always
+  uninstall through NinjaTrader.
 - Keep trade reconstruction (fill aggregation, reversal splitting, averages,
   legs, excursion tracking), payload building, and the retry queue in plain C#
   classes with no NinjaTrader types, covered by unit tests outside NT8.
