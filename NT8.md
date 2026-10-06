@@ -299,9 +299,11 @@ given moment (a trader using an ATM bracket sometimes moves the stop by hand
 after entry, sometimes doesn't).
 
 Auto-capture it best-effort, read-only (no order placement or modification,
-consistent with every other rule in this document). The trader's ATM uses a
-**single** stop order for all contracts, runners included; after Target 1 it
-stays as one order for the remaining contracts. While a position is open,
+consistent with every other rule in this document). The trader's ATM places
+one stop order per target (Stop1, Stop2; confirmed in NT8's log 2026-10-05).
+They can sit at different prices, so the **farthest from entry** (the most
+risk) is the one that counts. After Target 1 fills, its stop is cancelled and
+only the remaining one counts. While a position is open,
 watch `Account.OrderUpdate` (and read `Account.Orders` shortly after the
 entry fill, because the ATM may place its stop before the fill is reported,
 and again after a restart) for that account/instrument's working
@@ -315,7 +317,13 @@ Once the stop moves to breakeven or into profit (after Target 1, a trail, or
 by hand), it stops updating, so the trade keeps the last stop it was actually
 risking. Example: long 7700 with the ATM stop at 7696, loosened to 7694, later
 moved to 7700 for breakeven: the recorded stop is 7694. A trade that never had
-an at-risk stop sends `null`. Each copier follower records its own stop order. No cross-account or timing-based correlation is needed
+an at-risk stop sends `null`.
+
+Copier followers: with the copier in **Orders mode**, each follower has its own
+stop order and records it. In **Executions mode** the copier copies fills only,
+so a follower has no stop order; at Submit it then takes its master's stop
+price (decided 2026-10-05). MES and ES quote the same price level, so this
+holds for micro followers too. No cross-account or timing-based correlation is needed
 here, unlike the now-removed copier matching -- it is the same account, same
 instrument, and normally one open position at a time, so "the working stop
 order while this trade's position was open" is unambiguous.

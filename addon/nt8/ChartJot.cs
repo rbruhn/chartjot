@@ -852,10 +852,12 @@ namespace NinjaTrader.NinjaScript.AddOns
 			try
 			{
 				Order order = e.Order;
-				if (order == null || !IsLiveStop(order.OrderType, e.OrderState))
+				if (order == null || order.Account == null || order.Instrument == null)
 					return;
-				double price = e.StopPrice > 0 ? e.StopPrice : order.StopPrice;
-				RecordProtectiveStop(order, price);
+				if (order.OrderType != OrderType.StopMarket && order.OrderType != OrderType.StopLimit)
+					return;
+				// The event carries the order's new state and price; the order object may not reflect them yet.
+				RecordCurrentStop(order.Account, order.Instrument.FullName, order, e.OrderState, e.StopPrice > 0 ? e.StopPrice : order.StopPrice);
 			}
 			catch (Exception ex)
 			{
@@ -864,19 +866,14 @@ namespace NinjaTrader.NinjaScript.AddOns
 			}
 		}
 
-		/// <summary>Records the account/instrument's working protective stop, if there is one. Never call under sync.</summary>
+		/// <summary>Records the account/instrument's current protective stop, if any. Never call under sync.</summary>
 		private static void ReadWorkingStop(string accountName, string instrumentFullName)
 		{
 			try
 			{
 				Account account = Account.All.FirstOrDefault(a => a.Name == accountName);
-				if (account == null)
-					return;
-				foreach (Order order in account.Orders.ToList())
-				{
-					if (order.Instrument != null && order.Instrument.FullName == instrumentFullName && IsLiveStop(order.OrderType, order.OrderState))
-						RecordProtectiveStop(order, order.StopPrice);
-				}
+				if (account != null)
+					RecordCurrentStop(account, instrumentFullName, null, OrderState.Unknown, 0);
 			}
 			catch (Exception ex)
 			{
@@ -893,28 +890,46 @@ namespace NinjaTrader.NinjaScript.AddOns
 		}
 
 		/// <summary>
-		/// A stop on the closing side of the open position (a sell stop for a long, a buy stop for a short) is its
-		/// protective stop; addon/core decides whether its price is still at risk (#53).
+		/// Looks at every live stop order of the account/instrument on the closing side of the open position (a sell
+		/// stop for a long, a buy stop for a short). The ATM places one stop per target (Stop1, Stop2), which can sit
+		/// at different prices, so the farthest from entry (the most risk) is passed to addon/core, which keeps it only
+		/// while it is still at risk (#53). <paramref name="changed"/> is the order an event just reported, with its new
+		/// state and price; null when only reading what is working. Account.Orders is read here, never under sync.
 		/// </summary>
-		private static void RecordProtectiveStop(Order order, double price)
+		private static void RecordCurrentStop(Account account, string instrumentFullName, Order changed, OrderState changedState, double changedPrice)
 		{
-			if (order.Account == null || order.Instrument == null || price <= 0)
+			List<KeyValuePair<OrderAction, decimal>> live = new List<KeyValuePair<OrderAction, decimal>>();
+			foreach (Order order in account.Orders.ToList())
+			{
+				if (order.Instrument == null || order.Instrument.FullName != instrumentFullName)
+					continue;
+				bool isChanged = changed != null && ReferenceEquals(order, changed);
+				OrderState orderState = isChanged ? changedState : order.OrderState;
+				double price = isChanged ? changedPrice : order.StopPrice;
+				if (IsLiveStop(order.OrderType, orderState) && price > 0)
+					live.Add(new KeyValuePair<OrderAction, decimal>(order.OrderAction, (decimal)price));
+			}
+			if (changed != null && !account.Orders.Contains(changed) && IsLiveStop(changed.OrderType, changedState) && changedPrice > 0)
+				live.Add(new KeyValuePair<OrderAction, decimal>(changed.OrderAction, (decimal)changedPrice));
+			if (live.Count == 0)
 				return;
-			string accountName = order.Account.Name;
-			string instrumentFullName = order.Instrument.FullName;
-			decimal stop = (decimal)price;
 
+			string accountName = account.Name;
+			decimal stop;
 			bool recorded;
 			lock (sync)
 			{
 				OpenTradeInfo open = state.Tracker.OpenTrades.FirstOrDefault(t => t.Account == accountName && t.Instrument.FullName == instrumentFullName);
 				if (open == null)
 					return;
-				bool closingSide = open.Direction == Direction.Long
-					? order.OrderAction == OrderAction.Sell
-					: order.OrderAction == OrderAction.BuyToCover || order.OrderAction == OrderAction.Buy;
-				if (!closingSide)
+				bool isLong = open.Direction == Direction.Long;
+				List<decimal> protective = live
+					.Where(p => isLong ? p.Key == OrderAction.Sell : (p.Key == OrderAction.BuyToCover || p.Key == OrderAction.Buy))
+					.Select(p => p.Value)
+					.ToList();
+				if (protective.Count == 0)
 					return;
+				stop = isLong ? protective.Min() : protective.Max();
 				decimal? before = state.StopFor(open.TradeId);
 				recorded = state.RecordStop(accountName, instrumentFullName, stop) && before != stop;
 			}
