@@ -1,12 +1,22 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
+    <!--
+      net48 is what NinjaTrader 8 loads: a net48 DLL compiles in NinjaScript with no extra reference (#88).
+      netstandard2.0 is what the tests (net8.0) reference.
+    -->
+    <TargetFrameworks>net48;netstandard2.0</TargetFrameworks>
     <!-- NinjaScript's compiler is older than the SDK's. Stay on what it accepts. -->
     <LangVersion>7.3</LangVersion>
     <Nullable>disable</Nullable>
     <RootNamespace>ChartJot.Core</RootNamespace>
     <AssemblyName>ChartJot.Core</AssemblyName>
   </PropertyGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <!-- Lets the net48 build run on Linux and in CI, where .NET Framework itself isn't installed. -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
 
 </Project>
