@@ -778,7 +778,7 @@ contract per side, and ES is $50 per point.
 | `performance.ticks` | Required integer: `points` ÷ tick size, rounded to the nearest tick |
 | `performance.gross_pnl` | Required: sum over exit fills of (price difference × point value × allocated quantity), signed by direction |
 | `performance.commission` | Required: sum of allocated fill commissions (pro-rated by quantity for a split reversal fill) |
-| `performance.fees` | Decimal string when NT8 exposes fees separately from commission, otherwise `null`. `Execution.Fee` exists but is `0` on Sim and Playback; whether a live Rithmic fill reports it separately is still **(verify)** |
+| `performance.fees` | Decimal string when NT8 exposes fees separately from commission, otherwise `null`. `Execution.Fee` (exchange and regulatory fees, separate from the commission template's `Commission`) is `0` on Sim and Playback; whether a live Rithmic fill reports it separately is still **(verify)** |
 | `performance.net_pnl` | Required: `gross_pnl` − `commission` − `fees` |
 | `excursion` | Required object; values `null` when no price data was observed; `complete` is `false` if the price feed was interrupted |
 | `stop_price` | Optional decimal string; `null` when there was no stop or it is unknown. Never required, never blocks submission |
@@ -904,9 +904,9 @@ in NinjaTrader; see [Remaining NT8 checks](#remaining-nt8-checks).
   the exit fill, and can be recaptured before submission. *Unit:*
   `Recapture_ReplacesTheExitImageOfAStagedTrade`. *NT8:* spike item 7
   (drawings), exit and entry images in Playback.
-- [ ] Network delivery never freezes the NT8 UI. The sender runs off the UI
-  thread by design, but this hasn't been checked while the journal is
-  unreachable.
+- [x] Network delivery never freezes the NT8 UI. *NT8:* with the endpoint
+  pointed at an address that didn't answer (2026-10-05), the chart stayed
+  usable through all three tries and the Retry.
 - [x] Restarting NT8 while a position is open preserves its notes, excursion
   values observed so far, and yields the same `trade_id`. *Unit:*
   `Reconcile_AfterRestartMidTrade_*`. *NT8:* Sim restart mid-trade logged
@@ -933,23 +933,26 @@ in NinjaTrader; see [Remaining NT8 checks](#remaining-nt8-checks).
 
 ### Remaining NT8 checks
 
-One Sim or Playback session covers all three unticked items, plus two
-optional ones:
+One Sim or Playback session covers both unticked items, plus two optional
+ones:
 
-1. **UI while the journal is unreachable.** Point the endpoint at an address
-   that doesn't answer, for example `https://localhost:9/api/v1/trades`. Take a
-   trade and Submit. During the three tries, move the chart, open Chart
-   Trader, and place and cancel an order: nothing should stall.
-2. **A failed trade survives a restart.** With the trade from step 1 at
-   "Failed", close NinjaTrader. Restore the real endpoint, start NT, and
-   click Retry. It should be sent once, and appear once in the journal.
-3. **A rejected token.** In Settings, paste a made-up token and Save. Submit a
+1. **A failed trade survives a restart.** Point the endpoint at an address
+   that doesn't answer, for example `https://localhost:9/api/v1/trades`. Take
+   a trade and Submit, and let it reach "Failed". Close NinjaTrader, restore
+   the real endpoint, start NT, and click Retry. It should be sent once, and
+   appear once in the journal.
+2. **A rejected token.** In Settings, paste a made-up token and Save. Submit a
    trade. The status line should say the token was rejected, without showing
    it. Generate a real token, save it, click Retry, and it should send.
-4. *(Optional)* **A reversal:** reverse a position in one order. The journal
+3. *(Optional)* **A reversal:** reverse a position in one order. The journal
    should get two trades, with the flipping fill split between them.
-5. *(Optional, live Rithmic only)* **Fees:** after a live trade, compare the
-   journal's commission and fees with NT8's Executions tab. This settles the
+4. *(Optional, live Rithmic only)* **Fees:** NT8 reports two charges per
+   fill. `Commission` comes from the account's commission template, which is
+   why Sim and Playback trades show commission. `Fee` is for exchange and
+   regulatory fees, and Sim and Playback leave it at 0. After a live trade,
+   compare the journal's commission and fees with NT8's Executions tab, to see
+   whether Rithmic reports exchange fees in `Fee` or folds them into
+   `Commission`. Net P&L is right either way. This settles the
    `performance.fees` **(verify)** above.
 
 ## Spike to Verify
