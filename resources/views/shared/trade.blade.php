@@ -1,5 +1,5 @@
 {{--
-    Shared-trade page. Receives only plain arrays ($trade, $screenshots, $entryImage,
+    Shared-trade page. Receives only plain arrays ($trade, $images,
     $notes, $comments) built by SharedTradeController — no models.
 --}}
 @php
@@ -27,28 +27,12 @@
         </dl>
     </section>
 
-    {{-- ── Screenshots ── --}}
-    @foreach ($screenshots as $i => $shot)
-        <figure class="{{ $card }} mt-4 overflow-hidden" style="position:relative">
-            <img src="{{ $shot['url'] }}" alt="{{ $shot['caption'] ?? 'Trade screenshot' }}" class="w-full">
-            <button type="button" onclick="document.getElementById('chart-image-{{ $i }}').showModal()"
-                title="Expand image" aria-label="Expand image"
-                class="text-gray-300 hover:text-white" style="position:absolute;top:0.5rem;right:0.5rem;padding:0.375rem;border-radius:0.25rem;background:rgba(0,0,0,0.65);border:none;cursor:pointer;line-height:0">
-                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
-                </svg>
-            </button>
-            <x-image-dialog :id="'chart-image-'.$i" :url="$shot['url']" :alt="$shot['caption'] ?? 'Trade screenshot'" />
-            @if ($shot['caption'])
-                <figcaption class="px-4 py-2 text-xs text-gray-600 dark:text-gray-400">{{ $shot['caption'] }}</figcaption>
-            @endif
-        </figure>
-    @endforeach
-
-    @if ($entryImage)
-        <div class="mt-1">
-            <x-entry-image :id="$entryImage['id']" :url="$entryImage['url']" />
-        </div>
+    {{-- ── Chart images: named links, each opening its image in a modal (#91) ── --}}
+    @if ($images)
+        <section class="mt-4">
+            <h2 class="{{ $label }} mb-2">Chart</h2>
+            <x-chart-image-links :images="$images" />
+        </section>
     @endif
 
     {{-- ── Trader's notes ── --}}
