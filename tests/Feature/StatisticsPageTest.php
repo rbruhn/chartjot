@@ -242,3 +242,42 @@ test('equity curve flags accounts with no starting balance', function () {
 
     expect(statsComponent($user, $journal)->instance()->equity['missing_balance'])->toBe(1);
 });
+
+// ---------------------------------------------------------------------------
+// Copier masters and followers (#79): each setup counts once
+// ---------------------------------------------------------------------------
+
+test('statistics count a master and its followers as one trade', function () {
+    [$user, $journal] = statsPageUser();
+    $master = statsPageTrade(statsAccount($journal), 100, '2026-03-02 14:00:00');
+    statsPageTrade(statsAccount($journal), 10, '2026-03-02 14:00:00')->forceFill(['master_trade_id' => $master->id])->save();
+    statsPageTrade(statsAccount($journal), 100, '2026-03-02 14:00:00')->forceFill(['master_trade_id' => $master->id])->save();
+
+    $s = statsComponent($user, $journal)->instance()->stats->summary();
+
+    expect($s['total'])->toBe(1)->and($s['wins'])->toBe(1)->and($s['net_pnl'])->toBe(100.0);
+});
+
+test('statistics for a follower account count its own trades', function () {
+    [$user, $journal] = statsPageUser();
+    $master   = statsPageTrade(statsAccount($journal), 100, '2026-03-02 14:00:00');
+    $follower = statsPageTrade(statsAccount($journal), 10, '2026-03-02 14:00:00');
+    $follower->forceFill(['master_trade_id' => $master->id])->save();
+
+    $s = statsComponent($user, $journal)->set('selectedAccountIds', [$follower->account_id])->instance()->stats->summary();
+
+    expect($s['total'])->toBe(1)->and($s['net_pnl'])->toBe(10.0);
+});
+
+test('the equity curve still includes follower accounts own P&L', function () {
+    [$user, $journal] = statsPageUser();
+    $masterAccount   = statsAccount($journal, ['starting_balance' => 50000]);
+    $followerAccount = statsAccount($journal, ['starting_balance' => 50000]);
+    $master = statsPageTrade($masterAccount, 100, '2026-03-02 14:00:00');
+    statsPageTrade($followerAccount, 10, '2026-03-02 14:00:00')->forceFill(['master_trade_id' => $master->id])->save();
+
+    $equity = statsComponent($user, $journal)->instance()->equity;
+
+    // A balance is money in the accounts: both accounts' P&L, not one per setup.
+    expect($equity['points']->pluck('balance', 'date')->all())->toBe(['2026-03-02' => 100110.0]);
+});

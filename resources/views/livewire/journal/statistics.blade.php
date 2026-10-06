@@ -45,9 +45,24 @@ new class extends Component {
             : $this->accounts->whereIn('id', $this->selectedAccountIds)->values();
     }
 
-    /** One query for the whole page; every statistic is derived from this Collection. */
+    /**
+     * One query for the whole page; every trade statistic is derived from this Collection. A copier master and its
+     * followers count once, as the master (#79); see Trade::scopeCountedOnce for an account selection.
+     */
     #[Computed]
     public function trades(): Collection
+    {
+        return $this->selectedTradesQuery()->countedOnce($this->selectedAccountIds)->get();
+    }
+
+    /** Every trade of the selected accounts, followers included: the balance curve is the money in those accounts (#79). */
+    #[Computed]
+    public function accountTrades(): Collection
+    {
+        return $this->selectedTradesQuery()->get();
+    }
+
+    private function selectedTradesQuery()
     {
         return $this->journal->trades()
             ->with(['account.journal', 'legs'])
@@ -57,8 +72,7 @@ new class extends Component {
                 ? $q->whereRaw('0 = 1')
                 : $q->whereIn('account_id', $this->selectedAccountIds)
             )
-            ->orderBy('entry_at')
-            ->get();
+            ->orderBy('entry_at');
     }
 
     #[Computed]
@@ -103,7 +117,7 @@ new class extends Component {
 
         return [
             'opening'         => round($opening, 2),
-            'points'          => TradeStatistics::equityCurve($opening, $flows->values(), $this->stats->daily()),
+            'points'          => TradeStatistics::equityCurve($opening, $flows->values(), (new TradeStatistics($this->accountTrades))->daily()),
             'missing_balance' => $accounts->whereNull('starting_balance')->count(),
         ];
     }

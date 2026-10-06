@@ -18,7 +18,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 #[Fillable([
-    'uuid', 'journal_id', 'account_id', 'source_trade_id', 'source', 'addon_version',
+    'uuid', 'journal_id', 'account_id', 'source_trade_id', 'copier_master_source_trade_id', 'source', 'addon_version',
     'trade_type', 'trade_type_other', 'instrument', 'instrument_symbol',
     'tick_size', 'point_value', 'direction', 'quantity', 'total_entry_quantity',
     'entry_at', 'exit_at', 'entry_price', 'exit_price', 'stop_price',
@@ -114,6 +114,37 @@ class Trade extends BaseModel
     public function entryScreenshot(): HasOne
     {
         return $this->hasOne(TradeScreenshot::class)->where('kind', ScreenshotKind::Entry)->latest('id');
+    }
+
+    /** #79: the copier master this follower copied, in the same journal. Null for a master or a normal trade. */
+    public function master(): BelongsTo
+    {
+        return $this->belongsTo(Trade::class, 'master_trade_id');
+    }
+
+    /** #79: the copier followers of this master. A trade with followers is a master. */
+    public function followers(): HasMany
+    {
+        return $this->hasMany(Trade::class, 'master_trade_id')->orderBy('entry_at');
+    }
+
+    /**
+     * #79: the trades a list or a statistic counts once per setup. With no account selection, masters and normal
+     * trades (a follower is shown under its master). With a selection, every selected trade except a follower whose
+     * master is also selected, so filtering to a follower account shows its own trades with its own P&L.
+     *
+     * @param  array<int>|null  $accountIds
+     */
+    public function scopeCountedOnce($query, ?array $accountIds = null): void
+    {
+        if ($accountIds === null) {
+            $query->whereNull('master_trade_id');
+
+            return;
+        }
+
+        $query->where(fn ($q) => $q->whereNull('master_trade_id')
+            ->orWhereHas('master', fn ($m) => $m->whereNotIn('account_id', $accountIds)));
     }
 
     public function notes(): HasMany

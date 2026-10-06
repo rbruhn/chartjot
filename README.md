@@ -151,6 +151,19 @@ own setup and matched to the master trade by market (ES/MES, NQ/MNQ, …),
 direction (opposite for a fade) and entry time. If the copier didn't copy a
 trade, only the master is sent.
 
+Each follower also names its master trade (`copier_master_trade_id`), so the
+journal links them:
+
+- **The list** shows the master with a **Followers (N)** link. It expands to
+  the follower trades, indented under it, and each one opens like any trade.
+- **The trade page** labels the account **Master** or **Follower**.
+- **The summary strip and Statistics** count a master and its followers as
+  one trade, the master's. The Statistics balance curve still adds every
+  account's own P&L, since it is the money in those accounts.
+- **Filtering to a follower account** shows its trades as normal rows with
+  their own P&L. With several accounts selected, a follower is listed on its
+  own unless its master's account is also selected.
+
 ### Sending, retries and stuck trades
 
 - **Two holding areas**, both saved in `{Data folder}\state.json` so nothing is
