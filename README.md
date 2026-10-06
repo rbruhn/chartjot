@@ -157,12 +157,15 @@ journal links them:
 - **The list** shows the master with a **Followers (N)** link. It expands to
   the follower trades, indented under it, and each one opens like any trade.
 - **The trade page** labels the account **Master** or **Follower**.
-- **The summary strip and Statistics** count a master and its followers as
-  one trade, the master's. The Statistics balance curve still adds every
-  account's own P&L, since it is the money in those accounts.
-- **Filtering to a follower account** shows its trades as normal rows with
-  their own P&L. With several accounts selected, a follower is listed on its
-  own unless its master's account is also selected.
+- **Totals** (the summary strip, each day's header, the Overview and
+  Statistics) add every trade of the selected accounts, followers included.
+  To see one account on its own, select only that account.
+- **Expanding a master** always lists all of its followers, even ones whose
+  account isn't selected, so any of them can be opened. Those unselected
+  followers aren't in the totals.
+- **Filtering to a follower account** shows its trades as normal rows. With
+  several accounts selected, a follower is listed on its own unless its
+  master's account is also selected.
 
 ### Sending, retries and stuck trades
 

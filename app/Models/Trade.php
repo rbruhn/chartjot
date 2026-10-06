@@ -129,13 +129,14 @@ class Trade extends BaseModel
     }
 
     /**
-     * #79: the trades a list or a statistic counts once per setup. With no account selection, masters and normal
-     * trades (a follower is shown under its master). With a selection, every selected trade except a follower whose
-     * master is also selected, so filtering to a follower account shows its own trades with its own P&L.
+     * #79: the journal list's rows. A follower is grouped under its master, so with no account selection the rows
+     * are masters and normal trades. With a selection, every selected trade except a follower whose master is also
+     * selected, so filtering to a follower account shows its own trades as rows. Totals are not limited by this:
+     * they add every trade of the selected accounts.
      *
      * @param  array<int>|null  $accountIds
      */
-    public function scopeCountedOnce($query, ?array $accountIds = null): void
+    public function scopeListedRows($query, ?array $accountIds = null): void
     {
         if ($accountIds === null) {
             $query->whereNull('master_trade_id');

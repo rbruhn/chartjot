@@ -116,7 +116,7 @@ new class extends Component {
     public function trades(): Collection
     {
         return $this->journal->trades()
-            ->with(['account.journal', 'notes', 'screenshot', 'followers.account.journal'])
+            ->with(['account.journal', 'notes', 'screenshot', 'followers.account.journal', 'followers.notes'])
             ->withCount([
                 'comments',
                 'followers',
@@ -144,8 +144,8 @@ new class extends Component {
                 ? $q->whereRaw('0 = 1')
                 : $q->whereIn('account_id', $this->selectedAccountIds)
             )
-            // #79: a follower is listed under its master, so each setup counts once in the list and the summary
-            ->countedOnce($this->selectedAccountIds)
+            // #79: a follower is listed under its master; totals add it back in (totalledTrades)
+            ->listedRows($this->selectedAccountIds)
             ->when($this->needsNote, fn ($q) => $q->doesntHave('notes'))
             ->orderBy('entry_at', 'desc')
             ->get();
@@ -157,10 +157,27 @@ new class extends Component {
         return $this->trades->groupBy(fn (Trade $t) => $t->entry_at_local->format('Y-m-d'));
     }
 
+    /**
+     * #79: the listed rows plus the copier followers under them whose accounts are selected (all, with no
+     * selection). Totals add every trade of the selected accounts; the list only groups followers under their master.
+     */
+    public function withSelectedFollowers(Collection $rows): Collection
+    {
+        return $rows->flatMap(fn (Trade $t) => collect([$t])->concat($this->selectedAccountIds === null
+            ? $t->followers
+            : $t->followers->whereIn('account_id', $this->selectedAccountIds)));
+    }
+
+    #[Computed]
+    public function totalledTrades(): Collection
+    {
+        return $this->withSelectedFollowers($this->trades);
+    }
+
     #[Computed]
     public function summary(): array
     {
-        $trades = $this->trades;
+        $trades = $this->totalledTrades;
         $total  = $trades->count();
         if ($total === 0) {
             return ['total' => 0, 'net_pnl' => 0.0, 'win_rate' => 0, 'avg_win_pts' => 0.0, 'avg_loss_pts' => 0.0, 'journaled' => 0];
@@ -731,14 +748,15 @@ new class extends Component {
             @else
                 @foreach($this->grouped as $date => $dayTrades)
                     @php
-                        $dayPnl   = $dayTrades->sum(fn($t) => (float) $t->net_pnl);
+                        $dayTotals = $this->withSelectedFollowers($dayTrades);
+                        $dayPnl   = $dayTotals->sum(fn($t) => (float) $t->net_pnl);
                         $dayLabel = strtoupper(\Carbon\Carbon::parse($date)->format('D M j, Y'));
                     @endphp
                     {{-- Date header --}}
                     <div class="sticky top-0 z-10 flex justify-between items-center px-4 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-xs font-semibold text-gray-500 dark:text-gray-400 tracking-wide">
                         <span>{{ $dayLabel }}</span>
                         <span class="font-normal {{ $dayPnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400' }}">
-                            {{ $dayTrades->count() }} trade{{ $dayTrades->count() !== 1 ? 's' : '' }}
+                            {{ $dayTotals->count() }} trade{{ $dayTotals->count() !== 1 ? 's' : '' }}
                             &middot; {{ $this->pnlDisplay($dayPnl) }}
                         </span>
                     </div>
@@ -1528,7 +1546,7 @@ new class extends Component {
 
                         <div class="grid grid-cols-2 gap-4 mb-6">
                             @php
-                                $trades = $this->trades;
+                                $trades = $this->totalledTrades;
                                 $winners = $trades->filter(fn($t) => (float)$t->net_pnl > 0);
                                 $losers  = $trades->filter(fn($t) => (float)$t->net_pnl < 0);
                                 $grossWin  = $winners->sum(fn($t) => (float)$t->gross_pnl);
