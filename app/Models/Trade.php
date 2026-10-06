@@ -6,6 +6,7 @@ use App\Casts\UtcDatetime;
 use App\Enums\Direction;
 use App\Enums\ExitReason;
 use App\Enums\ScreenshotKind;
+use App\Enums\ScreenshotSource;
 use App\Enums\TradeType;
 use Database\Factories\TradeFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -15,6 +16,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
 #[Fillable([
@@ -104,10 +106,33 @@ class Trade extends BaseModel
         return $this->hasMany(TradeScreenshot::class);
     }
 
-    /** The chart images shown inline: the AddOn's exit image and any manual uploads. */
-    public function exitScreenshots(): HasMany
+    /**
+     * The trade's chart images as named links (#91), in display order: the entry image, the AddOn's exit image,
+     * then the trader's uploads oldest first. An upload is labelled by the name the trader gave it (its caption);
+     * unnamed uploads are "Image 1", "Image 2", ... Uses the loaded `screenshots` relation when present.
+     *
+     * @return Collection<int, array{screenshot: TradeScreenshot, label: string}>
+     */
+    public function chartImages(): Collection
     {
-        return $this->hasMany(TradeScreenshot::class)->where('kind', ScreenshotKind::Exit)->oldest();
+        $shots = $this->screenshots->sortBy('id')->values();
+
+        $entry   = $shots->filter(fn (TradeScreenshot $s) => $s->kind === ScreenshotKind::Entry);
+        $uploads = $shots->filter(fn (TradeScreenshot $s) => $s->kind === ScreenshotKind::Exit && $s->source === ScreenshotSource::ManualUpload);
+        $exit    = $shots->filter(fn (TradeScreenshot $s) => $s->kind === ScreenshotKind::Exit && $s->source !== ScreenshotSource::ManualUpload);
+
+        $numbered = fn (string $label, int $i) => $i === 0 ? $label : $label.' '.($i + 1);
+        $unnamed  = 0;
+
+        return collect()
+            ->concat($entry->values()->map(fn ($s, $i) => ['screenshot' => $s, 'label' => $numbered('Entry Image', $i)]))
+            ->concat($exit->values()->map(fn ($s, $i) => ['screenshot' => $s, 'label' => $numbered('Exit Image', $i)]))
+            ->concat($uploads->values()->map(function (TradeScreenshot $s) use (&$unnamed) {
+                $name = trim((string) $s->caption);
+
+                return ['screenshot' => $s, 'label' => $name !== '' ? $name : 'Image '.(++$unnamed)];
+            }))
+            ->values();
     }
 
     /** The image captured when the trade opened (#72), shown only through the "Entry Image" link. */
