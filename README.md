@@ -121,6 +121,26 @@ journal. Switching back needs a token from the real journal again.
 - **Where they're saved**: `{Data folder}\images\{trade_id}.png` and
   `{trade_id}-entry.png`. They're kept after the trade is sent.
 
+### Stop price
+
+The AddOn records the stop you were actually risking, read-only (it never
+places, moves or cancels orders):
+
+- **What counts.** Your ATM's stop is recorded while it's on the **losing
+  side** of your average entry. The ATM places one stop per target (Stop1,
+  Stop2) at the same price. If you tighten or loosen either one while it's
+  still at risk, that move is the new stop.
+- **What doesn't.** Once the stop moves to breakeven or into profit (after
+  Target 1, a trail, or by hand), it stops updating. Example: long 7700, ATM
+  stop 7696, loosened to 7694, later moved to breakeven: the trade records
+  7694.
+- **Sent with the trade.** It's sent as `stop_price` and shown on the trade
+  page, where you can still correct or add it.
+- **No stop at risk:** nothing is sent.
+- **Followers** record their own stop order when the copier is in Orders
+  mode. In Executions mode (fills only, no stop orders) they take the
+  master's stop price.
+
 ### Copier followers
 
 When the Affordable Indicators copier is on a chart, Submit also sends each

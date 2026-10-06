@@ -64,6 +64,9 @@ namespace ChartJot.Core
 		// Chart images (#52) of trades not staged yet (open, or closed and waiting to be staged), by trade_id.
 		private readonly Dictionary<string, TradeImages> captures = new Dictionary<string, TradeImages>();
 
+		// #53: the last at-risk stop price of trades not staged yet, by trade_id.
+		private readonly Dictionary<string, decimal> stops = new Dictionary<string, decimal>();
+
 		public AddonState(TimeSpan? initialBackoff = null, TimeSpan? maxBackoff = null)
 			: this(new PendingNotes(), new StagedTrades(), new DeliveryQueue(initialBackoff, maxBackoff))
 		{
@@ -155,7 +158,8 @@ namespace ChartJot.Core
 				throw new InvalidOperationException("Trade " + tradeId + " is not waiting to be staged.");
 
 			TradeImages images = ImagesFor(tradeId);
-			StagedTrade staged = new StagedTrade { Trade = trade, Notes = NotesFor(tradeId), StagedAt = stagedAt, Screenshot = images.Exit, EntryScreenshot = images.Entry };
+			StagedTrade staged = new StagedTrade { Trade = trade, Notes = NotesFor(tradeId), StagedAt = stagedAt, Screenshot = images.Exit, EntryScreenshot = images.Entry,
+				StopPrice = StopFor(tradeId) };
 			Staged.Add(staged);
 			Forget(tradeId);
 			return staged;
@@ -174,6 +178,7 @@ namespace ChartJot.Core
 			tradeNotes.Remove(tradeId);
 			records.Remove(tradeId);
 			captures.Remove(tradeId);
+			stops.Remove(tradeId);
 		}
 
 		/// <summary>
@@ -396,9 +401,16 @@ namespace ChartJot.Core
 					string masterId = masterOf == null ? null : masterOf(trade.TradeId);
 					TradeImages images;
 					if (masterId == null || !masterImages.TryGetValue(masterId, out images))
-						images = masterImages[masters[0].TradeId];
+					{
+						masterId = masters[0].TradeId;
+						images = masterImages[masterId];
+					}
 					staged.Screenshot = Copy(images.Exit);
 					staged.EntryScreenshot = Copy(images.Entry);
+					// #53: a follower keeps its own stop (copier Orders mode copies the stop order); without one
+					// (Executions mode copies fills only) it takes its master's.
+					if (!staged.StopPrice.HasValue)
+						staged.StopPrice = StopFor(masterId);
 				}
 				staged.Notes = string.IsNullOrWhiteSpace(form.Body)
 					? new List<NoteRecord>()
@@ -529,6 +541,44 @@ namespace ChartJot.Core
 		private static ScreenshotMeta Copy(ScreenshotMeta meta)
 		{
 			return meta == null ? null : new ScreenshotMeta { CapturedAt = meta.CapturedAt, Caption = meta.Caption, Format = meta.Format };
+		}
+
+		// ---- stop price (#53)
+
+		/// <summary>
+		/// The open position's protective stop is now at <paramref name="stopPrice"/>. It is recorded only while it is
+		/// on the losing side of the trade's average entry (below it for a long, above it for a short): the ATM's
+		/// stop, then any tightening or loosening by hand. A stop at breakeven or in profit (moved after Target 1, a
+		/// trail, or by hand) is ignored, so the trade keeps the last stop it was actually risking. False when there
+		/// is no open trade on that account/instrument or the stop is not at risk.
+		/// </summary>
+		public bool RecordStop(string account, string instrumentFullName, decimal stopPrice)
+		{
+			OpenTradeInfo open = FindOpen(account, instrumentFullName);
+			if (open == null)
+				return false;
+
+			List<TradeFill> entries = open.Fills.Where(f => f.Role == FillRole.Entry && f.AllocatedQuantity > 0).ToList();
+			if (entries.Count == 0)
+				return false;
+			decimal averageEntry = entries.Sum(f => f.Fill.Price * f.AllocatedQuantity) / entries.Sum(f => (decimal)f.AllocatedQuantity);
+
+			bool atRisk = open.Direction == Direction.Long ? stopPrice < averageEntry : stopPrice > averageEntry;
+			if (!atRisk)
+				return false;
+
+			stops[open.TradeId] = stopPrice;
+			return true;
+		}
+
+		/// <summary>The trade's recorded stop price (open, waiting, or staged), or null when it has none.</summary>
+		public decimal? StopFor(string tradeId)
+		{
+			StagedTrade staged = Staged.Find(tradeId);
+			if (staged != null)
+				return staged.StopPrice;
+			decimal stop;
+			return stops.TryGetValue(tradeId, out stop) ? stop : (decimal?)null;
 		}
 
 		// ---- submission
@@ -768,6 +818,16 @@ namespace ChartJot.Core
 			}
 			w.EndArray();
 
+			w.Name("stops").BeginArray();
+			foreach (KeyValuePair<string, decimal> entry in stops)
+			{
+				w.BeginObject();
+				w.Property("trade_id", entry.Key);
+				w.Property("stop_price", entry.Value);
+				w.EndObject();
+			}
+			w.EndArray();
+
 			w.Name("forms").BeginArray();
 			foreach (TradeForm form in forms.Values)
 			{
@@ -828,6 +888,13 @@ namespace ChartJot.Core
 
 			foreach (JsonValue item in root["awaiting_stage"].Items)
 				state.RecordClosed(StagedTrades.ReadCompletedTrade(item));
+
+			// Missing in state files written before the stop price was tracked.
+			if (root.Has("stops"))
+			{
+				foreach (JsonValue item in root["stops"].Items)
+					state.stops[item["trade_id"].AsString()] = item["stop_price"].AsDecimal();
+			}
 
 			// Missing in state files written before chart images existed.
 			if (root.Has("captures"))
