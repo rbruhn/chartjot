@@ -177,6 +177,25 @@ namespace ChartJot.Core.Tests
 		}
 
 		[Fact]
+		public void CopierMasterTradeId_IsNullForAMasterOrANormalTrade()
+		{
+			JsonElement root = Parse(PayloadBuilder.Build(WorkedExample(), Info()));
+
+			Assert.Equal(JsonValueKind.Null, root.GetProperty("copier_master_trade_id").ValueKind);
+		}
+
+		[Fact]
+		public void CopierMasterTradeId_IsSentForAFollower()
+		{
+			SubmissionInfo info = Info();
+			info.CopierMasterTradeId = "master-trade-1";
+
+			JsonElement root = Parse(PayloadBuilder.Build(WorkedExample(), info));
+
+			Assert.Equal("master-trade-1", root.GetProperty("copier_master_trade_id").GetString());
+		}
+
+		[Fact]
 		public void AFollowerAccountsTradeIsBuiltLikeAnyOther()
 		{
 			TradeTracker tracker = new TradeTracker();

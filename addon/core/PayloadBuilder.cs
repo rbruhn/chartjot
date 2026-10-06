@@ -110,6 +110,10 @@ namespace ChartJot.Core
 
 		/// <summary>Optional (<see cref="StagedTrade.StopPrice"/>); null is sent as null and never blocks submission.</summary>
 		public decimal? StopPrice { get; set; }
+
+		/// <summary>A copier follower's master trade_id (#79), so the journal can link the two; null for a master or
+		/// a trade with no copier.</summary>
+		public string CopierMasterTradeId { get; set; }
 	}
 
 	/// <summary>Builds the JSON `trade` part of the intake request (NT8.md, Provisional Payload Contract).</summary>
@@ -170,6 +174,7 @@ namespace ChartJot.Core
 			w.EndObject();
 
 			w.Property("stop_price", info.StopPrice.HasValue ? DecimalFormat.Price(info.StopPrice.Value, tick) : null);
+			w.Property("copier_master_trade_id", NullIfBlank(info.CopierMasterTradeId));
 
 			w.Name("legs").BeginArray();
 			foreach (Leg leg in trade.Legs)

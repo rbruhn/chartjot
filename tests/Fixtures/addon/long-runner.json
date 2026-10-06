@@ -43,6 +43,7 @@
     "complete": true
   },
   "stop_price": "7702.50",
+  "copier_master_trade_id": null,
   "legs": [
     {
       "sequence": 1,
