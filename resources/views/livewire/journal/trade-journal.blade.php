@@ -12,6 +12,7 @@ use App\Models\Trade;
 use App\Models\TradeInvitation;
 use App\Models\User;
 use App\Services\TradeCommentPoster;
+use App\Support\TradeStatistics;
 use App\Models\TradeNote;
 use App\Models\TradeScreenshot;
 use Illuminate\Support\Carbon;
@@ -180,18 +181,19 @@ new class extends Component {
         $trades = $this->totalledTrades;
         $total  = $trades->count();
         if ($total === 0) {
-            return ['total' => 0, 'net_pnl' => 0.0, 'win_rate' => 0, 'avg_win_pts' => 0.0, 'avg_loss_pts' => 0.0, 'journaled' => 0];
+            return ['total' => 0, 'net_pnl' => 0.0, 'win_rate' => 0, 'avg_win_pts' => null, 'avg_loss_pts' => null, 'journaled' => 0];
         }
-        $winners   = $trades->filter(fn ($t) => (float) $t->net_pnl > 0);
-        $losers    = $trades->filter(fn ($t) => (float) $t->net_pnl <= 0);
+        // Same rule as the Statistics page: a winner made money; breakeven counts as a loss (#82).
+        [$winners, $losers] = $trades->partition(fn (Trade $t) => TradeStatistics::isWinner($t));
         $journaled = $trades->filter(fn ($t) => $t->notes->isNotEmpty())->count();
 
         return [
             'total'        => $total,
             'net_pnl'      => (float) $trades->sum('net_pnl'),
             'win_rate'     => (int) round($winners->count() / $total * 100),
-            'avg_win_pts'  => $winners->count() > 0 ? (float) $winners->avg('points') : 0.0,
-            'avg_loss_pts' => $losers->count()  > 0 ? -(float) $losers->avg('points') : 0.0,
+            // Null (shown as a dash) when there are no winners or no losers to average (#82).
+            'avg_win_pts'  => $winners->isNotEmpty() ? (float) $winners->avg('points') : null,
+            'avg_loss_pts' => $losers->isNotEmpty() ? -(float) $losers->avg('points') : null,
             'journaled'    => $journaled,
         ];
     }
@@ -697,11 +699,19 @@ new class extends Component {
         </div>
         <div class="flex-1 px-5 py-3 border-r border-gray-200 dark:border-gray-700">
             <div class="text-xs font-semibold text-gray-600 dark:text-gray-500 uppercase tracking-wider">Avg Win</div>
-            <div class="text-2xl font-bold text-green-600 dark:text-green-400 mt-0.5">+{{ number_format($s['avg_win_pts'], 2) }} pt</div>
+            @if($s['avg_win_pts'] === null)
+                <div data-summary-avg-win="none" class="text-2xl font-bold text-gray-400 dark:text-gray-500 mt-0.5">—</div>
+            @else
+                <div class="text-2xl font-bold text-green-600 dark:text-green-400 mt-0.5">+{{ number_format($s['avg_win_pts'], 2) }} pt</div>
+            @endif
         </div>
         <div class="flex-1 px-5 py-3 border-r border-gray-200 dark:border-gray-700">
             <div class="text-xs font-semibold text-gray-600 dark:text-gray-500 uppercase tracking-wider">Avg Loss</div>
-            <div class="text-2xl font-bold text-red-600 dark:text-red-400 mt-0.5">-{{ number_format($s['avg_loss_pts'], 2) }} pt</div>
+            @if($s['avg_loss_pts'] === null)
+                <div data-summary-avg-loss="none" class="text-2xl font-bold text-gray-400 dark:text-gray-500 mt-0.5">—</div>
+            @else
+                <div class="text-2xl font-bold text-red-600 dark:text-red-400 mt-0.5">-{{ number_format($s['avg_loss_pts'], 2) }} pt</div>
+            @endif
         </div>
         <div class="flex-1 px-5 py-3">
             <div class="text-xs font-semibold text-gray-600 dark:text-gray-500 uppercase tracking-wider">Journaled</div>
@@ -1545,8 +1555,7 @@ new class extends Component {
                         <div class="grid grid-cols-2 gap-4 mb-6">
                             @php
                                 $trades = $this->totalledTrades;
-                                $winners = $trades->filter(fn($t) => (float)$t->net_pnl > 0);
-                                $losers  = $trades->filter(fn($t) => (float)$t->net_pnl < 0);
+                                [$winners, $losers] = $trades->partition(fn($t) => \App\Support\TradeStatistics::isWinner($t));
                                 $grossWin  = $winners->sum(fn($t) => (float)$t->gross_pnl);
                                 $grossLoss = abs($losers->sum(fn($t) => (float)$t->gross_pnl));
                                 $pf = $grossLoss > 0 ? round($grossWin / $grossLoss, 2) : null;
@@ -1555,8 +1564,8 @@ new class extends Component {
                             @foreach([
                                 ['Win / Loss', $winners->count() . 'W / ' . $losers->count() . 'L', 'text-gray-900 dark:text-gray-100'],
                                 ['Profit Factor', $pf !== null ? $pf : '—', $pf >= 1 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'],
-                                ['Avg Winner', $winners->count() > 0 ? $this->pnlDisplay((float)$winners->avg('net_pnl')) : '—', 'text-green-600 dark:text-green-400'],
-                                ['Avg Loser',  $losers->count()  > 0 ? $this->pnlDisplay((float)$losers->avg('net_pnl'))  : '—', 'text-red-600 dark:text-red-400'],
+                                ['Avg Winner', $winners->count() > 0 ? $this->pnlDisplay((float)$winners->avg('net_pnl')) : '—', $winners->count() > 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'],
+                                ['Avg Loser',  $losers->count()  > 0 ? $this->pnlDisplay((float)$losers->avg('net_pnl'))  : '—', $losers->count()  > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-gray-500'],
                                 ['Expectancy', $this->pnlDisplay($expectancy) . '/trade', $expectancy >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'],
                                 ['Journaled', $s['journaled'] . ' / ' . $s['total'] . ' trades', $s['journaled'] === $s['total'] ? 'text-green-600 dark:text-green-400' : 'text-yellow-600 dark:text-yellow-400'],
                             ] as [$label, $value, $color])
