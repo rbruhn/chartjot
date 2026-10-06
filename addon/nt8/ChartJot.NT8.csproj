@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Builds ChartJot.dll: the NT8 AddOn (ChartJot.cs) and addon/core compiled into one assembly, the way vendors ship
+    add-ons (#88). NinjaTrader imports it as a NinjaScript assembly, and Tools > Remove NinjaScript Assembly removes
+    it in one step.
+
+    It compiles against what NinjaTrader itself uses: the real .NET Framework runtime assemblies (all version
+    4.0.0.0; the net471+ reference packs say System.Net.Http 4.2.0.0, which NinjaScript rejects with CS1705) and
+    NinjaTrader's own DLLs. Those are installed only on a Windows PC with NinjaTrader 8, so this builds there (from
+    WSL by default), never on GitHub's runners. addon/package.sh drives it.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>Library</OutputType>
+    <AssemblyName>ChartJot</AssemblyName>
+    <RootNamespace>NinjaTrader.NinjaScript.AddOns</RootNamespace>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <Product>Chart Jot</Product>
+    <AssemblyTitle>Chart Jot NinjaTrader 8 AddOn</AssemblyTitle>
+    <Version>$(AddonVersion)</Version>
+    <Deterministic>true</Deterministic>
+    <DebugType>none</DebugType>
+
+    <!-- Exactly the references below; no SDK reference packs, facades or netstandard. -->
+    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
+    <ImplicitlyExpandNETStandardFacades>false</ImplicitlyExpandNETStandardFacades>
+    <ImplicitlyExpandDesignTimeFacades>false</ImplicitlyExpandDesignTimeFacades>
+    <AutoUnifyAssemblyReferences>false</AutoUnifyAssemblyReferences>
+    <NoStdLib>true</NoStdLib>
+
+    <WindowsDir Condition="'$(WindowsDir)' == ''">/mnt/c/Windows</WindowsDir>
+    <NT8Bin Condition="'$(NT8Bin)' == ''">/mnt/c/Program Files/NinjaTrader 8/bin</NT8Bin>
+    <FrameworkPathOverride>$(WindowsDir)/Microsoft.NET/Framework64/v4.0.30319</FrameworkPathOverride>
+    <Fx>$(WindowsDir)/Microsoft.NET/Framework64/v4.0.30319</Fx>
+    <Wpf>$(WindowsDir)/Microsoft.NET/Framework/v4.0.30319/WPF</Wpf>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="ChartJot.cs" />
+    <Compile Include="../core/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="$(Fx)/mscorlib.dll" Private="false" />
+    <Reference Include="$(Fx)/System.dll" Private="false" />
+    <Reference Include="$(Fx)/System.Core.dll" Private="false" />
+    <Reference Include="$(Fx)/System.Net.Http.dll" Private="false" />
+    <Reference Include="$(Fx)/System.Web.Extensions.dll" Private="false" />
+    <Reference Include="$(Fx)/System.Xaml.dll" Private="false" />
+    <Reference Include="$(Fx)/System.Xml.dll" Private="false" />
+    <Reference Include="$(Wpf)/WindowsBase.dll" Private="false" />
+    <Reference Include="$(Wpf)/PresentationCore.dll" Private="false" />
+    <Reference Include="$(Wpf)/PresentationFramework.dll" Private="false" />
+    <Reference Include="$(NT8Bin)/NinjaTrader.Core.dll" Private="false" />
+    <Reference Include="$(NT8Bin)/NinjaTrader.Gui.dll" Private="false" />
+  </ItemGroup>
+</Project>

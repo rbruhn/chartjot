@@ -35,29 +35,83 @@ specification and [`WEB.md`](WEB.md) for the web application reference
 (routes, data model, Livewire components, and key implementation notes).
 
 - `addon/core/`: plain C# (no NinjaTrader types). This is where trade tracking,
-  payloads, the delivery queue, the form and follower rules live. It builds
-  `ChartJot.Core.dll`.
+  payloads, the delivery queue, the form and follower rules live.
 - `addon/nt8/ChartJot.cs`: the NinjaScript AddOn. It covers NT8 events, the
   chart form, settings, chart images and the background sender.
+- `addon/nt8/ChartJot.NT8.csproj`: compiles both into **`ChartJot.dll`**, the
+  one file NinjaTrader loads, the way vendors ship add-ons.
 - `addon/tests/`: unit tests for `addon/core`.
 
 ### Installing or updating
 
-1. **Close NinjaTrader.** It locks `ChartJot.Core.dll` while running, so the
-   copy fails. A new `ChartJot.cs` with an old DLL shows compile errors such as
-   "`TradeImages` could not be found".
-2. Build the DLL: `dotnet build addon/core`.
-3. Copy `addon/core/bin/Debug/netstandard2.0/ChartJot.Core.dll` to
-   `Documents\NinjaTrader 8\bin\Custom\`.
-4. Copy `addon/nt8/ChartJot.cs` to `Documents\NinjaTrader 8\bin\Custom\AddOns\`.
-5. Start NinjaTrader, open the NinjaScript Editor and press **F5**. Reopen
-   charts (or restart) so they get the Chart Jot button.
+Each GitHub Release that changed the AddOn has it attached as
+`ChartJot-AddOn-<version>.zip`, a NinjaScript archive holding `ChartJot.dll`
+and `Info.xml`.
 
-If only `ChartJot.cs` changed, NinjaTrader can stay open: copy it and press
-F5. The NinjaScript Editor's **References** must include `ChartJot.Core.dll`
-and `netstandard.dll` (one-time setup; see NT8.md, "Platform and
-Architecture Constraints"). Any compile error in another script, for example
-a strategy, blocks every script, including Chart Jot.
+In NinjaTrader's Control Center, go to **Tools → Import → NinjaScript…**,
+pick the zip and click **Import**. NinjaTrader installs `ChartJot.dll` and
+lists Chart Jot among its vendor assemblies. Reopen charts (or restart) so
+they get the Chart Jot button. There are no references to add and nothing to
+compile.
+
+**Coming from a version before #88** (`ChartJot.cs` plus `ChartJot.Core.dll`):
+remove that first, or NinjaTrader gets two copies of Chart Jot.
+
+1. In the NinjaScript Editor, delete **ChartJot** under **AddOns** and let it
+   compile.
+2. **Tools → Remove NinjaScript Assembly → ChartJot.Core**, then restart
+   NinjaTrader. Also remove a leftover **netstandard** reference in the
+   NinjaScript Editor's **References**, if there is one.
+3. Import the zip.
+
+### Uninstalling
+
+**Tools → Remove NinjaScript Assembly → ChartJot**, then restart NinjaTrader.
+Your settings, state and images in `%USERPROFILE%\ChartJot\` are left alone.
+
+Don't delete `ChartJot.dll` in Windows Explorer instead. NinjaTrader's last
+compiled build references it, and without it NinjaTrader won't start. If that
+happens, put the DLL back in `bin\Custom`, start NinjaTrader, and use Remove
+NinjaScript Assembly.
+
+### Building the package
+
+`ChartJot.dll` compiles against NinjaTrader's own DLLs and the real .NET
+Framework assemblies in `C:\Windows\Microsoft.NET`. Only a Windows PC with
+NinjaTrader 8 has those, so the package is built there, from WSL, never on
+GitHub:
+
+```bash
+addon/package.sh
+```
+
+This writes `addon/dist/ChartJot-AddOn-<version>.zip`, with the version from
+`AddonVersion` in `ChartJot.cs`. Before zipping, it checks the DLL with
+Windows' own .NET:
+
+- **Framework references must be version 4.0.0.0.** NinjaScript compiles
+  against those, and a newer `System.Net.Http` breaks every script's compile.
+- **No `netstandard` reference.**
+- **The DLL's version must match `AddonVersion`.**
+
+**Releasing.** Merging to `main` creates the GitHub Release. When the AddOn
+changed, the release notes say so. Then attach the package from the release's
+commit:
+
+```bash
+git checkout <release-tag>
+addon/release.sh <release-tag>
+git checkout development
+```
+
+`release.sh` refuses unless the checkout is exactly the release's commit with
+no local changes. It skips the upload if `addon/core` and `addon/nt8` didn't
+change since the previous release (use `--force` to attach anyway).
+
+**For development**, close NinjaTrader and copy
+`addon/nt8/bin/package/ChartJot.dll` (left by `package.sh`) over the one in
+`Documents\NinjaTrader 8\bin\Custom\`, then start NinjaTrader. It's locked
+while NinjaTrader runs. Or import the zip.
 
 ### First-time setup
 
