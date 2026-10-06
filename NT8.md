@@ -89,9 +89,10 @@ time.
   trade (see `executions[].allocated_quantity`).
 - Keep trade state separate by account and instrument. A close in one
   instrument must never complete notes or executions belonging to another.
-- Every connected account's round turns become journal trades independently;
-  there is no master/follower distinction (the AddOn does not read or match
-  against any trade copier -- see "Housekeeping" in `NT.md`).
+- Every account's round turns are tracked independently. Only the trades a
+  chart form submits are journaled: the Chart Trader account's, plus each copier
+  follower's own trade, which carries the master's note and type (see "Copier
+  followers").
 - Ignore a fill whose `ExecutionId` has already been processed for that
   account. Reconnects can replay historical executions (verified on Rithmic:
   52 duplicates on reconnect; none on Sim). Treat `ExecutionId` as an opaque
@@ -209,53 +210,67 @@ fills say −2 pt; the excursion shows the trade was +3 pt at its best.
 
 ## Notes
 
-### Note panel
+### Trade form (decided 2026-10-04, #64)
 
-Implement a non-blocking WPF note panel attached to, or floating over, the
-chart. It should have:
+One form per chart, opened from a **Chart Jot** button at the bottom of the
+chart's Chart Trader panel (or, when that panel's layout is not available, at
+the very end of the chart toolbar). It follows that chart's **Chart Trader** account and instrument; there is no
+account or instrument picker. It has:
 
-- A text box with an explicit **Add note** action.
-- A visible active-trade state: account, instrument, direction, quantity, and
-  elapsed time when known.
-- A timeline/list of locally captured notes for the selected trade, with
-  **Edit** and **Delete** for each note until that trade is submitted.
-- A staged-trades list showing every closed trade awaiting review or
-  delivery, with its delivery state.
-- A **Trade type** dropdown in the completed-trade review state. It must be
-  selected before **Submit trade** is enabled.
-- A prominent **Submit trade** action that is enabled only after the position
-  is closed and the trade has been staged for review.
-- A **Recapture** action for the screenshot while the trade is in review.
-- Clear delivery state: pending, sending, sent, queued for retry, or failed.
+- One large note box. The trader writes in it before, during and after the
+  trade; it is the same note throughout. Its text is saved locally as it is
+  typed (never transmitted until Submit) and survives an NT8 restart.
+- A **Trade type** dropdown (see below), with the `Other` description field.
+- **Submit**: enabled once a trade on that account/instrument has closed and a
+  trade type is chosen. It sends the trade(s) that closed there since the form
+  was opened or last submitted/reset (the master) plus each copier follower's own trade (see "Copier followers"), all
+  with the form's note and trade type, then clears the form.
+- **Reset**: clears the note and type for the next idea. If a trade has closed
+  and not been submitted, Reset drops it without journaling it (after a
+  confirmation).
+- One status line about the current trade only: waiting for entry, in trade
+  (direction, size, time open), closed and ready to submit, and, after Submit,
+  "Sending (try 1/3)..." until the journal has it. While it cannot be reached,
+  each try is shown with a countdown ("Try 1/3 failed: the journal can't be
+  reached. Try 2/3 in 4s..."). Then "Sent." for a few seconds, or "Not sent ...
+  Click Retry" once the 3 tries run out. Past submissions are not listed; only a
+  failed one is shown, with **Retry**, because it needs action.
+- A **Settings** button that opens Chart Jot Settings (the only way in; there
+  is no Control Center menu item).
 
-Do not continuously transmit every keystroke. A note becomes a timestamped
-record when the trader explicitly saves it. If there is no active trade, retain
-the note as a pending `pre_trade` note for the next qualifying trade on that
-chart/account.
+The form only cares about trades that close after it is first opened in an NT
+session, or after its last Submit/Reset (decided 2026-10-05). The AddOn still
+tracks every account's fills (it needs them for followers), but trades taken
+before the form was opened are never offered, warned about, or sent; the 24-hour
+prune drops them.
 
-### Note targeting
+There is no staged-trades list and no separate pre/in/post-trade notes. The
+note is sent as a single `general` note whose `occurred_at` is when the trader
+started writing it. Closed trades nobody submits within 24 hours of staging are
+dropped locally (they were never journaled).
 
-- While a position is open, a saved note is `in_trade` for that position.
-- While flat with no staged trade, a saved note is a pending `pre_trade` note.
-- While flat with one or more staged trades, the panel shows an explicit
-  target toggle: **Post-trade note for [selected staged trade]** (default)
-  or **Pre-trade note for next trade**.
-- A note is never silently moved to another trade after it is saved. Editing a
-  note keeps its original `occurred_at`.
+### Copier followers (corrected 2026-10-04)
 
-### Note phases
+With the Affordable Indicators trade copier, the **master** is the Chart Trader
+account the form follows. The note, trade type and screenshot are written or
+captured once, on the master, and reused for every follower. Each account,
+master and followers alike, still sends **its own trade data**: instrument,
+entries, exits, legs/targets, P&L and excursion. Each is its own journal trade.
 
-Use these values:
+The AddOn reads the copier's follower list for the master from the copier
+indicator (`aiDuplicateAccountActions`, its `ThisMasterAccount` and
+`AllAccountData`) on any open chart, read-only. A follower's trade is the one
+that matches the vendor-confirmed rules: same market family and contract month
+(ES/MES, NQ/MNQ, YM/MYM, RTY/M2K, CL/MCL, GC/MGC), the master's direction (the
+opposite when the follower fades), and an entry from 5 seconds before the
+master's entry up to 5 seconds after it (Executions mode) or up to the master's
+exit (Orders mode). The earliest such trade per follower is used.
 
-| Phase | Meaning |
-| --- | --- |
-| `pre_trade` | Saved while flat before the associated trade opens |
-| `in_trade` | Saved while the associated position is open |
-| `post_trade` | Saved after the position closed but before the completed trade has been delivered |
-| `general` | A fallback only when a phase cannot be determined |
-
-Every note must include its original local timestamp with offset. Do not
-replace pre-trade notes with a single final text field.
+Each follower's payload names its master trade in `copier_master_trade_id`
+(the master's `trade_id`); the master's own payload, like any trade without a
+copier, sends `null`. The journal links the two within the same journal,
+whichever arrives first, and lists the follower under its master. Totals and
+Statistics still add every trade of the selected accounts (#79).
 
 ### Trade type selector
 
@@ -290,12 +305,32 @@ given moment (a trader using an ATM bracket sometimes moves the stop by hand
 after entry, sometimes doesn't).
 
 Auto-capture it best-effort, read-only (no order placement or modification,
-consistent with every other rule in this document): while a position is
-open, watch `Account.OrderUpdate` for `StopMarket`/`StopLimit` orders on that
-account/instrument, and track the current working stop's price, updating it
-whenever it changes (the trader drags it, or the ATM moves it to breakeven).
-Whatever it is when the trade closes (or `null` if there never was one) is
-the starting value. No cross-account or timing-based correlation is needed
+consistent with every other rule in this document). The trader's ATM places
+one stop order per target (Stop1, Stop2; confirmed in NT8's log 2026-10-05).
+Both start at the same price. The stop is taken from the **most recent actual
+move** of either order: the AddOn remembers each stop order's last price, and
+status updates that don't change it are ignored. After Target 1 fills, its stop
+is cancelled and only the remaining one can move. While a position is open,
+watch `Account.OrderUpdate` (and read `Account.Orders` shortly after the
+entry fill, because the ATM may place its stop before the fill is reported,
+and again after a restart) for that account/instrument's working
+`StopMarket`/`StopLimit` order on the closing side (a sell stop for a long, a
+buy stop for a short).
+
+Record its price **only while it is at risk**, on the losing side of the
+average entry: below it for a long, above it for a short (decided
+2026-10-05). That's the ATM's stop, then any tightening or loosening by hand.
+Once the stop moves to breakeven or into profit (after Target 1, a trail, or
+by hand), it stops updating, so the trade keeps the last stop it was actually
+risking. Example: long 7700 with the ATM stop at 7696, loosened to 7694, later
+moved to 7700 for breakeven: the recorded stop is 7694. A trade that never had
+an at-risk stop sends `null`.
+
+Copier followers: with the copier in **Orders mode**, each follower has its own
+stop order and records it. In **Executions mode** the copier copies fills only,
+so a follower has no stop order; at Submit it then takes its master's stop
+price (decided 2026-10-05). MES and ES quote the same price level, so this
+holds for micro followers too. No cross-account or timing-based correlation is needed
 here, unlike the now-removed copier matching -- it is the same account, same
 instrument, and normally one open position at a time, so "the working stop
 order while this trade's position was open" is unambiguous.
@@ -317,12 +352,12 @@ Capture **two** images per trade, both optional (a capture failure on either
 must never prevent the trader from submitting the trade):
 
 - **Entry screenshot**: captured shortly after the position opens (same short
-  render delay as exit, below, so the entry fill/marker is drawn). Sent to
-  the server with the trade, but the journal web UI is not required to
-  display it on the main trade view -- it exists so the trader can retrieve
-  it later via the API (for example, for outside analysis). No **Recapture**
-  for this one; it is a point-in-time record of what the setup looked like at
-  entry, not something to redo.
+  render delay as exit, below, so the entry fill/marker is drawn), **only when
+  "Entry image" is ticked in Chart Jot Settings** (off by default; decided
+  2026-10-04). Sent as `entry_screenshot_file` with an `entry_screenshot`
+  object (`captured_at`). The journal shows it behind an "Entry Image" link
+  under the exit image (#72). No **Recapture** for this one; it is a
+  point-in-time record of what the setup looked like at entry.
 - **Exit screenshot**: captured after a short render delay (default 1 second
   after flat) so the exit fill and execution markers are drawn. The trader
   can replace it with **Recapture** any time before submission -- this is the
@@ -338,15 +373,23 @@ must never prevent the trader from submitting the trade):
 Both captures use the same originating-chart logic (below) and the same
 threading rules.
 
+Images are written as PNG to `{Data folder}\images\{trade_id}.png` (exit) and
+`{trade_id}-entry.png` (entry). Copier followers send their master's images:
+at Submit the master's files are copied under each follower's trade_id
+(see "Copier followers").
+
 ### Originating chart
 
 The originating chart is chosen in this order:
 
-1. The chart window hosting the note panel whose visible tab shows the trade's
-   instrument.
-2. Otherwise, the most recently active chart window whose visible tab shows
+1. For Recapture, the chart window whose Chart Jot form was used, if its
+   visible tab shows the trade's instrument.
+2. Otherwise, a chart window whose visible tab shows the instrument and whose
+   Chart Trader account is the trade's account.
+3. Otherwise, the most recently active chart window whose visible tab shows
    that instrument.
-3. Otherwise, no screenshot; the trade is staged with "screenshot skipped".
+4. Otherwise, no screenshot; the trade is staged without it (logged as
+   "image skipped").
 
 "Visible tab shows the trade's instrument" is not a visual/title check --
 match on `ChartTab.Instrument` directly (confirmed 2026-09-30, issue #37):
@@ -454,7 +497,14 @@ event handlers, or dispatcher while waiting for an HTTP response.
 - Record the server response and mark the local delivery as sent only after a
   successful response.
 - For timeouts, connection errors, and HTTP `5xx`, retain the exact same
-  staged request data and offer retry with exponential backoff.
+  staged request data and retry automatically with exponential backoff, **up
+  to 3 attempts in all** (decided 2026-10-05: about 5s, then 10s apart). After
+  the third, the delivery is Failed: the form says it could not be sent and
+  offers **Retry**, which sends the same payload again with 3 fresh attempts.
+  Retry covers **every** failed trade, not only the last Submit, and any form
+  shows how many are waiting ("3 trades not sent ... Click Retry"; during a
+  trade, a short note), so a trade can never be left stuck out of sight.
+  The failed payload and its images stay saved across NT8 restarts until then.
 - For HTTP `401` or `403`, stop automatic retries and show a configuration
   error; the trader must correct/replace the intake token.
 - For HTTP `422`, retain the payload, show the validation response, and permit
@@ -606,6 +656,7 @@ contract per side, and ES is $50 per point.
     "complete": true
   },
   "stop_price": "7702.50",
+  "copier_master_trade_id": null,
   "legs": [
     {
       "sequence": 1,
@@ -731,6 +782,7 @@ contract per side, and ES is $50 per point.
 | `performance.net_pnl` | Required: `gross_pnl` − `commission` − `fees` |
 | `excursion` | Required object; values `null` when no price data was observed; `complete` is `false` if the price feed was interrupted |
 | `stop_price` | Optional decimal string; `null` when there was no stop or it is unknown. Never required, never blocks submission |
+| `copier_master_trade_id` | Optional string: a copier follower's master `trade_id`; `null` for a master or a trade without a copier. The journal links the follower to that trade in the same journal |
 | `legs` | Required non-empty array, one per exit order, ordered by `sequence` |
 | `legs[].runner` | `true` when an earlier leg of the same trade had already exited |
 | `legs[].points` / `gross_pnl` | Measured from the trade's average entry price |
@@ -800,17 +852,16 @@ unless verbose diagnostics is enabled, or raw image bytes.
   fill's quantity split via `allocated_quantity`.
 - [ ] Replayed/duplicate execution events do not create duplicate fills or
   trades.
-- [ ] Pre-, in-, and post-trade notes arrive with the correct phase and time.
+- [ ] The form follows the chart's Chart Trader account and instrument, and its
+  note (written before, during and after the trade) arrives as one note.
 - [ ] A closed trade is staged for review and does not post until the trader
   clicks **Submit trade**.
-- [ ] A new trade can be opened, noted, and closed while a previous trade is
-  still awaiting review; the two never share notes.
-- [ ] A user can add, edit, and delete notes after close and before submission.
+- [ ] A copier follower's own trade is sent with the master's note and type.
+- [ ] Reset clears the form; a closed, unsubmitted trade is then not journaled.
 - [ ] A user must select one valid trade type before submission; a
   direction mismatch shows a non-blocking warning.
 - [ ] Selecting `Other` permits an optional custom entry description.
-- [ ] A successful submission clears the note field and starts a fresh
-  pre-trade note buffer.
+- [ ] A successful submission clears the form for the next trade.
 - [ ] A failed submission preserves the staged trade and notes for retry.
 - [ ] A submitted trade posts without a screenshot if screenshot capture fails.
 - [ ] Screenshot capture occurs on the chart dispatcher, includes drawings and

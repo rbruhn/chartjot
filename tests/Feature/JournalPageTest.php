@@ -310,8 +310,46 @@ test('editing a note updates its body', function () {
 });
 
 // ---------------------------------------------------------------------------
-// Stop price (issue #60)
+// Stop price (issue #60), edited in its table cell (#83)
 // ---------------------------------------------------------------------------
+
+test('the table has a STOP PRICE cell and no ACCOUNT cell; the account stays under the title', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['stop_price' => 4512.25]);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->assertSeeHtml('>STOP PRICE</div>')
+        ->assertDontSeeHtml('>ACCOUNT</div>')
+        ->assertSee($trade->account->name)
+        ->assertSee('4,512.25')
+        ->assertSeeHtml('aria-label="Edit stop price"')
+        // The old line under the table is gone.
+        ->assertDontSee('Edit Stop Price');
+});
+
+test('a trade without a stop shows a dash in the cell that adds one', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['stop_price' => null]);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->assertSeeHtml('aria-label="Add stop price"')
+        ->assertDontSee('Add Stop Price');
+});
+
+test('editing shows the input in the cell', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['stop_price' => 4500]);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->call('startEditStopPrice')
+        ->assertSeeHtmlInOrder(['>STOP PRICE</div>', 'id="stop-price-input"', '>TRADE TYPE</div>']);
+});
 
 test('adding a stop price to a trade without one saves it', function () {
     [$user, $journal] = journalUser();
@@ -320,7 +358,7 @@ test('adding a stop price to a trade without one saves it', function () {
     Livewire::actingAs($user)
         ->test('journal.trade-journal', ['journal' => $journal])
         ->call('selectTrade', $trade->uuid)
-        ->assertSee('Add Stop Price')
+        ->assertSeeHtml('aria-label="Add stop price"')
         ->call('startEditStopPrice')
         ->assertSet('editingStopPrice', true)
         ->assertSet('stopPriceForm', '')
@@ -329,7 +367,7 @@ test('adding a stop price to a trade without one saves it', function () {
         ->assertHasNoErrors()
         ->assertSet('editingStopPrice', false)
         ->assertSee('4,512.25')
-        ->assertSee('Edit Stop Price');
+        ->assertSeeHtml('aria-label="Edit stop price"');
 
     expect((float) $trade->fresh()->stop_price)->toBe(4512.25);
 });
@@ -360,7 +398,7 @@ test('saving a blank stop price clears it to null', function () {
         ->set('stopPriceForm', '  ')
         ->call('saveStopPrice')
         ->assertHasNoErrors()
-        ->assertSee('Add Stop Price');
+        ->assertSeeHtml('aria-label="Add stop price"');
 
     expect($trade->fresh()->stop_price)->toBeNull();
 });
@@ -817,4 +855,327 @@ test('cannot delete a trade belonging to another journal', function () {
         ->call('deleteTrade', $otherTrade->uuid);
 
     expect(Trade::find($otherTrade->id))->not->toBeNull();
+});
+
+// ---------------------------------------------------------------------------
+// "Other" trade type description (issue #75)
+// ---------------------------------------------------------------------------
+
+function editTrade(User $user, Journal $journal, Trade $trade)
+{
+    return Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->call('startEditTrade');
+}
+
+test('the trade view shows Other with an info icon holding the description', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['trade_type' => TradeType::Other, 'trade_type_other' => 'breakout retest']);
+
+    $html = Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->assertSeeHtml('aria-label="Other trade type description"')
+        ->html();
+
+    // The description is in the icon's tooltip, not printed after "Other".
+    expect($html)->toMatch('#role="tooltip"[^>]*>\s*breakout retest\s*</span>#')
+        ->and($html)->not->toContain('Other: breakout retest');
+});
+
+test('the trade view shows plain Other when there is no description', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['trade_type' => TradeType::Other, 'trade_type_other' => null]);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->assertSee('Other')
+        ->assertDontSeeHtml('aria-label="Other trade type description"');
+});
+
+test('the Other description is escaped on the trade view', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['trade_type' => TradeType::Other, 'trade_type_other' => '<script>alert(1)</script>']);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->assertSeeHtml('&lt;script&gt;alert(1)&lt;/script&gt;')
+        ->assertDontSeeHtml('<script>alert(1)</script>');
+});
+
+test('startEditTrade prefills the Other description', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['trade_type' => TradeType::Other, 'trade_type_other' => 'news fade']);
+
+    editTrade($user, $journal, $trade)->assertSet('tradeEditForm.trade_type_other', 'news fade');
+});
+
+test('saveTrade stores a trimmed Other description', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['trade_type' => TradeType::SecondEntryLong]);
+
+    editTrade($user, $journal, $trade)
+        ->set('tradeEditForm.trade_type', TradeType::Other->value)
+        ->set('tradeEditForm.trade_type_other', '  opening drive  ')
+        ->call('saveTrade')
+        ->assertHasNoErrors();
+
+    $fresh = $trade->fresh();
+    expect($fresh->trade_type)->toBe(TradeType::Other)
+        ->and($fresh->trade_type_other)->toBe('opening drive');
+});
+
+test('saveTrade clears a blank Other description to null', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['trade_type' => TradeType::Other, 'trade_type_other' => 'old text']);
+
+    editTrade($user, $journal, $trade)
+        ->set('tradeEditForm.trade_type_other', '   ')
+        ->call('saveTrade');
+
+    expect($trade->fresh()->trade_type_other)->toBeNull();
+});
+
+test('saveTrade rejects an Other description longer than 64 characters', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['trade_type' => TradeType::Other, 'trade_type_other' => 'keep me']);
+
+    editTrade($user, $journal, $trade)
+        ->set('tradeEditForm.trade_type_other', str_repeat('x', 65))
+        ->call('saveTrade')
+        ->assertHasErrors(['tradeEditForm.trade_type_other' => 'max'])
+        ->assertSee('The description field must not be greater than 64 characters.');
+
+    expect($trade->fresh()->trade_type_other)->toBe('keep me');
+});
+
+test('changing the type away from Other clears the description', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['trade_type' => TradeType::Other, 'trade_type_other' => 'breakout retest']);
+
+    editTrade($user, $journal, $trade)
+        ->set('tradeEditForm.trade_type', TradeType::RangeLong->value)
+        ->call('saveTrade');
+
+    $fresh = $trade->fresh();
+    expect($fresh->trade_type)->toBe(TradeType::RangeLong)
+        ->and($fresh->trade_type_other)->toBeNull();
+});
+
+test('search matches the Other description, only in this journal', function () {
+    [$user, $journal] = journalUser();
+    tradeInJournal($journal, ['trade_type' => TradeType::Other, 'trade_type_other' => 'breakout retest']);
+    tradeInJournal($journal, ['trade_type' => TradeType::SecondEntryLong, 'instrument_symbol' => 'ES']);
+    [, $otherJournal] = journalUser();
+    tradeInJournal($otherJournal, ['trade_type' => TradeType::Other, 'trade_type_other' => 'breakout retest']);
+
+    $component = Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->set('search', 'retest');
+
+    expect($component->get('summary')['total'])->toBe(1);
+});
+
+// ---------------------------------------------------------------------------
+// Copier masters and followers (#79)
+// ---------------------------------------------------------------------------
+
+/**
+ * A master trade (+$100) with two followers (+$10 and +$100), each on its own account, plus the accounts.
+ *
+ * @return array{0: Trade, 1: Trade, 2: Trade}
+ */
+function copierSetup(Journal $journal): array
+{
+    $master = tradeInJournal($journal, ['instrument_symbol' => 'MSTR', 'net_pnl' => 100, 'points' => 2]);
+    $small  = tradeInJournal($journal, ['instrument_symbol' => 'FOLA', 'net_pnl' => 10, 'points' => 2, 'master_trade_id' => $master->id]);
+    $large  = tradeInJournal($journal, ['instrument_symbol' => 'FOLB', 'net_pnl' => 100, 'points' => 2, 'master_trade_id' => $master->id]);
+
+    return [$master, $small, $large];
+}
+
+test('the list shows a master with a Followers link and hides its followers', function () {
+    [$user, $journal] = journalUser();
+    copierSetup($journal);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->assertSee('MSTR')
+        ->assertSee('Followers (2)')
+        ->assertDontSee('FOLA')
+        ->assertDontSee('FOLB');
+});
+
+test('the Followers link expands the follower rows under the master and collapses them again', function () {
+    [$user, $journal] = journalUser();
+    [$master, $small] = copierSetup($journal);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('toggleFollowers', $master->uuid)
+        ->assertSeeInOrder(['MSTR', 'Followers (2)', 'FOLA', 'FOLB'])
+        ->assertSeeHtml("selectTrade('{$small->uuid}')")
+        ->call('toggleFollowers', $master->uuid)
+        ->assertDontSee('FOLA');
+});
+
+test('a trade without followers has no Followers link', function () {
+    [$user, $journal] = journalUser();
+    tradeInJournal($journal);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->assertDontSee('Followers (');
+});
+
+test('the summary totals every trade of the accounts shown, followers included', function () {
+    [$user, $journal] = journalUser();
+    copierSetup($journal);
+    tradeInJournal($journal, ['net_pnl' => -20, 'points' => -1]);
+
+    $summary = Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->get('summary');
+
+    expect($summary['total'])->toBe(4)
+        ->and($summary['net_pnl'])->toBe(190.0)
+        ->and($summary['win_rate'])->toBe(75);
+});
+
+test('the day header totals followers of the selected accounts too', function () {
+    [$user, $journal] = journalUser();
+    copierSetup($journal);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->assertSee('3 trades')
+        ->assertSee('+$210.00');
+});
+
+test('a master selected on its own totals only the master, though its followers still expand', function () {
+    [$user, $journal] = journalUser();
+    [$master] = copierSetup($journal);
+
+    $component = Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->set('selectedAccountIds', [$master->account_id])
+        ->call('toggleFollowers', $master->uuid)
+        ->assertSee('FOLA')
+        ->assertSee('FOLB');
+
+    expect($component->get('summary')['total'])->toBe(1)
+        ->and($component->get('summary')['net_pnl'])->toBe(100.0);
+});
+
+test('filtering to a follower account shows its trades as normal rows with their own P&L', function () {
+    [$user, $journal] = journalUser();
+    [, $small] = copierSetup($journal);
+
+    $component = Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->set('selectedAccountIds', [$small->account_id])
+        ->assertSee('FOLA')
+        ->assertDontSee('MSTR');
+
+    expect($component->get('summary')['total'])->toBe(1)
+        ->and($component->get('summary')['net_pnl'])->toBe(10.0);
+});
+
+test('a follower whose master is also selected is not listed twice', function () {
+    [$user, $journal] = journalUser();
+    [$master, $small] = copierSetup($journal);
+
+    $component = Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->set('selectedAccountIds', [$master->account_id, $small->account_id])
+        ->assertSee('MSTR')
+        ->assertDontSee('FOLA');
+
+    expect($component->get('summary')['total'])->toBe(2)
+        ->and($component->get('summary')['net_pnl'])->toBe(110.0);
+});
+
+test('the trade view labels a master and a follower next to the account under the title', function () {
+    [$user, $journal] = journalUser();
+    [$master, $small] = copierSetup($journal);
+    $normal = tradeInJournal($journal);
+
+    $component = Livewire::actingAs($user)->test('journal.trade-journal', ['journal' => $journal]);
+
+    $component->call('selectTrade', $master->uuid)->assertSeeHtml('data-copier-role="master"')->assertSee('Master');
+    $component->call('selectTrade', $small->uuid)->assertSeeHtml('data-copier-role="follower"')->assertSee('Follower')
+        // In the line under the title, before the table.
+        ->assertSeeHtmlInOrder(['data-copier-role="follower"', '>ENTRY PRICE</div>']);
+    $component->call('selectTrade', $normal->uuid)->assertDontSeeHtml('data-copier-role');
+});
+
+// ---------------------------------------------------------------------------
+// Summary strip averages (#82): a dash when there are no winners or no losers
+// ---------------------------------------------------------------------------
+
+test('with only winning trades the strip shows a dash for the average loss', function () {
+    [$user, $journal] = journalUser();
+    tradeInJournal($journal, ['net_pnl' => 100, 'points' => 2]);
+
+    $component = Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->assertDontSee('-0.00 pt')
+        ->assertSeeHtml('data-summary-avg-loss="none"');
+
+    expect($component->get('summary')['avg_loss_pts'])->toBeNull()
+        ->and($component->get('summary')['avg_win_pts'])->toBe(2.0);
+});
+
+test('with only losing trades the strip shows a dash for the average win', function () {
+    [$user, $journal] = journalUser();
+    tradeInJournal($journal, ['net_pnl' => -50, 'points' => -1]);
+
+    $component = Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->assertDontSee('+0.00 pt')
+        ->assertSeeHtml('data-summary-avg-win="none"');
+
+    expect($component->get('summary')['avg_win_pts'])->toBeNull()
+        ->and($component->get('summary')['avg_loss_pts'])->toBe(1.0);
+});
+
+test('with winners and losers both strip averages are shown', function () {
+    [$user, $journal] = journalUser();
+    tradeInJournal($journal, ['net_pnl' => 100, 'points' => 2]);
+    tradeInJournal($journal, ['net_pnl' => -50, 'points' => -1]);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->assertSee('+2.00 pt')
+        ->assertSee('-1.00 pt')
+        ->assertDontSeeHtml('data-summary-avg-win="none"')
+        ->assertDontSeeHtml('data-summary-avg-loss="none"');
+});
+
+test('with no trades the strip shows dashes for both averages', function () {
+    [$user, $journal] = journalUser();
+
+    $component = Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->assertOk()
+        ->assertSeeHtml('data-summary-avg-win="none"')
+        ->assertSeeHtml('data-summary-avg-loss="none"');
+
+    expect($component->get('summary')['avg_win_pts'])->toBeNull()
+        ->and($component->get('summary')['avg_loss_pts'])->toBeNull();
+});
+
+test('a breakeven trade counts as a loss in the strip and the Overview, as on Statistics', function () {
+    [$user, $journal] = journalUser();
+    tradeInJournal($journal, ['net_pnl' => 100, 'points' => 2]);
+    tradeInJournal($journal, ['net_pnl' => 0, 'points' => 0]);
+
+    $component = Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->assertSee('1W / 1L');
+
+    expect($component->get('summary')['win_rate'])->toBe(50);
 });

@@ -43,6 +43,7 @@
     "complete": false
   },
   "stop_price": null,
+  "copier_master_trade_id": null,
   "legs": [
     {
       "sequence": 1,
@@ -109,5 +110,8 @@
   "screenshot": {
     "captured_at": "2026-09-24T09:36:21-04:00",
     "caption": "5-minute ES with H2 at EMA"
+  },
+  "entry_screenshot": {
+    "captured_at": "2026-09-24T09:30:01-04:00"
   }
 }

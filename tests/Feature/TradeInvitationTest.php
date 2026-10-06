@@ -123,13 +123,13 @@ test('the owner can invite an accepted friend, who is emailed', function () {
 });
 
 test('the invitation email carries no account information', function () {
-    [$owner, $friend] = User::factory()->count(2)->create();
+    [$owner, $friend] = User::factory()->count(2)->sequence(['name' => 'Administration'], [])->create();
     $trade = ownedTrade($owner);
     $inv   = invite($trade, $owner, $friend);
 
     $html = (new TradeInvitationMail($inv))->render();
 
-    expect($html)->toContain($owner->name)->and($html)->not->toContain('Secret Funded 50K');
+    expect($html)->toContain('Administration')->and($html)->not->toContain('Secret Funded 50K');
 });
 
 test('cannot invite someone who is not an accepted friend', function () {

@@ -8,6 +8,7 @@ use App\Enums\ExecutionAction;
 use App\Enums\ExecutionRole;
 use App\Enums\ExitReason;
 use App\Enums\NotePhase;
+use App\Enums\ScreenshotKind;
 use App\Enums\ScreenshotSource;
 use App\Enums\TradeType;
 use App\Models\Account;
@@ -46,9 +47,13 @@ class TradeIntakeService
         return $account;
     }
 
-    public function store(Journal $journal, array $data, ?UploadedFile $screenshotFile): Trade
+    /**
+     * Stores one AddOn trade. $screenshotFile is the exit image (the trade's main chart);
+     * $entryScreenshotFile is the optional image captured when the trade opened (#72).
+     */
+    public function store(Journal $journal, array $data, ?UploadedFile $screenshotFile, ?UploadedFile $entryScreenshotFile = null): Trade
     {
-        return DB::transaction(function () use ($journal, $data, $screenshotFile) {
+        return DB::transaction(function () use ($journal, $data, $screenshotFile, $entryScreenshotFile) {
             $account = $this->resolveAccount($journal, $data['account_name'], $data['connection'] ?? null);
 
             $instrument = $data['instrument'];
@@ -62,6 +67,7 @@ class TradeIntakeService
                 'journal_id'                    => $journal->id,
                 'account_id'                    => $account->id,
                 'source_trade_id'               => $data['trade_id'],
+                'copier_master_source_trade_id' => $data['copier_master_trade_id'] ?? null,
                 'source'                        => $data['source'],
                 'addon_version'                 => $data['addon_version'],
                 'trade_type'                    => TradeType::from($data['trade_type']),
@@ -92,7 +98,7 @@ class TradeIntakeService
                 'excursion_max_adverse_price'   => $excursion['max_adverse_price'] ?? null,
                 'excursion_max_favorable_price' => $excursion['max_favorable_price'] ?? null,
                 'excursion_complete'            => $excursion['complete'],
-                'raw_payload'                   => collect($data)->except(['screenshot_file', 'trade'])->all(),
+                'raw_payload'                   => collect($data)->except(['screenshot_file', 'entry_screenshot_file', 'trade'])->all(),
             ]);
 
             foreach ($data['executions'] ?? [] as $exec) {
@@ -142,27 +148,70 @@ class TradeIntakeService
             }
 
             if ($screenshotFile) {
-                $ext  = $screenshotFile->extension();
-                $path = "trade-screenshots/{$journal->id}/{$trade->uuid}.{$ext}";
-                Storage::disk('local')->putFileAs(
-                    "trade-screenshots/{$journal->id}",
-                    $screenshotFile,
-                    "{$trade->uuid}.{$ext}"
-                );
-
-                TradeScreenshot::create([
-                    'trade_id'    => $trade->id,
-                    'disk'        => 'local',
-                    'path'        => $path,
-                    'caption'     => $data['screenshot']['caption'] ?? null,
-                    'mime_type'   => $screenshotFile->getMimeType(),
-                    'bytes'       => $screenshotFile->getSize(),
-                    'captured_at' => $data['screenshot']['captured_at'] ?? null,
-                    'source'      => ScreenshotSource::Nt8,
-                ]);
+                $this->storeScreenshot($journal, $trade, $screenshotFile, ScreenshotKind::Exit,
+                    $data['screenshot']['captured_at'] ?? null, $data['screenshot']['caption'] ?? null);
             }
+
+            if ($entryScreenshotFile) {
+                $this->storeScreenshot($journal, $trade, $entryScreenshotFile, ScreenshotKind::Entry,
+                    $data['entry_screenshot']['captured_at'] ?? null, null);
+            }
+
+            $this->linkCopier($journal, $trade);
 
             return $trade;
         });
+    }
+
+    /**
+     * #79: links a copier follower to its master in the same journal, whichever of the two arrives first. Links
+     * stay one level deep: a trade that names a master is never itself a master, and a trade never names itself.
+     */
+    private function linkCopier(Journal $journal, Trade $trade): void
+    {
+        $masterSourceId = $trade->copier_master_source_trade_id;
+
+        if ($masterSourceId === null) {
+            // A master or a normal trade: pick up any followers that arrived before it.
+            Trade::where('journal_id', $journal->id)
+                ->where('copier_master_source_trade_id', $trade->source_trade_id)
+                ->whereNull('master_trade_id')
+                ->update(['master_trade_id' => $trade->id]);
+
+            return;
+        }
+
+        if ($masterSourceId === $trade->source_trade_id) {
+            return;
+        }
+
+        $masterId = Trade::where('journal_id', $journal->id)
+            ->where('source_trade_id', $masterSourceId)
+            ->whereNull('copier_master_source_trade_id')
+            ->value('id');
+
+        if ($masterId !== null) {
+            $trade->forceFill(['master_trade_id' => $masterId])->save();
+        }
+    }
+
+    /** Saves an AddOn chart image next to the trade's other images and records it. */
+    private function storeScreenshot(Journal $journal, Trade $trade, UploadedFile $file, ScreenshotKind $kind, ?string $capturedAt, ?string $caption): void
+    {
+        $ext  = $file->extension();
+        $name = $kind === ScreenshotKind::Entry ? "{$trade->uuid}-entry.{$ext}" : "{$trade->uuid}.{$ext}";
+        Storage::disk('local')->putFileAs("trade-screenshots/{$journal->id}", $file, $name);
+
+        TradeScreenshot::create([
+            'trade_id'    => $trade->id,
+            'kind'        => $kind,
+            'disk'        => 'local',
+            'path'        => "trade-screenshots/{$journal->id}/{$name}",
+            'caption'     => $caption,
+            'mime_type'   => $file->getMimeType(),
+            'bytes'       => $file->getSize(),
+            'captured_at' => $capturedAt,
+            'source'      => ScreenshotSource::Nt8,
+        ]);
     }
 }

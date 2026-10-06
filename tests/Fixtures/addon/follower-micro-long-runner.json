@@ -43,6 +43,7 @@
     "complete": true
   },
   "stop_price": null,
+  "copier_master_trade_id": "NT8-TEST_ACCT_001-ES_12_26-ca8c47b6eda5db93",
   "legs": [
     {
       "sequence": 1,
@@ -133,5 +134,8 @@
       "phase": "post_trade",
       "occurred_at": "2026-09-24T09:36:40-04:00"
     }
-  ]
+  ],
+  "entry_screenshot": {
+    "captured_at": "2026-09-24T09:30:01-04:00"
+  }
 }

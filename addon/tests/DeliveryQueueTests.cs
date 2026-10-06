@@ -65,7 +65,7 @@ namespace ChartJot.Core.Tests
 		[Fact]
 		public void RecordResult_RetryableRepeatedly_BacksOffExponentiallyUpToCap()
 		{
-			DeliveryQueue queue = new DeliveryQueue(initialBackoff: TimeSpan.FromSeconds(5), maxBackoff: TimeSpan.FromSeconds(30));
+			DeliveryQueue queue = new DeliveryQueue(initialBackoff: TimeSpan.FromSeconds(5), maxBackoff: TimeSpan.FromSeconds(30), maxAutomaticAttempts: 10);
 			queue.Enqueue("t1", "{}");
 
 			DateTimeOffset now = Now;
@@ -206,6 +206,139 @@ namespace ChartJot.Core.Tests
 			Assert.Equal(TimeSpan.FromSeconds(20), DeliveryQueue.NextBackoff(3, initial, max));
 			Assert.Equal(TimeSpan.FromSeconds(30), DeliveryQueue.NextBackoff(4, initial, max));
 			Assert.Equal(TimeSpan.FromSeconds(30), DeliveryQueue.NextBackoff(50, initial, max));
+		}
+
+		// ---- automatic retries stop after three attempts; the trader retries by hand from there
+
+		[Fact]
+		public void RecordResult_RetryableOnTheThirdAttempt_FailsWithTheLastError()
+		{
+			DeliveryQueue queue = new DeliveryQueue();
+			queue.Enqueue("t1", "{}");
+			DateTimeOffset now = Now;
+
+			for (int attempt = 1; attempt <= 3; attempt++)
+			{
+				queue.MarkSending("t1");
+				queue.RecordResult("t1", DeliveryOutcome.Retryable, now, errorMessage: "Connection refused");
+				if (attempt < 3)
+				{
+					Assert.Equal(DeliveryState.QueuedForRetry, queue.Find("t1").State);
+					now = queue.Find("t1").NextAttemptAt.Value;
+				}
+			}
+
+			QueuedDelivery d = queue.Find("t1");
+			Assert.Equal(DeliveryState.Failed, d.State);
+			Assert.Equal(3, d.Attempts);
+			Assert.Equal(3, queue.MaxAutomaticAttempts);
+			Assert.Null(d.NextAttemptAt);
+			Assert.False(d.IsConfigurationError);
+			Assert.Equal("Connection refused", d.LastErrorMessage);
+			Assert.Equal("{}", d.PayloadJson);
+			Assert.Empty(queue.Due(now.AddHours(1)));
+			Assert.False(queue.ConfigurationErrorHalted);
+		}
+
+		[Fact]
+		public void RetryManually_AfterAutomaticRetriesRanOut_GivesThreeMoreAttempts()
+		{
+			DeliveryQueue queue = new DeliveryQueue();
+			queue.Enqueue("t1", "{}");
+			for (int attempt = 1; attempt <= 3; attempt++)
+			{
+				queue.MarkSending("t1");
+				queue.RecordResult("t1", DeliveryOutcome.Retryable, Now, statusCode: 503);
+			}
+
+			queue.RetryManually("t1", Now);
+
+			QueuedDelivery d = queue.Find("t1");
+			Assert.Equal(DeliveryState.Pending, d.State);
+			Assert.Equal(0, d.Attempts);
+			queue.MarkSending("t1");
+			queue.RecordResult("t1", DeliveryOutcome.Retryable, Now, statusCode: 503);
+			Assert.Equal(DeliveryState.QueuedForRetry, d.State);
+		}
+
+		[Fact]
+		public void AFailedDelivery_SurvivesARestartAsFailed()
+		{
+			DeliveryQueue queue = new DeliveryQueue();
+			queue.Enqueue("t1", "{\"trade_id\":\"t1\"}");
+			for (int attempt = 1; attempt <= 3; attempt++)
+			{
+				queue.MarkSending("t1");
+				queue.RecordResult("t1", DeliveryOutcome.Retryable, Now, statusCode: 503);
+			}
+
+			QueuedDelivery reloaded = DeliveryQueue.Deserialize(queue.Serialize()).Find("t1");
+
+			Assert.Equal(DeliveryState.Failed, reloaded.State);
+			Assert.Equal("{\"trade_id\":\"t1\"}", reloaded.PayloadJson);
+		}
+
+		// ---- several stuck deliveries
+
+		private static void FailAutomatically(DeliveryQueue queue, string tradeId)
+		{
+			for (int attempt = 1; attempt <= 3; attempt++)
+			{
+				queue.MarkSending(tradeId);
+				queue.RecordResult(tradeId, DeliveryOutcome.Retryable, Now, statusCode: 503);
+			}
+		}
+
+		[Fact]
+		public void FailedDeliveries_ListsEveryFailedOneInQueueOrder()
+		{
+			DeliveryQueue queue = new DeliveryQueue();
+			queue.Enqueue("t1", "{}");
+			queue.Enqueue("t2", "{}");
+			queue.Enqueue("t3", "{}");
+			FailAutomatically(queue, "t1");
+			queue.MarkSending("t2");
+			queue.RecordResult("t2", DeliveryOutcome.Accepted, Now, statusCode: 201);
+			FailAutomatically(queue, "t3");
+
+			Assert.Equal(new[] { "t1", "t3" }, queue.FailedDeliveries.Select(d => d.TradeId));
+		}
+
+		[Fact]
+		public void RetryAllFailed_ResendsEveryFailedDeliveryAndLeavesTheRest()
+		{
+			DeliveryQueue queue = new DeliveryQueue();
+			queue.Enqueue("t1", "{}");
+			queue.Enqueue("t2", "{}");
+			queue.Enqueue("t3", "{}");
+			FailAutomatically(queue, "t1");
+			queue.MarkSending("t2");
+			queue.RecordResult("t2", DeliveryOutcome.Accepted, Now, statusCode: 201);
+			queue.MarkSending("t3");
+			queue.RecordResult("t3", DeliveryOutcome.ValidationError, Now, statusCode: 422);
+
+			IList<string> retried = queue.RetryAllFailed(Now);
+
+			Assert.Equal(new[] { "t1", "t3" }, retried);
+			Assert.Equal(DeliveryState.Pending, queue.Find("t1").State);
+			Assert.Equal(0, queue.Find("t1").Attempts);
+			Assert.Equal(DeliveryState.Pending, queue.Find("t3").State);
+			Assert.Equal(DeliveryState.Sent, queue.Find("t2").State);
+			Assert.Equal(new[] { "t1", "t3" }, queue.Due(Now).Select(d => d.TradeId));
+		}
+
+		[Fact]
+		public void RetryAllFailed_LiftsAConfigurationHalt()
+		{
+			DeliveryQueue queue = new DeliveryQueue();
+			queue.Enqueue("t1", "{}");
+			queue.MarkSending("t1");
+			queue.RecordResult("t1", DeliveryOutcome.ConfigurationError, Now, statusCode: 401);
+
+			queue.RetryAllFailed(Now);
+
+			Assert.False(queue.ConfigurationErrorHalted);
+			Assert.Single(queue.Due(Now));
 		}
 	}
 }

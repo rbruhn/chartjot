@@ -7,7 +7,8 @@ namespace ChartJot.Core.Tests
 	/// Payloads the AddOn produces, shared with the Laravel test suite as fixtures in tests/Fixtures/addon.
 	/// Laravel posts every file to the real intake endpoint, so the two sides cannot drift apart unnoticed.
 	/// Regenerate with PATS_WRITE_FIXTURES=1 dotnet test addon/tests.
-	/// Every account's round turn is its own submission, master or copier follower alike; nothing links them.
+	/// Every account's round turn is its own submission, master or copier follower alike; a follower names its
+	/// master's trade_id (copier_master_trade_id, #79) so the journal can link them.
 	/// </summary>
 	internal static class PayloadFixtures
 	{
@@ -39,26 +40,30 @@ namespace ChartJot.Core.Tests
 					new NoteRecord { Body = "T1 filled. Letting the runner work.", Phase = "in_trade", OccurredAt = At(85) },
 					new NoteRecord { Body = "Runner stopped. Good management.", Phase = "post_trade", OccurredAt = At(400) }
 				},
-				Screenshot = new ScreenshotMeta { CapturedAt = At(381), Caption = "5-minute ES with H2 at EMA" }
+				Screenshot = new ScreenshotMeta { CapturedAt = At(381), Caption = "5-minute ES with H2 at EMA" },
+				EntryScreenshot = new ScreenshotMeta { CapturedAt = At(1), Format = "png" }
 			};
 		}
 
 		private static string LongRunner()
+		{
+			// The runner's stop, trailed up to where it filled.
+			SubmissionInfo info = Info();
+			info.StopPrice = 7702.50m;
+			return PayloadBuilder.Build(LongRunnerTrade(), info);
+		}
+
+		private static CompletedTrade LongRunnerTrade()
 		{
 			TradeTracker tracker = new TradeTracker();
 			tracker.Apply(Buy("a1b2c3d4e5f6", "ord-1001", "Entry", 3, 7700.00m, 0, 3.87m, 3, isEntry: true));
 			tracker.OnPrice("ES 12-26", 7699.25m);
 			tracker.Apply(Sell("a1b2c3d4e5f7", "ord-1002", "Target1", 2, 7701.00m, 70, 2.58m, 1, isExit: true));
 			tracker.OnPrice("ES 12-26", 7703.25m);
-			CompletedTrade trade = tracker.Apply(Sell("a1b2c3d4e5f8", "ord-1003", "Stop1", 1, 7702.50m, 380, 1.29m, 0, isExit: true)).Closed[0];
-
-			// The runner's stop, trailed up to where it filled.
-			SubmissionInfo info = Info();
-			info.StopPrice = 7702.50m;
-			return PayloadBuilder.Build(trade, info);
+			return tracker.Apply(Sell("a1b2c3d4e5f8", "ord-1003", "Stop1", 1, 7702.50m, 380, 1.29m, 0, isExit: true)).Closed[0];
 		}
 
-		/// <summary>An Orders-mode Micro follower of the long runner above, sent as its own trade.</summary>
+		/// <summary>An Orders-mode Micro follower of the long runner above, sent as its own trade naming its master.</summary>
 		private static string FollowerMicroLongRunner()
 		{
 			TradeTracker tracker = new TradeTracker();
@@ -70,6 +75,7 @@ namespace ChartJot.Core.Tests
 
 			SubmissionInfo info = Info();
 			info.Screenshot = null;
+			info.CopierMasterTradeId = LongRunnerTrade().TradeId;
 			return PayloadBuilder.Build(trade, info);
 		}
 

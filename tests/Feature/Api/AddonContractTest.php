@@ -83,3 +83,19 @@ it('treats a re-sent AddOn payload as the same trade', function (string $file) {
 
     expect(Trade::count())->toBe(1);
 })->with(addonFixtures());
+
+it('links the follower fixture to its master when both reach one journal', function () {
+    [$journal, $token] = addonJournalToken();
+
+    // Files are posted in name order, so the follower arrives before its master.
+    foreach (addonFixtures() as [$file]) {
+        test()->postJson('/api/v1/trades', json_decode(file_get_contents($file), true), ['Authorization' => "Bearer {$token}"])
+            ->assertStatus(201);
+    }
+
+    $master = Trade::where('journal_id', $journal->id)->where('account_id', Account::where('name', 'TEST-ACCT-001')->value('id'))
+        ->where('instrument', 'ES 12-26')->whereNull('master_trade_id')->firstOrFail();
+    $follower = Trade::where('master_trade_id', $master->id)->sole();
+
+    expect($follower->account->name)->toBe('TEST-ACCT-002');
+});

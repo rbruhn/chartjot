@@ -41,6 +41,19 @@ payload fields to match.
 Everything below this point that predates 2026-09-29 and mentions the copier
 is historical record of work that was later removed, not current scope.
 
+## Copier followers restored (2026-10-04, #64)
+
+The section above misread the decision. What was actually decided: followers
+do not need their own notes, submissions or screenshots. The master carries
+the note, trade type and screenshot, and those apply to each follower's trade;
+every account, master and followers alike, still sends its own trade data.
+So the AddOn reads the copier's follower list again (read-only) and matches
+each follower's own trade to the master with the vendor-confirmed rules
+(`MarketFamilies`, fade, Executions/Orders mode windows), now in
+`addon/core/FollowerMatching.cs`. It does not bring back the copy summaries,
+missed-copy reporting or the `copies` payload fields. See NT8.md, "Copier
+followers".
+
 ## What the spike proved
 
 - **Fills and positions:** `ExecutionUpdate` always arrives about 15 to 20 ms

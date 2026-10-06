@@ -12,6 +12,7 @@ use App\Models\Trade;
 use App\Models\TradeInvitation;
 use App\Models\User;
 use App\Services\TradeCommentPoster;
+use App\Support\TradeStatistics;
 use App\Models\TradeNote;
 use App\Models\TradeScreenshot;
 use Illuminate\Support\Carbon;
@@ -44,6 +45,9 @@ new class extends Component {
 
     #[Url(as: 'needs_note')]
     public bool $needsNote = false;
+
+    /** #79: masters whose follower rows are shown in the list, by uuid. */
+    public array $expandedMasters = [];
 
     #[Url(as: 'trade')]
     public string $selectedUuid = '';
@@ -113,9 +117,10 @@ new class extends Component {
     public function trades(): Collection
     {
         return $this->journal->trades()
-            ->with(['account.journal', 'notes', 'screenshot'])
+            ->with(['account.journal', 'notes', 'screenshot', 'followers.account.journal', 'followers.notes'])
             ->withCount([
                 'comments',
+                'followers',
                 'invitations as active_invitations_count' => fn ($q) => $q->active(),
             ])
             ->when($this->dateFrom, fn ($q) => $q->where('entry_at', '>=', Carbon::parse($this->dateFrom)->startOfDay()))
@@ -131,6 +136,7 @@ new class extends Component {
                     ->where('instrument_symbol', 'like', "%{$term}%")
                     ->orWhere('instrument', 'like', "%{$term}%")
                     ->orWhere('trade_type', 'like', "%{$term}%")
+                    ->orWhere('trade_type_other', 'like', "%{$term}%")
                     ->when($matchingTypes, fn ($i) => $i->orWhereIn('trade_type', $matchingTypes))
                     ->orWhereHas('account', fn ($a) => $a->where('name', 'like', "%{$term}%"))
                 );
@@ -139,6 +145,8 @@ new class extends Component {
                 ? $q->whereRaw('0 = 1')
                 : $q->whereIn('account_id', $this->selectedAccountIds)
             )
+            // #79: a follower is listed under its master; totals add it back in (totalledTrades)
+            ->listedRows($this->selectedAccountIds)
             ->when($this->needsNote, fn ($q) => $q->doesntHave('notes'))
             ->orderBy('entry_at', 'desc')
             ->get();
@@ -150,24 +158,42 @@ new class extends Component {
         return $this->trades->groupBy(fn (Trade $t) => $t->entry_at_local->format('Y-m-d'));
     }
 
+    /**
+     * #79: the listed rows plus the copier followers under them whose accounts are selected (all, with no
+     * selection). Totals add every trade of the selected accounts; the list only groups followers under their master.
+     */
+    public function withSelectedFollowers(Collection $rows): Collection
+    {
+        return $rows->flatMap(fn (Trade $t) => collect([$t])->concat($this->selectedAccountIds === null
+            ? $t->followers
+            : $t->followers->whereIn('account_id', $this->selectedAccountIds)));
+    }
+
+    #[Computed]
+    public function totalledTrades(): Collection
+    {
+        return $this->withSelectedFollowers($this->trades);
+    }
+
     #[Computed]
     public function summary(): array
     {
-        $trades = $this->trades;
+        $trades = $this->totalledTrades;
         $total  = $trades->count();
         if ($total === 0) {
-            return ['total' => 0, 'net_pnl' => 0.0, 'win_rate' => 0, 'avg_win_pts' => 0.0, 'avg_loss_pts' => 0.0, 'journaled' => 0];
+            return ['total' => 0, 'net_pnl' => 0.0, 'win_rate' => 0, 'avg_win_pts' => null, 'avg_loss_pts' => null, 'journaled' => 0];
         }
-        $winners   = $trades->filter(fn ($t) => (float) $t->net_pnl > 0);
-        $losers    = $trades->filter(fn ($t) => (float) $t->net_pnl <= 0);
+        // Same rule as the Statistics page: a winner made money; breakeven counts as a loss (#82).
+        [$winners, $losers] = $trades->partition(fn (Trade $t) => TradeStatistics::isWinner($t));
         $journaled = $trades->filter(fn ($t) => $t->notes->isNotEmpty())->count();
 
         return [
             'total'        => $total,
             'net_pnl'      => (float) $trades->sum('net_pnl'),
             'win_rate'     => (int) round($winners->count() / $total * 100),
-            'avg_win_pts'  => $winners->count() > 0 ? (float) $winners->avg('points') : 0.0,
-            'avg_loss_pts' => $losers->count()  > 0 ? -(float) $losers->avg('points') : 0.0,
+            // Null (shown as a dash) when there are no winners or no losers to average (#82).
+            'avg_win_pts'  => $winners->isNotEmpty() ? (float) $winners->avg('points') : null,
+            'avg_loss_pts' => $losers->isNotEmpty() ? -(float) $losers->avg('points') : null,
             'journaled'    => $journaled,
         ];
     }
@@ -177,9 +203,18 @@ new class extends Component {
     {
         if ($this->selectedUuid === '') return null;
         return $this->journal->trades()
-            ->with(['account', 'executions', 'notes', 'screenshots', 'legs'])
+            ->with(['account', 'executions', 'notes', 'exitScreenshots', 'entryScreenshot', 'legs'])
+            ->withCount('followers')
             ->where('uuid', $this->selectedUuid)
             ->first();
+    }
+
+    /** #79: shows or hides a master's follower rows in the list. */
+    public function toggleFollowers(string $uuid): void
+    {
+        $this->expandedMasters = in_array($uuid, $this->expandedMasters, true)
+            ? array_values(array_diff($this->expandedMasters, [$uuid]))
+            : [...$this->expandedMasters, $uuid];
     }
 
     public function selectTrade(string $uuid): void
@@ -537,6 +572,7 @@ new class extends Component {
             'exit_at'          => $t->exit_at->setTimezone($tz)->format('Y-m-d\TH:i'),
             'exit_reason'      => $t->exit_reason->value,
             'trade_type'       => $t->trade_type?->value ?? '',
+            'trade_type_other' => $t->trade_type_other ?? '',
             'entry_order_name' => $t->entry_order_name ?? '',
             'exit_order_name'  => $t->exit_order_name ?? '',
         ];
@@ -553,6 +589,13 @@ new class extends Component {
     {
         $trade = $this->selectedTrade;
         if (!$trade) return;
+
+        $this->tradeEditForm['trade_type_other'] = trim((string) ($this->tradeEditForm['trade_type_other'] ?? ''));
+        $this->validate(
+            ['tradeEditForm.trade_type_other' => ['nullable', 'string', 'max:64']],
+            [],
+            ['tradeEditForm.trade_type_other' => 'description'],
+        );
 
         $data       = $this->tradeEditForm;
         $tz         = $trade->account->effectiveTimezone();
@@ -578,6 +621,10 @@ new class extends Component {
             'exit_at'          => $exitAt,
             'exit_reason'      => ExitReason::from($data['exit_reason']),
             'trade_type'       => $data['trade_type'] ? \App\Enums\TradeType::from($data['trade_type']) : null,
+            // The description belongs to Other only (same rule as the AddOn); blank saves as null.
+            'trade_type_other' => $data['trade_type'] === \App\Enums\TradeType::Other->value && $data['trade_type_other'] !== ''
+                ? $data['trade_type_other']
+                : null,
             'entry_order_name' => $data['entry_order_name'] ?? '',
             'exit_order_name'  => $data['exit_order_name'] ?? '',
             'points'           => $points,
@@ -652,11 +699,19 @@ new class extends Component {
         </div>
         <div class="flex-1 px-5 py-3 border-r border-gray-200 dark:border-gray-700">
             <div class="text-xs font-semibold text-gray-600 dark:text-gray-500 uppercase tracking-wider">Avg Win</div>
-            <div class="text-2xl font-bold text-green-600 dark:text-green-400 mt-0.5">+{{ number_format($s['avg_win_pts'], 2) }} pt</div>
+            @if($s['avg_win_pts'] === null)
+                <div data-summary-avg-win="none" class="text-2xl font-bold text-gray-400 dark:text-gray-500 mt-0.5">—</div>
+            @else
+                <div class="text-2xl font-bold text-green-600 dark:text-green-400 mt-0.5">+{{ number_format($s['avg_win_pts'], 2) }} pt</div>
+            @endif
         </div>
         <div class="flex-1 px-5 py-3 border-r border-gray-200 dark:border-gray-700">
             <div class="text-xs font-semibold text-gray-600 dark:text-gray-500 uppercase tracking-wider">Avg Loss</div>
-            <div class="text-2xl font-bold text-red-600 dark:text-red-400 mt-0.5">-{{ number_format($s['avg_loss_pts'], 2) }} pt</div>
+            @if($s['avg_loss_pts'] === null)
+                <div data-summary-avg-loss="none" class="text-2xl font-bold text-gray-400 dark:text-gray-500 mt-0.5">—</div>
+            @else
+                <div class="text-2xl font-bold text-red-600 dark:text-red-400 mt-0.5">-{{ number_format($s['avg_loss_pts'], 2) }} pt</div>
+            @endif
         </div>
         <div class="flex-1 px-5 py-3">
             <div class="text-xs font-semibold text-gray-600 dark:text-gray-500 uppercase tracking-wider">Journaled</div>
@@ -703,14 +758,15 @@ new class extends Component {
             @else
                 @foreach($this->grouped as $date => $dayTrades)
                     @php
-                        $dayPnl   = $dayTrades->sum(fn($t) => (float) $t->net_pnl);
+                        $dayTotals = $this->withSelectedFollowers($dayTrades);
+                        $dayPnl   = $dayTotals->sum(fn($t) => (float) $t->net_pnl);
                         $dayLabel = strtoupper(\Carbon\Carbon::parse($date)->format('D M j, Y'));
                     @endphp
                     {{-- Date header --}}
                     <div class="sticky top-0 z-10 flex justify-between items-center px-4 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-xs font-semibold text-gray-500 dark:text-gray-400 tracking-wide">
                         <span>{{ $dayLabel }}</span>
                         <span class="font-normal {{ $dayPnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400' }}">
-                            {{ $dayTrades->count() }} trade{{ $dayTrades->count() !== 1 ? 's' : '' }}
+                            {{ $dayTotals->count() }} trade{{ $dayTotals->count() !== 1 ? 's' : '' }}
                             &middot; {{ $this->pnlDisplay($dayPnl) }}
                         </span>
                     </div>
@@ -789,6 +845,51 @@ new class extends Component {
                                 </div>
                             </div>
                         </button>
+                        {{-- Copier followers (#79): listed under their master, indented, when expanded --}}
+                        @if($trade->followers_count > 0)
+                            @php $expanded = in_array($trade->uuid, $expandedMasters, true); @endphp
+                            <button type="button" wire:click="toggleFollowers('{{ $trade->uuid }}')" aria-expanded="{{ $expanded ? 'true' : 'false' }}"
+                                class="w-full flex items-center gap-1 text-left pl-[5.5rem] pr-4 py-1 border-b border-gray-100 dark:border-gray-700/40 text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:bg-gray-100 dark:hover:bg-gray-800/50">
+                                <svg class="w-3 h-3 flex-shrink-0 transition-transform {{ $expanded ? 'rotate-90' : '' }}" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                                    <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/>
+                                </svg>
+                                <span>Followers ({{ $trade->followers_count }})</span>
+                            </button>
+                            @if($expanded)
+                                @foreach($trade->followers as $follower)
+                                    @php
+                                        $followerPnl = (float) $follower->net_pnl;
+                                        $followerWin = $followerPnl > 0;
+                                    @endphp
+                                    <button
+                                        wire:click="selectTrade('{{ $follower->uuid }}')"
+                                        class="w-full text-left pl-10 pr-4 py-2 border-b border-gray-100 dark:border-gray-700/40 transition-colors
+                                            {{ $selectedUuid === $follower->uuid
+                                                ? 'bg-indigo-50 dark:bg-indigo-950/40 border-l-[3px] border-l-indigo-500'
+                                                : 'border-l-[3px] border-l-transparent hover:bg-gray-100 dark:hover:bg-gray-800/50' }}"
+                                    >
+                                        <div class="flex items-center gap-3 border-l-2 border-gray-200 dark:border-gray-700 pl-3">
+                                            <div class="flex-1 min-w-0">
+                                                <div class="flex items-baseline justify-between gap-2">
+                                                    <div class="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
+                                                        {{ $follower->instrument_symbol }} &times; {{ $follower->quantity }}
+                                                    </div>
+                                                    <div class="text-xs font-semibold flex-shrink-0 {{ $followerWin ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400' }}">
+                                                        {{ $this->ptsDisplay($follower) }}
+                                                    </div>
+                                                </div>
+                                                <div class="flex items-center justify-between gap-2 mt-0.5">
+                                                    <div class="text-xs text-gray-600 dark:text-gray-500 truncate">{{ $follower->account->name }}</div>
+                                                    <div class="text-xs flex-shrink-0 {{ $followerWin ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400' }}">
+                                                        {{ $this->pnlDisplay($followerPnl) }}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </button>
+                                @endforeach
+                            @endif
+                        @endif
                     @endforeach
                 @endforeach
             @endif
@@ -858,6 +959,12 @@ new class extends Component {
                         {{ $localEntry->format('D M j, Y') }}
                         &middot;
                         {{ $t->account->name }}
+                        {{-- Copier role (#79): a follower has a master; a master has followers --}}
+                        @if($t->master_trade_id !== null || $t->followers_count > 0)
+                            @php $copierRole = $t->master_trade_id !== null ? 'follower' : 'master'; @endphp
+                            <span data-copier-role="{{ $copierRole }}" class="ml-0.5 inline-block px-1.5 py-px rounded text-[10px] font-semibold uppercase tracking-wide align-middle
+                                {{ $copierRole === 'master' ? 'bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300' }}">{{ $copierRole === 'master' ? 'Master' : 'Follower' }}</span>
+                        @endif
                         @if($t->account->connection)
                             &middot; {{ $t->account->connection }}
                         @endif
@@ -977,7 +1084,7 @@ new class extends Component {
                         <div class="grid grid-cols-2 gap-4">
                             <div>
                                 <label class="block text-xs text-gray-600 dark:text-gray-500 uppercase tracking-wide mb-1">Trade Type</label>
-                                <select wire:model="tradeEditForm.trade_type"
+                                <select wire:model.live="tradeEditForm.trade_type"
                                     class="w-full bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 text-sm rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500">
                                     <option value="">— unknown —</option>
                                     <option value="2ES">Second Entry Short</option>
@@ -988,6 +1095,14 @@ new class extends Component {
                                     <option value="F2EL">Failed Second Entry Long</option>
                                     <option value="Other">Other</option>
                                 </select>
+                                @if(($tradeEditForm['trade_type'] ?? '') === 'Other')
+                                    <input type="text" wire:model="tradeEditForm.trade_type_other" maxlength="64" placeholder="Describe the setup (optional)"
+                                        aria-label="Other trade type description"
+                                        class="mt-2 w-full bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 text-sm rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                                    @error('tradeEditForm.trade_type_other')
+                                        <p class="mt-1 text-xs text-red-600 dark:text-red-400">{{ $message }}</p>
+                                    @enderror
+                                @endif
                             </div>
                             <div>
                                 <label class="block text-xs text-gray-600 dark:text-gray-500 uppercase tracking-wide mb-1">Exit Reason</label>
@@ -1031,49 +1146,53 @@ new class extends Component {
                             ['EXIT BY',      $t->exit_reason->label()],
                             ['ENTRY ORDER',  $t->entry_order_name ?: '—'],
                             ['EXIT ORDER',   $t->exit_order_name  ?: '—'],
-                            ['ACCOUNT',      $t->account->name],
+                            ['STOP PRICE',   null],
                             ['TRADE TYPE',   $t->trade_type?->label() ?: '—'],
                         ] as [$label, $value])
                             <div class="bg-gray-50 dark:bg-gray-800 px-3 py-2.5">
                                 <div class="text-xs text-gray-600 dark:text-gray-500 uppercase tracking-wide mb-0.5">{{ $label }}</div>
-                                <div class="text-gray-900 dark:text-gray-100 font-medium">{{ $value }}</div>
+                                @if($label === 'STOP PRICE')
+                                    {{-- Stop price: optional, edited only here, in its cell (#60, #83) --}}
+                                    @if($editingStopPrice)
+                                        <div class="flex items-center gap-1">
+                                            <input id="stop-price-input" type="number" step="any" min="0" wire:model="stopPriceForm"
+                                                wire:keydown.enter="saveStopPrice" wire:keydown.escape="cancelEditStopPrice"
+                                                placeholder="blank to clear" aria-label="Stop price" autofocus
+                                                class="min-w-0 flex-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 text-sm font-medium rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                                            <button wire:click="saveStopPrice" aria-label="Save stop price" title="Save"
+                                                class="flex-shrink-0 p-1 rounded text-green-600 dark:text-green-400 hover:bg-gray-200 dark:hover:bg-gray-700">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                                            </button>
+                                            <button wire:click="cancelEditStopPrice" aria-label="Cancel stop price edit" title="Cancel"
+                                                class="flex-shrink-0 p-1 rounded text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                            </button>
+                                        </div>
+                                        @error('stopPriceForm')
+                                            <p class="mt-1 text-xs text-red-600 dark:text-red-400">{{ $message }}</p>
+                                        @enderror
+                                    @else
+                                        <button wire:click="startEditStopPrice" aria-label="{{ $t->stop_price !== null ? 'Edit stop price' : 'Add stop price' }}" title="{{ $t->stop_price !== null ? 'Edit stop price' : 'Add stop price' }}"
+                                            class="group inline-flex items-center gap-1.5 text-gray-900 dark:text-gray-100 font-medium hover:text-indigo-600 dark:hover:text-indigo-400">
+                                            <span>{{ $t->stop_price !== null ? number_format((float) $t->stop_price, 2) : '—' }}</span>
+                                            <svg class="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+                                            </svg>
+                                        </button>
+                                    @endif
+                                @else
+                                <div class="text-gray-900 dark:text-gray-100 font-medium">
+                                    {{ $value }}
+                                    {{-- An Other trade's description (up to 64 characters) sits behind an info icon so the cell stays one line (#75) --}}
+                                    @if($label === 'TRADE TYPE' && $t->trade_type === \App\Enums\TradeType::Other && filled($t->trade_type_other))
+                                        <x-stats.info-tip label="Other trade type description" class="align-middle">{{ $t->trade_type_other }}</x-stats.info-tip>
+                                    @endif
+                                </div>
+                                @endif
                             </div>
                         @endforeach
                     </div>
 
-                    {{-- Stop price: optional, edited only here (issue #60) --}}
-                    <div class="-mt-4 mb-6 px-3 text-sm">
-                        @if($editingStopPrice)
-                            <div class="flex flex-wrap items-center gap-2">
-                                <label for="stop-price-input" class="text-xs text-gray-600 dark:text-gray-500 uppercase tracking-wide">Stop Price</label>
-                                <input id="stop-price-input" type="number" step="any" min="0" wire:model="stopPriceForm"
-                                    wire:keydown.enter="saveStopPrice" wire:keydown.escape="cancelEditStopPrice"
-                                    placeholder="blank to clear"
-                                    class="w-36 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 text-sm rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500">
-                                <button wire:click="saveStopPrice"
-                                    class="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded transition-colors">
-                                    Save
-                                </button>
-                                <button wire:click="cancelEditStopPrice"
-                                    class="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 px-3 py-1.5 rounded transition-colors">
-                                    Cancel
-                                </button>
-                            </div>
-                            @error('stopPriceForm')
-                                <p class="mt-1 text-xs text-red-600 dark:text-red-400">{{ $message }}</p>
-                            @enderror
-                        @elseif($t->stop_price !== null)
-                            <div class="flex items-center gap-3">
-                                <span class="text-xs text-gray-600 dark:text-gray-500 uppercase tracking-wide">Stop Price</span>
-                                <span class="text-gray-900 dark:text-gray-100 font-medium">{{ number_format((float) $t->stop_price, 2) }}</span>
-                                <button wire:click="startEditStopPrice"
-                                    class="text-xs text-gray-600 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">Edit Stop Price</button>
-                            </div>
-                        @else
-                            <button wire:click="startEditStopPrice"
-                                class="text-xs text-gray-600 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">+ Add Stop Price</button>
-                        @endif
-                    </div>
                     @endif
 
                     {{-- Executions table --}}
@@ -1118,9 +1237,9 @@ new class extends Component {
                     <div class="mb-6">
                         <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Chart</h3>
 
-                        @if($t->screenshots->isNotEmpty())
+                        @if($t->exitScreenshots->isNotEmpty())
                             <div class="space-y-3">
-                                @foreach($t->screenshots as $shot)
+                                @foreach($t->exitScreenshots as $shot)
                                     <div style="position:relative;border-radius:0.5rem;overflow:hidden" class="bg-gray-50 dark:bg-gray-800"
                                         x-data="{ hover: false }" @mouseenter="hover=true" @mouseleave="hover=false">
                                         <img
@@ -1157,6 +1276,17 @@ new class extends Component {
                                     </div>
                                 @endforeach
                             </div>
+                        @endif
+
+                        @if($t->entryScreenshot)
+                            <x-entry-image :id="$t->entryScreenshot->id" :url="route('journal.screenshot', [$t, $t->entryScreenshot])">
+                                <button
+                                    type="button"
+                                    wire:click="deleteScreenshot({{ $t->entryScreenshot->id }})"
+                                    wire:confirm="Delete this image?"
+                                    class="text-xs px-3 py-1 rounded border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400"
+                                >Delete</button>
+                            </x-entry-image>
                         @endif
 
                         {{-- Upload area --}}
@@ -1424,9 +1554,8 @@ new class extends Component {
 
                         <div class="grid grid-cols-2 gap-4 mb-6">
                             @php
-                                $trades = $this->trades;
-                                $winners = $trades->filter(fn($t) => (float)$t->net_pnl > 0);
-                                $losers  = $trades->filter(fn($t) => (float)$t->net_pnl < 0);
+                                $trades = $this->totalledTrades;
+                                [$winners, $losers] = $trades->partition(fn($t) => \App\Support\TradeStatistics::isWinner($t));
                                 $grossWin  = $winners->sum(fn($t) => (float)$t->gross_pnl);
                                 $grossLoss = abs($losers->sum(fn($t) => (float)$t->gross_pnl));
                                 $pf = $grossLoss > 0 ? round($grossWin / $grossLoss, 2) : null;
@@ -1435,8 +1564,8 @@ new class extends Component {
                             @foreach([
                                 ['Win / Loss', $winners->count() . 'W / ' . $losers->count() . 'L', 'text-gray-900 dark:text-gray-100'],
                                 ['Profit Factor', $pf !== null ? $pf : '—', $pf >= 1 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'],
-                                ['Avg Winner', $winners->count() > 0 ? $this->pnlDisplay((float)$winners->avg('net_pnl')) : '—', 'text-green-600 dark:text-green-400'],
-                                ['Avg Loser',  $losers->count()  > 0 ? $this->pnlDisplay((float)$losers->avg('net_pnl'))  : '—', 'text-red-600 dark:text-red-400'],
+                                ['Avg Winner', $winners->count() > 0 ? $this->pnlDisplay((float)$winners->avg('net_pnl')) : '—', $winners->count() > 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'],
+                                ['Avg Loser',  $losers->count()  > 0 ? $this->pnlDisplay((float)$losers->avg('net_pnl'))  : '—', $losers->count()  > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-gray-500'],
                                 ['Expectancy', $this->pnlDisplay($expectancy) . '/trade', $expectancy >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'],
                                 ['Journaled', $s['journaled'] . ' / ' . $s['total'] . ' trades', $s['journaled'] === $s['total'] ? 'text-green-600 dark:text-green-400' : 'text-yellow-600 dark:text-yellow-400'],
                             ] as [$label, $value, $color])
