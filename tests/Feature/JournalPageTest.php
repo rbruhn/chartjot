@@ -1111,3 +1111,71 @@ test('the trade view labels a master and a follower next to the account under th
         ->assertSeeHtmlInOrder(['data-copier-role="follower"', '>ENTRY PRICE</div>']);
     $component->call('selectTrade', $normal->uuid)->assertDontSeeHtml('data-copier-role');
 });
+
+// ---------------------------------------------------------------------------
+// Summary strip averages (#82): a dash when there are no winners or no losers
+// ---------------------------------------------------------------------------
+
+test('with only winning trades the strip shows a dash for the average loss', function () {
+    [$user, $journal] = journalUser();
+    tradeInJournal($journal, ['net_pnl' => 100, 'points' => 2]);
+
+    $component = Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->assertDontSee('-0.00 pt')
+        ->assertSeeHtml('data-summary-avg-loss="none"');
+
+    expect($component->get('summary')['avg_loss_pts'])->toBeNull()
+        ->and($component->get('summary')['avg_win_pts'])->toBe(2.0);
+});
+
+test('with only losing trades the strip shows a dash for the average win', function () {
+    [$user, $journal] = journalUser();
+    tradeInJournal($journal, ['net_pnl' => -50, 'points' => -1]);
+
+    $component = Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->assertDontSee('+0.00 pt')
+        ->assertSeeHtml('data-summary-avg-win="none"');
+
+    expect($component->get('summary')['avg_win_pts'])->toBeNull()
+        ->and($component->get('summary')['avg_loss_pts'])->toBe(1.0);
+});
+
+test('with winners and losers both strip averages are shown', function () {
+    [$user, $journal] = journalUser();
+    tradeInJournal($journal, ['net_pnl' => 100, 'points' => 2]);
+    tradeInJournal($journal, ['net_pnl' => -50, 'points' => -1]);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->assertSee('+2.00 pt')
+        ->assertSee('-1.00 pt')
+        ->assertDontSeeHtml('data-summary-avg-win="none"')
+        ->assertDontSeeHtml('data-summary-avg-loss="none"');
+});
+
+test('with no trades the strip shows dashes for both averages', function () {
+    [$user, $journal] = journalUser();
+
+    $component = Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->assertOk()
+        ->assertSeeHtml('data-summary-avg-win="none"')
+        ->assertSeeHtml('data-summary-avg-loss="none"');
+
+    expect($component->get('summary')['avg_win_pts'])->toBeNull()
+        ->and($component->get('summary')['avg_loss_pts'])->toBeNull();
+});
+
+test('a breakeven trade counts as a loss in the strip and the Overview, as on Statistics', function () {
+    [$user, $journal] = journalUser();
+    tradeInJournal($journal, ['net_pnl' => 100, 'points' => 2]);
+    tradeInJournal($journal, ['net_pnl' => 0, 'points' => 0]);
+
+    $component = Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->assertSee('1W / 1L');
+
+    expect($component->get('summary')['win_rate'])->toBe(50);
+});
