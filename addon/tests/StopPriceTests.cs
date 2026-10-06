@@ -149,5 +149,44 @@ namespace ChartJot.Core.Tests
 
 			Assert.Equal("7696.25", payload["stop_price"].AsString());
 		}
+
+		// ---- followers (copier Executions mode copies fills only, so a follower may have no stop order of its own)
+
+		[Fact]
+		public void AFollowerWithoutItsOwnStop_InheritsTheMastersStop()
+		{
+			string masterId, followerId;
+			AddonState state = OpenLong(out masterId);
+			state.RecordStop(Account, EsName, 7696m);
+			state.Tracker.Apply(Buy("f1", "g1", "AI", 2, 7700.25m, 1, 0m, 2, Other, Mes, isEntry: true));
+			state.Tracker.Apply(LongTarget);
+			state.RecordClosed(Assert.Single(state.Tracker.Apply(LongStopOut).Closed));
+			state.RecordClosed(Assert.Single(state.Tracker.Apply(Sell("f2", "g2", "AI", 2, 7703m, 61, 0m, 0, Other, Mes, isExit: true)).Closed));
+			followerId = state.FollowerCandidates(Account).Single().TradeId;
+			state.UpdateForm(Account, EsName, "idea", "2EL", null, At(0));
+
+			IList<QueuedDelivery> sent = state.SubmitForm(Account, EsName, "0.5.0", a => "Sim", new[] { followerId }, At(400), id => masterId);
+
+			Assert.Equal("7696.00", JsonValue.Parse(sent[1].PayloadJson)["stop_price"].AsString());
+		}
+
+		[Fact]
+		public void AFollowerWithItsOwnStop_KeepsIt()
+		{
+			string masterId;
+			AddonState state = OpenLong(out masterId);
+			state.RecordStop(Account, EsName, 7696m);
+			state.Tracker.Apply(Buy("f1", "g1", "AI", 2, 7700.25m, 1, 0m, 2, Other, Mes, isEntry: true));
+			state.RecordStop(Other, "MES 12-26", 7695.50m);
+			state.Tracker.Apply(LongTarget);
+			state.RecordClosed(Assert.Single(state.Tracker.Apply(LongStopOut).Closed));
+			state.RecordClosed(Assert.Single(state.Tracker.Apply(Sell("f2", "g2", "AI", 2, 7703m, 61, 0m, 0, Other, Mes, isExit: true)).Closed));
+			string followerId = state.FollowerCandidates(Account).Single().TradeId;
+			state.UpdateForm(Account, EsName, "idea", "2EL", null, At(0));
+
+			IList<QueuedDelivery> sent = state.SubmitForm(Account, EsName, "0.5.0", a => "Sim", new[] { followerId }, At(400), id => masterId);
+
+			Assert.Equal("7695.50", JsonValue.Parse(sent[1].PayloadJson)["stop_price"].AsString());
+		}
 	}
 }

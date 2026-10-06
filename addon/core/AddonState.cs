@@ -401,9 +401,16 @@ namespace ChartJot.Core
 					string masterId = masterOf == null ? null : masterOf(trade.TradeId);
 					TradeImages images;
 					if (masterId == null || !masterImages.TryGetValue(masterId, out images))
-						images = masterImages[masters[0].TradeId];
+					{
+						masterId = masters[0].TradeId;
+						images = masterImages[masterId];
+					}
 					staged.Screenshot = Copy(images.Exit);
 					staged.EntryScreenshot = Copy(images.Entry);
+					// #53: a follower keeps its own stop (copier Orders mode copies the stop order); without one
+					// (Executions mode copies fills only) it takes its master's.
+					if (!staged.StopPrice.HasValue)
+						staged.StopPrice = StopFor(masterId);
 				}
 				staged.Notes = string.IsNullOrWhiteSpace(form.Body)
 					? new List<NoteRecord>()
