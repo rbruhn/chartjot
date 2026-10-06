@@ -18,19 +18,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\core\ChartJot.Core.csproj" />
-    <!-- Builds the net462 DLL NinjaTrader loads, so NinjaTraderBuildTests can inspect it (#88). -->
-    <ProjectReference Include="..\core\ChartJot.Core.csproj" SetTargetFramework="TargetFramework=net462" ReferenceOutputAssembly="false" />
-  </ItemGroup>
-
-  <PropertyGroup>
-    <CoreNet462Dll>$(MSBuildThisFileDirectory)../core/bin/$(Configuration)/net462/ChartJot.Core.dll</CoreNet462Dll>
-  </PropertyGroup>
-
-  <ItemGroup>
-    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
-      <_Parameter1>CoreNet462Dll</_Parameter1>
-      <_Parameter2>$(CoreNet462Dll)</_Parameter2>
-    </AssemblyAttribute>
   </ItemGroup>
 
   <ItemGroup>
