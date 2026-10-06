@@ -269,8 +269,8 @@ exit (Orders mode). The earliest such trade per follower is used.
 Each follower's payload names its master trade in `copier_master_trade_id`
 (the master's `trade_id`); the master's own payload, like any trade without a
 copier, sends `null`. The journal links the two within the same journal,
-whichever arrives first, and lists the follower under its master. Statistics
-count the master and its followers as one trade (#79).
+whichever arrives first, and lists the follower under its master. Totals and
+Statistics still add every trade of the selected accounts (#79).
 
 ### Trade type selector
 

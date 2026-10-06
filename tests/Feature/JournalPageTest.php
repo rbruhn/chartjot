@@ -993,7 +993,7 @@ test('a trade without followers has no Followers link', function () {
         ->assertDontSee('Followers (');
 });
 
-test('the summary counts a master and its followers as one trade', function () {
+test('the summary totals every trade of the accounts shown, followers included', function () {
     [$user, $journal] = journalUser();
     copierSetup($journal);
     tradeInJournal($journal, ['net_pnl' => -20, 'points' => -1]);
@@ -1002,9 +1002,34 @@ test('the summary counts a master and its followers as one trade', function () {
         ->test('journal.trade-journal', ['journal' => $journal])
         ->get('summary');
 
-    expect($summary['total'])->toBe(2)
-        ->and($summary['net_pnl'])->toBe(80.0)
-        ->and($summary['win_rate'])->toBe(50);
+    expect($summary['total'])->toBe(4)
+        ->and($summary['net_pnl'])->toBe(190.0)
+        ->and($summary['win_rate'])->toBe(75);
+});
+
+test('the day header totals followers of the selected accounts too', function () {
+    [$user, $journal] = journalUser();
+    copierSetup($journal);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->assertSee('3 trades')
+        ->assertSee('+$210.00');
+});
+
+test('a master selected on its own totals only the master, though its followers still expand', function () {
+    [$user, $journal] = journalUser();
+    [$master] = copierSetup($journal);
+
+    $component = Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->set('selectedAccountIds', [$master->account_id])
+        ->call('toggleFollowers', $master->uuid)
+        ->assertSee('FOLA')
+        ->assertSee('FOLB');
+
+    expect($component->get('summary')['total'])->toBe(1)
+        ->and($component->get('summary')['net_pnl'])->toBe(100.0);
 });
 
 test('filtering to a follower account shows its trades as normal rows with their own P&L', function () {
@@ -1031,8 +1056,8 @@ test('a follower whose master is also selected is not listed twice', function ()
         ->assertSee('MSTR')
         ->assertDontSee('FOLA');
 
-    expect($component->get('summary')['total'])->toBe(1)
-        ->and($component->get('summary')['net_pnl'])->toBe(100.0);
+    expect($component->get('summary')['total'])->toBe(2)
+        ->and($component->get('summary')['net_pnl'])->toBe(110.0);
 });
 
 test('the trade view labels a master and a follower next to the account', function () {
