@@ -132,13 +132,20 @@ namespace ChartJot.Core
 		/// Sends one delivery's frozen payload, with the screenshot when given. Never throws for a network failure,
 		/// a timeout or a cancellation: those come back as <see cref="DeliveryOutcome.Retryable"/>.
 		/// </summary>
-		public async Task<DeliveryAttempt> SendAsync(QueuedDelivery delivery, DeliveryScreenshot screenshot,
+		public Task<DeliveryAttempt> SendAsync(QueuedDelivery delivery, DeliveryScreenshot screenshot,
+			CancellationToken cancellationToken = default(CancellationToken))
+		{
+			return SendAsync(delivery, screenshot, null, cancellationToken);
+		}
+
+		/// <summary>As above, with the entry image (#52) as the <c>entry_screenshot_file</c> part when given.</summary>
+		public async Task<DeliveryAttempt> SendAsync(QueuedDelivery delivery, DeliveryScreenshot screenshot, DeliveryScreenshot entryScreenshot,
 			CancellationToken cancellationToken = default(CancellationToken))
 		{
 			if (delivery == null)
 				throw new ArgumentNullException("delivery");
 
-			using (HttpRequestMessage request = BuildRequest(delivery, screenshot))
+			using (HttpRequestMessage request = BuildRequest(delivery, screenshot, entryScreenshot))
 			using (CancellationTokenSource timeoutSource = new CancellationTokenSource(timeout))
 			using (CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutSource.Token))
 			{
@@ -235,7 +242,7 @@ namespace ChartJot.Core
 			return reports;
 		}
 
-		private HttpRequestMessage BuildRequest(QueuedDelivery delivery, DeliveryScreenshot screenshot)
+		private HttpRequestMessage BuildRequest(QueuedDelivery delivery, DeliveryScreenshot screenshot, DeliveryScreenshot entryScreenshot)
 		{
 			MultipartFormDataContent content = new MultipartFormDataContent();
 			content.Add(new StringContent(delivery.PayloadJson, new UTF8Encoding(false), "application/json"), "trade");
@@ -246,6 +253,14 @@ namespace ChartJot.Core
 				ByteArrayContent image = new ByteArrayContent(screenshot.Bytes);
 				image.Headers.ContentType = new MediaTypeHeaderValue(MediaType(screenshot.Format));
 				content.Add(image, "screenshot_file", delivery.TradeId + "." + Extension(screenshot.Format));
+			}
+			if (entryScreenshot != null)
+			{
+				if (!IsUsable(entryScreenshot))
+					throw new ArgumentException("An entry image must be non-empty PNG or JPEG.", "entryScreenshot");
+				ByteArrayContent image = new ByteArrayContent(entryScreenshot.Bytes);
+				image.Headers.ContentType = new MediaTypeHeaderValue(MediaType(entryScreenshot.Format));
+				content.Add(image, "entry_screenshot_file", delivery.TradeId + "-entry." + Extension(entryScreenshot.Format));
 			}
 
 			HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = content };

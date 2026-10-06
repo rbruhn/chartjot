@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Casts\UtcDatetime;
 use App\Enums\Direction;
 use App\Enums\ExitReason;
+use App\Enums\ScreenshotKind;
 use App\Enums\TradeType;
 use Database\Factories\TradeFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -17,7 +18,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 #[Fillable([
-    'uuid', 'journal_id', 'account_id', 'source_trade_id', 'source', 'addon_version',
+    'uuid', 'journal_id', 'account_id', 'source_trade_id', 'copier_master_source_trade_id', 'source', 'addon_version',
     'trade_type', 'trade_type_other', 'instrument', 'instrument_symbol',
     'tick_size', 'point_value', 'direction', 'quantity', 'total_entry_quantity',
     'entry_at', 'exit_at', 'entry_price', 'exit_price', 'stop_price',
@@ -91,14 +92,60 @@ class Trade extends BaseModel
         return $this->hasMany(TradeLeg::class)->orderBy('sequence');
     }
 
+    /** The trade's main chart image: the first exit image (never the entry image, which is captured earlier). */
     public function screenshot(): HasOne
     {
-        return $this->hasOne(TradeScreenshot::class)->oldest();
+        return $this->hasOne(TradeScreenshot::class)->where('kind', ScreenshotKind::Exit)->oldest();
     }
 
+    /** Every image of the trade, entry included (for cleanup). */
     public function screenshots(): HasMany
     {
         return $this->hasMany(TradeScreenshot::class);
+    }
+
+    /** The chart images shown inline: the AddOn's exit image and any manual uploads. */
+    public function exitScreenshots(): HasMany
+    {
+        return $this->hasMany(TradeScreenshot::class)->where('kind', ScreenshotKind::Exit)->oldest();
+    }
+
+    /** The image captured when the trade opened (#72), shown only through the "Entry Image" link. */
+    public function entryScreenshot(): HasOne
+    {
+        return $this->hasOne(TradeScreenshot::class)->where('kind', ScreenshotKind::Entry)->latest('id');
+    }
+
+    /** #79: the copier master this follower copied, in the same journal. Null for a master or a normal trade. */
+    public function master(): BelongsTo
+    {
+        return $this->belongsTo(Trade::class, 'master_trade_id');
+    }
+
+    /** #79: the copier followers of this master. A trade with followers is a master. */
+    public function followers(): HasMany
+    {
+        return $this->hasMany(Trade::class, 'master_trade_id')->orderBy('entry_at');
+    }
+
+    /**
+     * #79: the journal list's rows. A follower is grouped under its master, so with no account selection the rows
+     * are masters and normal trades. With a selection, every selected trade except a follower whose master is also
+     * selected, so filtering to a follower account shows its own trades as rows. Totals are not limited by this:
+     * they add every trade of the selected accounts.
+     *
+     * @param  array<int>|null  $accountIds
+     */
+    public function scopeListedRows($query, ?array $accountIds = null): void
+    {
+        if ($accountIds === null) {
+            $query->whereNull('master_trade_id');
+
+            return;
+        }
+
+        $query->where(fn ($q) => $q->whereNull('master_trade_id')
+            ->orWhereHas('master', fn ($m) => $m->whereNotIn('account_id', $accountIds)));
     }
 
     public function notes(): HasMany

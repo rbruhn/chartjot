@@ -12,6 +12,53 @@ namespace ChartJot.Core
 		{
 			return Array.IndexOf(All, value) >= 0;
 		}
+
+		/// <summary>The dropdown label for a submitted value (NT8.md, "Trade type selector"); null when unknown.</summary>
+		public static string Label(string value)
+		{
+			switch (value)
+			{
+				case "2ES": return "Second Entry Short";
+				case "2EL": return "Second Entry Long";
+				case "RS": return "Range Short";
+				case "RL": return "Range Long";
+				case "F2ES": return "Failed Second Entry Short";
+				case "F2EL": return "Failed Second Entry Long";
+				case "Other": return "Other type of entry";
+			}
+			return null;
+		}
+
+		/// <summary>
+		/// The direction a type is traded in, or null when it implies none (<c>Other</c>, unknown). A failed second
+		/// entry is traded the opposite way: <c>F2ES</c> is taken long and <c>F2EL</c> short (confirmed by the
+		/// trader, 2026-10-04).
+		/// </summary>
+		public static Direction? ImpliedDirection(string value)
+		{
+			switch (value)
+			{
+				case "2ES":
+				case "RS":
+				case "F2EL":
+					return Direction.Short;
+				case "2EL":
+				case "RL":
+				case "F2ES":
+					return Direction.Long;
+			}
+			return null;
+		}
+
+		/// <summary>The non-blocking warning shown when the chosen type implies the other direction; null otherwise.</summary>
+		public static string DirectionWarning(string value, Direction actual)
+		{
+			Direction? implied = ImpliedDirection(value);
+			if (!implied.HasValue || implied.Value == actual)
+				return null;
+			return Label(value) + " is usually a " + implied.Value.ToString().ToLowerInvariant()
+				+ " trade, but this trade was " + actual.ToString().ToLowerInvariant() + ".";
+		}
 	}
 
 	public static class NotePhases
@@ -27,6 +74,13 @@ namespace ChartJot.Core
 		public string Body { get; set; }
 		public string Phase { get; set; }
 		public DateTimeOffset OccurredAt { get; set; }
+	}
+
+	/// <summary>A trade's two chart images (#52); either may be null.</summary>
+	public sealed class TradeImages
+	{
+		public ScreenshotMeta Exit { get; set; }
+		public ScreenshotMeta Entry { get; set; }
 	}
 
 	public sealed class ScreenshotMeta
@@ -51,8 +105,15 @@ namespace ChartJot.Core
 		/// <summary>Null when no screenshot file is attached.</summary>
 		public ScreenshotMeta Screenshot { get; set; }
 
+		/// <summary>The entry image (#52); null when none is attached. Only its capture time is sent.</summary>
+		public ScreenshotMeta EntryScreenshot { get; set; }
+
 		/// <summary>Optional (<see cref="StagedTrade.StopPrice"/>); null is sent as null and never blocks submission.</summary>
 		public decimal? StopPrice { get; set; }
+
+		/// <summary>A copier follower's master trade_id (#79), so the journal can link the two; null for a master or
+		/// a trade with no copier.</summary>
+		public string CopierMasterTradeId { get; set; }
 	}
 
 	/// <summary>Builds the JSON `trade` part of the intake request (NT8.md, Provisional Payload Contract).</summary>
@@ -113,6 +174,7 @@ namespace ChartJot.Core
 			w.EndObject();
 
 			w.Property("stop_price", info.StopPrice.HasValue ? DecimalFormat.Price(info.StopPrice.Value, tick) : null);
+			w.Property("copier_master_trade_id", NullIfBlank(info.CopierMasterTradeId));
 
 			w.Name("legs").BeginArray();
 			foreach (Leg leg in trade.Legs)
@@ -155,6 +217,13 @@ namespace ChartJot.Core
 				w.Name("screenshot").BeginObject();
 				w.Property("captured_at", Timestamp(info.Screenshot.CapturedAt));
 				w.Property("caption", NullIfBlank(info.Screenshot.Caption));
+				w.EndObject();
+			}
+
+			if (info.EntryScreenshot != null)
+			{
+				w.Name("entry_screenshot").BeginObject();
+				w.Property("captured_at", Timestamp(info.EntryScreenshot.CapturedAt));
 				w.EndObject();
 			}
 

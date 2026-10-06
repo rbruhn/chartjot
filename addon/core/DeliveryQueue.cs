@@ -24,7 +24,7 @@ namespace ChartJot.Core
 		/// <summary>HTTP 200: the server already had this trade_id and accepted the retry idempotently.</summary>
 		AcceptedIdempotent,
 
-		/// <summary>Timeout, connection error, or HTTP 5xx. Keep the same payload and back off.</summary>
+		/// <summary>Timeout, connection error, or HTTP 5xx. Keep the same payload and back off; after the last automatic attempt the delivery fails and waits for a manual retry.</summary>
 		Retryable,
 
 		/// <summary>HTTP 401 or 403. The intake token is wrong; automatic retries stop for the whole queue.</summary>
@@ -68,11 +68,23 @@ namespace ChartJot.Core
 		private readonly List<QueuedDelivery> order = new List<QueuedDelivery>();
 		private readonly TimeSpan initialBackoff;
 		private readonly TimeSpan maxBackoff;
+		private readonly int maxAutomaticAttempts;
 
-		public DeliveryQueue(TimeSpan? initialBackoff = null, TimeSpan? maxBackoff = null)
+		/// <param name="maxAutomaticAttempts">Send attempts before a timeout, connection error or 5xx stops being
+		/// retried automatically and the delivery fails (the trader retries it by hand). Default 3.</param>
+		public DeliveryQueue(TimeSpan? initialBackoff = null, TimeSpan? maxBackoff = null, int maxAutomaticAttempts = 3)
 		{
+			if (maxAutomaticAttempts < 1)
+				throw new ArgumentOutOfRangeException("maxAutomaticAttempts");
 			this.initialBackoff = initialBackoff ?? TimeSpan.FromSeconds(5);
 			this.maxBackoff = maxBackoff ?? TimeSpan.FromMinutes(5);
+			this.maxAutomaticAttempts = maxAutomaticAttempts;
+		}
+
+		/// <summary>Send attempts per delivery before it fails and waits for the trader's Retry.</summary>
+		public int MaxAutomaticAttempts
+		{
+			get { return maxAutomaticAttempts; }
 		}
 
 		/// <summary>
@@ -173,6 +185,14 @@ namespace ChartJot.Core
 
 				case DeliveryOutcome.Retryable:
 					d.Attempts++;
+					if (d.Attempts >= maxAutomaticAttempts)
+					{
+						// Out of automatic attempts: keep the payload and wait for the trader's Retry.
+						d.State = DeliveryState.Failed;
+						d.NextAttemptAt = null;
+						d.IsConfigurationError = false;
+						break;
+					}
 					d.State = DeliveryState.QueuedForRetry;
 					d.NextAttemptAt = now + NextBackoff(d.Attempts, initialBackoff, maxBackoff);
 					break;
@@ -196,8 +216,8 @@ namespace ChartJot.Core
 		}
 
 		/// <summary>
-		/// The trader asked to retry a Failed delivery (token corrected, or validation issue resolved) with its
-		/// existing payload unchanged. Also lifts <see cref="ConfigurationErrorHalted"/>, since acting on it is
+		/// The trader asked to retry a Failed delivery (journal reachable again, token corrected, or validation issue
+		/// resolved) with its existing payload unchanged, with a fresh set of automatic attempts. Also lifts <see cref="ConfigurationErrorHalted"/>, since acting on it is
 		/// the trader's signal that the token is fixed.
 		/// </summary>
 		public void RetryManually(string tradeId, DateTimeOffset now)
@@ -207,8 +227,28 @@ namespace ChartJot.Core
 				throw new InvalidOperationException("Trade " + tradeId + " is not Failed (state: " + d.State + ").");
 
 			d.State = DeliveryState.Pending;
+			d.Attempts = 0;
 			d.NextAttemptAt = null;
 			ConfigurationErrorHalted = false;
+		}
+
+		/// <summary>Every Failed delivery, in the order queued: what the trader still has to retry.</summary>
+		public IList<QueuedDelivery> FailedDeliveries
+		{
+			get { return order.Where(d => d.State == DeliveryState.Failed).ToList(); }
+		}
+
+		/// <summary>
+		/// The trader clicked Retry: every Failed delivery goes back to Pending with a fresh set of automatic attempts,
+		/// its payload unchanged (see <see cref="RetryManually"/>). Returns the retried trade_ids.
+		/// </summary>
+		public IList<string> RetryAllFailed(DateTimeOffset now)
+		{
+			List<string> retried = FailedDeliveries.Select(d => d.TradeId).ToList();
+			foreach (string tradeId in retried)
+				RetryManually(tradeId, now);
+			ConfigurationErrorHalted = false;
+			return retried;
 		}
 
 		/// <summary>Exponential backoff from attempt 1, doubling each time and capped at max.</summary>

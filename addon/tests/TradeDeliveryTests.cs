@@ -651,5 +651,43 @@ namespace ChartJot.Core.Tests
 			Assert.Empty(handler.Sent);
 			Assert.Empty(reports);
 		}
+
+		// ---- entry image (#52/#72)
+
+		[Fact]
+		public async Task SendAsync_WithAnEntryImage_AttachesItAsEntryScreenshotFile()
+		{
+			StubHandler handler = Answer(HttpStatusCode.Created);
+			QueuedDelivery d = Queued();
+			byte[] entryPng = { 0x89, 0x50, 0x4E, 0x47, 9, 9 };
+
+			await Delivery(handler).SendAsync(d, new DeliveryScreenshot { Bytes = Png, Format = "png" }, new DeliveryScreenshot { Bytes = entryPng, Format = "png" });
+
+			SentRequest sent = Assert.Single(handler.Sent);
+			Assert.Equal(Png, sent.Part("screenshot_file").Bytes);
+			SentPart entry = sent.Part("entry_screenshot_file");
+			Assert.Equal("image/png", entry.ContentType.MediaType);
+			Assert.Equal(d.TradeId + "-entry.png", entry.FileName);
+			Assert.Equal(entryPng, entry.Bytes);
+		}
+
+		[Fact]
+		public async Task SendAsync_WithOnlyAnEntryImage_SendsNoExitPart()
+		{
+			StubHandler handler = Answer(HttpStatusCode.Created);
+
+			await Delivery(handler).SendAsync(Queued(), null, new DeliveryScreenshot { Bytes = Png, Format = "png" });
+
+			SentRequest sent = Assert.Single(handler.Sent);
+			Assert.Null(sent.Part("screenshot_file"));
+			Assert.NotNull(sent.Part("entry_screenshot_file"));
+		}
+
+		[Fact]
+		public async Task SendAsync_WithAnUnsupportedEntryImageFormat_Throws()
+		{
+			await Assert.ThrowsAsync<ArgumentException>(() =>
+				Delivery(Answer(HttpStatusCode.Created)).SendAsync(Queued(), null, new DeliveryScreenshot { Bytes = Png, Format = "bmp" }));
+		}
 	}
 }
