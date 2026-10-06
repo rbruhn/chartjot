@@ -284,6 +284,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 			foreach (Account account in toUnsubscribe)
 			{
 				account.ExecutionUpdate -= OnExecutionUpdate;
+				account.OrderUpdate -= OnOrderUpdate;
 				account.PositionUpdate -= OnPositionUpdate;
 			}
 		}
@@ -413,7 +414,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 
 		// ---- submission (called by the note panel, #64's second PR)
 
-		public const string AddonVersion = "0.4.0";
+		public const string AddonVersion = "0.5.0";
 
 		/// <summary>
 		/// The trader clicked Submit trade. Freezes the staged trade into the delivery queue and wakes the delivery
@@ -732,6 +733,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 			foreach (Account account in toSubscribe)
 			{
 				account.ExecutionUpdate	+= OnExecutionUpdate;
+				account.OrderUpdate		+= OnOrderUpdate;
 				account.PositionUpdate		+= OnPositionUpdate;
 			}
 
@@ -740,6 +742,13 @@ namespace NinjaTrader.NinjaScript.AddOns
 
 			// Trades closed while away (and any left from before a restart) have long passed the settle period.
 			StageAllAwaiting();
+
+			// Trades still open after a restart or reconnect: pick up their current stop.
+			List<OpenTradeInfo> stillOpen;
+			lock (sync)
+				stillOpen = state.Tracker.OpenTrades.ToList();
+			foreach (OpenTradeInfo open in stillOpen)
+				ReadWorkingStop(open.Account, open.Instrument.FullName);
 		}
 
 		private static void ReconcileAccount(Account account, string reason)
@@ -811,6 +820,11 @@ namespace NinjaTrader.NinjaScript.AddOns
 						state.AttachPendingNotes(result.Opened);
 					if (Settings.CaptureEntryImage)
 						ChartJotCapture.CaptureLater(result.Opened.Account, result.Opened.Instrument.FullName, result.Opened.TradeId, true);
+					// The ATM can place its stop before this fill is reported, so read the working stop shortly after too.
+					string openedAccount = result.Opened.Account;
+					string openedInstrument = result.Opened.Instrument.FullName;
+					Task.Delay(TimeSpan.FromMilliseconds(500)).ContinueWith(t => ReadWorkingStop(openedAccount, openedInstrument));
+					Task.Delay(TimeSpan.FromSeconds(2)).ContinueWith(t => ReadWorkingStop(openedAccount, openedInstrument));
 				}
 
 				foreach (CompletedTrade closed in result.Closed)
@@ -829,6 +843,85 @@ namespace NinjaTrader.NinjaScript.AddOns
 				// An AddOn bug must never escape into NT8's event pipeline.
 				ChartJotLog.Write("ERROR", "OnExecutionUpdate: " + ex);
 			}
+		}
+
+		// ---- stop price (#53): read-only, the AddOn never places, changes or cancels an order
+
+		private static void OnOrderUpdate(object sender, OrderEventArgs e)
+		{
+			try
+			{
+				Order order = e.Order;
+				if (order == null || !IsLiveStop(order.OrderType, e.OrderState))
+					return;
+				double price = e.StopPrice > 0 ? e.StopPrice : order.StopPrice;
+				RecordProtectiveStop(order, price);
+			}
+			catch (Exception ex)
+			{
+				// An AddOn bug must never escape into NT8's event pipeline.
+				ChartJotLog.Write("ERROR", "OnOrderUpdate: " + ex);
+			}
+		}
+
+		/// <summary>Records the account/instrument's working protective stop, if there is one. Never call under sync.</summary>
+		private static void ReadWorkingStop(string accountName, string instrumentFullName)
+		{
+			try
+			{
+				Account account = Account.All.FirstOrDefault(a => a.Name == accountName);
+				if (account == null)
+					return;
+				foreach (Order order in account.Orders.ToList())
+				{
+					if (order.Instrument != null && order.Instrument.FullName == instrumentFullName && IsLiveStop(order.OrderType, order.OrderState))
+						RecordProtectiveStop(order, order.StopPrice);
+				}
+			}
+			catch (Exception ex)
+			{
+				ChartJotLog.Write("ERROR", "ReadWorkingStop: " + ex);
+			}
+		}
+
+		private static bool IsLiveStop(OrderType type, OrderState orderState)
+		{
+			if (type != OrderType.StopMarket && type != OrderType.StopLimit)
+				return false;
+			return orderState == OrderState.Accepted || orderState == OrderState.Working || orderState == OrderState.TriggerPending
+				|| orderState == OrderState.ChangePending || orderState == OrderState.ChangeSubmitted;
+		}
+
+		/// <summary>
+		/// A stop on the closing side of the open position (a sell stop for a long, a buy stop for a short) is its
+		/// protective stop; addon/core decides whether its price is still at risk (#53).
+		/// </summary>
+		private static void RecordProtectiveStop(Order order, double price)
+		{
+			if (order.Account == null || order.Instrument == null || price <= 0)
+				return;
+			string accountName = order.Account.Name;
+			string instrumentFullName = order.Instrument.FullName;
+			decimal stop = (decimal)price;
+
+			bool recorded;
+			lock (sync)
+			{
+				OpenTradeInfo open = state.Tracker.OpenTrades.FirstOrDefault(t => t.Account == accountName && t.Instrument.FullName == instrumentFullName);
+				if (open == null)
+					return;
+				bool closingSide = open.Direction == Direction.Long
+					? order.OrderAction == OrderAction.Sell
+					: order.OrderAction == OrderAction.BuyToCover || order.OrderAction == OrderAction.Buy;
+				if (!closingSide)
+					return;
+				decimal? before = state.StopFor(open.TradeId);
+				recorded = state.RecordStop(accountName, instrumentFullName, stop) && before != stop;
+			}
+			if (!recorded)
+				return;
+			SaveState();
+			ChartJotLog.Write("STOP", "account=" + accountName + " instrument=" + instrumentFullName + " stop=" + stop.ToString(CultureInfo.InvariantCulture));
 		}
 
 		private static void OnPositionUpdate(object sender, PositionEventArgs e)
