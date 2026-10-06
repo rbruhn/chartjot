@@ -310,8 +310,46 @@ test('editing a note updates its body', function () {
 });
 
 // ---------------------------------------------------------------------------
-// Stop price (issue #60)
+// Stop price (issue #60), edited in its table cell (#83)
 // ---------------------------------------------------------------------------
+
+test('the table has a STOP PRICE cell and no ACCOUNT cell; the account stays under the title', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['stop_price' => 4512.25]);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->assertSeeHtml('>STOP PRICE</div>')
+        ->assertDontSeeHtml('>ACCOUNT</div>')
+        ->assertSee($trade->account->name)
+        ->assertSee('4,512.25')
+        ->assertSeeHtml('aria-label="Edit stop price"')
+        // The old line under the table is gone.
+        ->assertDontSee('Edit Stop Price');
+});
+
+test('a trade without a stop shows a dash in the cell that adds one', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['stop_price' => null]);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->assertSeeHtml('aria-label="Add stop price"')
+        ->assertDontSee('Add Stop Price');
+});
+
+test('editing shows the input in the cell', function () {
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal, ['stop_price' => 4500]);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->call('startEditStopPrice')
+        ->assertSeeHtmlInOrder(['>STOP PRICE</div>', 'id="stop-price-input"', '>TRADE TYPE</div>']);
+});
 
 test('adding a stop price to a trade without one saves it', function () {
     [$user, $journal] = journalUser();
@@ -320,7 +358,7 @@ test('adding a stop price to a trade without one saves it', function () {
     Livewire::actingAs($user)
         ->test('journal.trade-journal', ['journal' => $journal])
         ->call('selectTrade', $trade->uuid)
-        ->assertSee('Add Stop Price')
+        ->assertSeeHtml('aria-label="Add stop price"')
         ->call('startEditStopPrice')
         ->assertSet('editingStopPrice', true)
         ->assertSet('stopPriceForm', '')
@@ -329,7 +367,7 @@ test('adding a stop price to a trade without one saves it', function () {
         ->assertHasNoErrors()
         ->assertSet('editingStopPrice', false)
         ->assertSee('4,512.25')
-        ->assertSee('Edit Stop Price');
+        ->assertSeeHtml('aria-label="Edit stop price"');
 
     expect((float) $trade->fresh()->stop_price)->toBe(4512.25);
 });
@@ -360,7 +398,7 @@ test('saving a blank stop price clears it to null', function () {
         ->set('stopPriceForm', '  ')
         ->call('saveStopPrice')
         ->assertHasNoErrors()
-        ->assertSee('Add Stop Price');
+        ->assertSeeHtml('aria-label="Add stop price"');
 
     expect($trade->fresh()->stop_price)->toBeNull();
 });
@@ -1060,7 +1098,7 @@ test('a follower whose master is also selected is not listed twice', function ()
         ->and($component->get('summary')['net_pnl'])->toBe(110.0);
 });
 
-test('the trade view labels a master and a follower next to the account', function () {
+test('the trade view labels a master and a follower next to the account under the title', function () {
     [$user, $journal] = journalUser();
     [$master, $small] = copierSetup($journal);
     $normal = tradeInJournal($journal);
@@ -1068,6 +1106,8 @@ test('the trade view labels a master and a follower next to the account', functi
     $component = Livewire::actingAs($user)->test('journal.trade-journal', ['journal' => $journal]);
 
     $component->call('selectTrade', $master->uuid)->assertSeeHtml('data-copier-role="master"')->assertSee('Master');
-    $component->call('selectTrade', $small->uuid)->assertSeeHtml('data-copier-role="follower"')->assertSee('Follower');
+    $component->call('selectTrade', $small->uuid)->assertSeeHtml('data-copier-role="follower"')->assertSee('Follower')
+        // In the line under the title, before the table.
+        ->assertSeeHtmlInOrder(['data-copier-role="follower"', '>ENTRY PRICE</div>']);
     $component->call('selectTrade', $normal->uuid)->assertDontSeeHtml('data-copier-role');
 });
