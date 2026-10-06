@@ -2,10 +2,13 @@
 
   <PropertyGroup>
     <!--
-      net48 is what NinjaTrader 8 loads: a net48 DLL compiles in NinjaScript with no extra reference (#88).
+      net462 is the DLL installed in NinjaTrader 8 (#88). It runs on NinjaTrader's .NET Framework 4.8 runtime and
+      compiles in NinjaScript with no extra reference: unlike a netstandard2.0 DLL it needs no netstandard.dll, and
+      unlike net471+ reference assemblies it references System.Net.Http 4.0.0.0, the version NinjaScript compiles
+      against (4.2.0.0 fails the import with CS1705). NinjaTraderBuildTests guards both.
       netstandard2.0 is what the tests (net8.0) reference.
     -->
-    <TargetFrameworks>net48;netstandard2.0</TargetFrameworks>
+    <TargetFrameworks>net462;netstandard2.0</TargetFrameworks>
     <!-- NinjaScript's compiler is older than the SDK's. Stay on what it accepts. -->
     <LangVersion>7.3</LangVersion>
     <Nullable>disable</Nullable>
@@ -13,8 +16,8 @@
     <AssemblyName>ChartJot.Core</AssemblyName>
   </PropertyGroup>
 
-  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
-    <!-- Lets the net48 build run on Linux and in CI, where .NET Framework itself isn't installed. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net462'">
+    <!-- Lets the net462 build run on Linux and in CI, where .NET Framework itself isn't installed. -->
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
     <Reference Include="System.Net.Http" />
   </ItemGroup>

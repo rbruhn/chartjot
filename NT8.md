@@ -570,11 +570,24 @@ frozen payload with the same `trade_id`.
   assembly that is not referenced"). The working copy on this machine:
   `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\netstandard.dll`. Add it
   through the same References window. **Since #88 this no longer applies:**
-  `addon/core` also builds for .NET Framework 4.8 (`net48`), the runtime NT8
-  uses, and that is the DLL installed in NinjaTrader. A net48 DLL needs no
-  `netstandard` reference (checked by compiling `ChartJot.cs` against it with
-  only NinjaScript's references). The netstandard2.0 build remains for the
-  unit tests.
+  `addon/core` also builds for .NET Framework 4.6.2 (`net462`), and that is the
+  DLL installed in NinjaTrader (it runs on NT8's 4.8 runtime). It needs no
+  `netstandard` reference. The netstandard2.0 build remains for the unit tests.
+- **Framework versions (confirmed 2026-10-06, #88).** NinjaScript compiles
+  against the real runtime assemblies in
+  `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\`, which are all version
+  4.0.0.0. A DLL built against the `net48` reference assemblies references
+  `System.Net.Http` **4.2.0.0** (as do all net471+ packs), and NinjaTrader's
+  import then fails with CS1705 ("uses 'System.Net.Http, Version=4.2.0.0' which
+  has a higher version than referenced assembly ... 4.0.0.0"). A modern `csc`
+  accepts the mismatch, so a compile check outside NT8 doesn't catch it.
+  `NinjaTraderBuildTests` reads the net462 DLL's references and fails on any
+  framework assembly above 4.0.0.0.
+- **Uninstalling (confirmed 2026-10-06).** Deleting `ChartJot.Core.dll` while
+  NinjaTrader's compiled build (`NinjaTrader.Custom.dll`) still contains the
+  AddOn stops NinjaTrader from starting ("Unable to retrieve type info for
+  'NinjaTrader.NinjaScript.AddOnBase'"). Remove the script and reference and
+  compile first; see README, "Uninstalling".
 - Keep trade reconstruction (fill aggregation, reversal splitting, averages,
   legs, excursion tracking), payload building, and the retry queue in plain C#
   classes with no NinjaTrader types, covered by unit tests outside NT8.
