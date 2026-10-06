@@ -492,6 +492,69 @@ test('screenshot upload stores file and creates record', function () {
         ->and(TradeScreenshot::first()->source->value)->toBe('manual_upload');
 });
 
+test('an uploaded image is saved with the name typed for it (#91)', function () {
+    Storage::fake('local');
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->set('screenshotUpload', UploadedFile::fake()->image('chart.png'))
+        ->set('screenshotName', '  15-minute context  ')
+        ->call('uploadScreenshot')
+        ->assertHasNoErrors()
+        ->assertSet('screenshotName', '')
+        ->assertSeeHtml('15-minute context');
+
+    expect(TradeScreenshot::sole()->caption)->toBe('15-minute context');
+});
+
+test('an image uploaded without a name is listed as Image 1 (#91)', function () {
+    Storage::fake('local');
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->set('screenshotUpload', UploadedFile::fake()->image('chart.png'))
+        ->call('uploadScreenshot')
+        ->assertHasNoErrors()
+        ->assertSee('Image 1');
+
+    expect(TradeScreenshot::sole()->caption)->toBeNull();
+});
+
+test('an image name longer than 60 characters is rejected (#91)', function () {
+    Storage::fake('local');
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->set('screenshotUpload', UploadedFile::fake()->image('chart.png'))
+        ->set('screenshotName', str_repeat('x', 61))
+        ->call('uploadScreenshot')
+        ->assertHasErrors(['screenshotName']);
+
+    expect(TradeScreenshot::count())->toBe(0);
+});
+
+test('choosing an image shows a name box next to Upload (#91)', function () {
+    Storage::fake('local');
+    [$user, $journal] = journalUser();
+    $trade = tradeInJournal($journal);
+
+    Livewire::actingAs($user)
+        ->test('journal.trade-journal', ['journal' => $journal])
+        ->call('selectTrade', $trade->uuid)
+        ->assertDontSeeHtml('wire:model="screenshotName"')
+        ->set('screenshotUpload', UploadedFile::fake()->image('chart.png'))
+        ->assertSeeHtml('wire:model="screenshotName"');
+});
+
 test('screenshot upload rejects non-image files', function () {
     Storage::fake('local');
     [$user, $journal] = journalUser();
