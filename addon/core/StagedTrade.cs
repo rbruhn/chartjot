@@ -29,6 +29,9 @@ namespace ChartJot.Core
 		/// there was none or it is unknown; that must never block submission.</summary>
 		public decimal? StopPrice { get; set; }
 
+		/// <summary>For a copier follower, the trade_id of the master trade it copied (#79); null otherwise.</summary>
+		public string CopierMasterTradeId { get; set; }
+
 		/// <summary>When the trade entered the review list (wall clock). Null in state files written before it existed,
 		/// which <see cref="AddonState.PruneUnsubmitted"/> treats as old.</summary>
 		public DateTimeOffset? StagedAt { get; set; }
@@ -116,6 +119,7 @@ namespace ChartJot.Core
 
 			w.Name("stop_price");
 			if (s.StopPrice.HasValue) w.Decimal(s.StopPrice.Value); else w.Null();
+			w.Property("copier_master_trade_id", s.CopierMasterTradeId);
 			w.Property("staged_at", s.StagedAt.HasValue ? Timestamp(s.StagedAt.Value) : null);
 
 			w.EndObject();
@@ -133,7 +137,9 @@ namespace ChartJot.Core
 				EntryScreenshot = ReadScreenshot(v["entry_screenshot"]),
 				// Missing in files written before the field existed, which reads as null.
 				StopPrice = v["stop_price"].IsNull ? (decimal?)null : v["stop_price"].AsDecimal(),
-				StagedAt = ParseTimestamp(v["staged_at"])
+				StagedAt = ParseTimestamp(v["staged_at"]),
+				// Missing in files written before #79, which reads as null.
+				CopierMasterTradeId = v["copier_master_trade_id"].AsString()
 			};
 		}
 

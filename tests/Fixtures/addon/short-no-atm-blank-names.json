@@ -43,6 +43,7 @@
     "complete": true
   },
   "stop_price": null,
+  "copier_master_trade_id": null,
   "legs": [
     {
       "sequence": 1,

@@ -47,6 +47,9 @@ class TradeIntakeRequest extends FormRequest
             'trade_type'       => ['required', Rule::in($tradeTypes)],
             'trade_type_other' => ['nullable', 'string', 'max:64'],
 
+            // #79: a copier follower names its master's trade_id; null for a master or a normal trade.
+            'copier_master_trade_id' => ['nullable', 'string', 'max:255'],
+
             // Instrument
             'instrument'              => ['required', 'array'],
             'instrument.symbol'       => ['required', 'string', 'max:16'],

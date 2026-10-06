@@ -266,6 +266,12 @@ opposite when the follower fades), and an entry from 5 seconds before the
 master's entry up to 5 seconds after it (Executions mode) or up to the master's
 exit (Orders mode). The earliest such trade per follower is used.
 
+Each follower's payload names its master trade in `copier_master_trade_id`
+(the master's `trade_id`); the master's own payload, like any trade without a
+copier, sends `null`. The journal links the two within the same journal,
+whichever arrives first, and lists the follower under its master. Totals and
+Statistics still add every trade of the selected accounts (#79).
+
 ### Trade type selector
 
 The completed-trade review form must provide this dropdown:
@@ -650,6 +656,7 @@ contract per side, and ES is $50 per point.
     "complete": true
   },
   "stop_price": "7702.50",
+  "copier_master_trade_id": null,
   "legs": [
     {
       "sequence": 1,
@@ -775,6 +782,7 @@ contract per side, and ES is $50 per point.
 | `performance.net_pnl` | Required: `gross_pnl` − `commission` − `fees` |
 | `excursion` | Required object; values `null` when no price data was observed; `complete` is `false` if the price feed was interrupted |
 | `stop_price` | Optional decimal string; `null` when there was no stop or it is unknown. Never required, never blocks submission |
+| `copier_master_trade_id` | Optional string: a copier follower's master `trade_id`; `null` for a master or a trade without a copier. The journal links the follower to that trade in the same journal |
 | `legs` | Required non-empty array, one per exit order, ordered by `sequence` |
 | `legs[].runner` | `true` when an earlier leg of the same trade had already exited |
 | `legs[].points` / `gross_pnl` | Measured from the trade's average entry price |
