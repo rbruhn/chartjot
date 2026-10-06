@@ -949,6 +949,12 @@ new class extends Component {
                         {{ $localEntry->format('D M j, Y') }}
                         &middot;
                         {{ $t->account->name }}
+                        {{-- Copier role (#79): a follower has a master; a master has followers --}}
+                        @if($t->master_trade_id !== null || $t->followers_count > 0)
+                            @php $copierRole = $t->master_trade_id !== null ? 'follower' : 'master'; @endphp
+                            <span data-copier-role="{{ $copierRole }}" class="ml-0.5 inline-block px-1.5 py-px rounded text-[10px] font-semibold uppercase tracking-wide align-middle
+                                {{ $copierRole === 'master' ? 'bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300' }}">{{ $copierRole === 'master' ? 'Master' : 'Follower' }}</span>
+                        @endif
                         @if($t->account->connection)
                             &middot; {{ $t->account->connection }}
                         @endif
@@ -1130,61 +1136,53 @@ new class extends Component {
                             ['EXIT BY',      $t->exit_reason->label()],
                             ['ENTRY ORDER',  $t->entry_order_name ?: '—'],
                             ['EXIT ORDER',   $t->exit_order_name  ?: '—'],
-                            ['ACCOUNT',      $t->account->name],
+                            ['STOP PRICE',   null],
                             ['TRADE TYPE',   $t->trade_type?->label() ?: '—'],
                         ] as [$label, $value])
                             <div class="bg-gray-50 dark:bg-gray-800 px-3 py-2.5">
                                 <div class="text-xs text-gray-600 dark:text-gray-500 uppercase tracking-wide mb-0.5">{{ $label }}</div>
+                                @if($label === 'STOP PRICE')
+                                    {{-- Stop price: optional, edited only here, in its cell (#60, #83) --}}
+                                    @if($editingStopPrice)
+                                        <div class="flex items-center gap-1">
+                                            <input id="stop-price-input" type="number" step="any" min="0" wire:model="stopPriceForm"
+                                                wire:keydown.enter="saveStopPrice" wire:keydown.escape="cancelEditStopPrice"
+                                                placeholder="blank to clear" aria-label="Stop price" autofocus
+                                                class="min-w-0 flex-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 text-sm font-medium rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                                            <button wire:click="saveStopPrice" aria-label="Save stop price" title="Save"
+                                                class="flex-shrink-0 p-1 rounded text-green-600 dark:text-green-400 hover:bg-gray-200 dark:hover:bg-gray-700">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                                            </button>
+                                            <button wire:click="cancelEditStopPrice" aria-label="Cancel stop price edit" title="Cancel"
+                                                class="flex-shrink-0 p-1 rounded text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                            </button>
+                                        </div>
+                                        @error('stopPriceForm')
+                                            <p class="mt-1 text-xs text-red-600 dark:text-red-400">{{ $message }}</p>
+                                        @enderror
+                                    @else
+                                        <button wire:click="startEditStopPrice" aria-label="{{ $t->stop_price !== null ? 'Edit stop price' : 'Add stop price' }}" title="{{ $t->stop_price !== null ? 'Edit stop price' : 'Add stop price' }}"
+                                            class="group inline-flex items-center gap-1.5 text-gray-900 dark:text-gray-100 font-medium hover:text-indigo-600 dark:hover:text-indigo-400">
+                                            <span>{{ $t->stop_price !== null ? number_format((float) $t->stop_price, 2) : '—' }}</span>
+                                            <svg class="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+                                            </svg>
+                                        </button>
+                                    @endif
+                                @else
                                 <div class="text-gray-900 dark:text-gray-100 font-medium">
                                     {{ $value }}
-                                    {{-- Copier role (#79): a follower has a master; a master has followers --}}
-                                    @if($label === 'ACCOUNT' && ($t->master_trade_id !== null || $t->followers_count > 0))
-                                        @php $copierRole = $t->master_trade_id !== null ? 'follower' : 'master'; @endphp
-                                        <span data-copier-role="{{ $copierRole }}" class="ml-1 inline-block px-1.5 py-px rounded text-[10px] font-semibold uppercase tracking-wide align-middle
-                                            {{ $copierRole === 'master' ? 'bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300' }}">{{ $copierRole === 'master' ? 'Master' : 'Follower' }}</span>
-                                    @endif
                                     {{-- An Other trade's description (up to 64 characters) sits behind an info icon so the cell stays one line (#75) --}}
                                     @if($label === 'TRADE TYPE' && $t->trade_type === \App\Enums\TradeType::Other && filled($t->trade_type_other))
                                         <x-stats.info-tip label="Other trade type description" class="align-middle">{{ $t->trade_type_other }}</x-stats.info-tip>
                                     @endif
                                 </div>
+                                @endif
                             </div>
                         @endforeach
                     </div>
 
-                    {{-- Stop price: optional, edited only here (issue #60) --}}
-                    <div class="-mt-4 mb-6 px-3 text-sm">
-                        @if($editingStopPrice)
-                            <div class="flex flex-wrap items-center gap-2">
-                                <label for="stop-price-input" class="text-xs text-gray-600 dark:text-gray-500 uppercase tracking-wide">Stop Price</label>
-                                <input id="stop-price-input" type="number" step="any" min="0" wire:model="stopPriceForm"
-                                    wire:keydown.enter="saveStopPrice" wire:keydown.escape="cancelEditStopPrice"
-                                    placeholder="blank to clear"
-                                    class="w-36 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 text-sm rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500">
-                                <button wire:click="saveStopPrice"
-                                    class="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded transition-colors">
-                                    Save
-                                </button>
-                                <button wire:click="cancelEditStopPrice"
-                                    class="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 px-3 py-1.5 rounded transition-colors">
-                                    Cancel
-                                </button>
-                            </div>
-                            @error('stopPriceForm')
-                                <p class="mt-1 text-xs text-red-600 dark:text-red-400">{{ $message }}</p>
-                            @enderror
-                        @elseif($t->stop_price !== null)
-                            <div class="flex items-center gap-3">
-                                <span class="text-xs text-gray-600 dark:text-gray-500 uppercase tracking-wide">Stop Price</span>
-                                <span class="text-gray-900 dark:text-gray-100 font-medium">{{ number_format((float) $t->stop_price, 2) }}</span>
-                                <button wire:click="startEditStopPrice"
-                                    class="text-xs text-gray-600 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">Edit Stop Price</button>
-                            </div>
-                        @else
-                            <button wire:click="startEditStopPrice"
-                                class="text-xs text-gray-600 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">+ Add Stop Price</button>
-                        @endif
-                    </div>
                     @endif
 
                     {{-- Executions table --}}
