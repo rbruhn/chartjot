@@ -50,7 +50,7 @@ writes it to `addon/dist/`. It contains:
 | File | What it is |
 | --- | --- |
 | `AddOns\ChartJot.cs` | The AddOn source; NinjaTrader compiles it on import |
-| `ChartJot.Core.dll` | `addon/core` built for .NET Framework 4.8, so no `netstandard` reference is needed |
+| `ChartJot.Core.dll` | `addon/core` built for .NET Framework 4.6.2 (it runs on NinjaTrader's 4.8), so no `netstandard` reference is needed |
 | `AdditionalReferences.txt` | Tells NinjaTrader to reference `ChartJot.Core.dll` |
 | `Info.xml` | NinjaTrader's export header |
 
@@ -69,7 +69,7 @@ so use `addon/package.sh`.
    copy fails. A new `ChartJot.cs` with an old DLL shows compile errors such as
    "`TradeImages` could not be found".
 2. Build the DLL: `dotnet build addon/core`.
-3. Copy `addon/core/bin/Debug/net48/ChartJot.Core.dll` to
+3. Copy `addon/core/bin/Debug/net462/ChartJot.Core.dll` to
    `Documents\NinjaTrader 8\bin\Custom\`.
 4. Copy `addon/nt8/ChartJot.cs` to `Documents\NinjaTrader 8\bin\Custom\AddOns\`.
 5. Start NinjaTrader, open the NinjaScript Editor and press **F5**. Reopen
@@ -81,6 +81,24 @@ F5. The NinjaScript Editor's **References** must include `ChartJot.Core.dll`
 has a `netstandard.dll` reference; it's harmless and can stay. Any compile
 error in another script, for example a strategy, blocks every script,
 including Chart Jot.
+
+### Uninstalling
+
+Do it in this order, or NinjaTrader won't start. Its last compiled build still
+contains Chart Jot and fails to load without `ChartJot.Core.dll`.
+
+1. With NinjaTrader running, delete `bin\Custom\AddOns\ChartJot.cs` (or remove
+   it in the NinjaScript Editor).
+2. In the NinjaScript Editor's **References**, remove **ChartJot.Core** (and
+   **netstandard**, if an install from before #88 added it).
+3. Press **F5** to compile without Chart Jot.
+4. Close NinjaTrader, then delete `bin\Custom\ChartJot.Core.dll`.
+
+If NinjaTrader won't start because the DLL was deleted first, put
+`ChartJot.Core.dll` back in `bin\Custom`, start NinjaTrader, and follow the
+steps above.
+
+Your settings, state and images in `%USERPROFILE%\ChartJot\` are left alone.
 
 ### First-time setup
 

@@ -3,7 +3,7 @@
 # Tools > Import > NinjaScript (#88):
 #
 #   AddOns\ChartJot.cs          the AddOn source, compiled by NinjaTrader on import
-#   ChartJot.Core.dll           addon/core built for net48, so no netstandard reference is needed
+#   ChartJot.Core.dll           addon/core built for .NET Framework 4.6.2: no netstandard reference, System.Net.Http 4.0.0.0
 #   AdditionalReferences.txt    tells NinjaTrader to reference ChartJot.Core.dll
 #   Info.xml                    NinjaTrader's export header
 #
@@ -23,7 +23,7 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
-"$DOTNET" build "$ADDON_DIR/core" -c Release -f net48 --nologo -v:q -o "$ADDON_DIR/core/bin/package"
+"$DOTNET" build "$ADDON_DIR/core" -c Release -f net462 --nologo -v:q -o "$ADDON_DIR/core/bin/package"
 DLL="$ADDON_DIR/core/bin/package/ChartJot.Core.dll"
 
 mkdir -p "$OUT_DIR"
@@ -60,14 +60,14 @@ with zipfile.ZipFile(zip_path, 'w') as z:
     z.writestr(entry('AdditionalReferences.txt'), references)
     z.writestr(entry('Info.xml'), info)
 
-# Check the result: exactly these entries, and the DLL is the .NET Framework 4.8 build.
+# Check the result: exactly these entries, and the DLL is the .NET Framework 4.6.2 build.
 with zipfile.ZipFile(zip_path) as z:
     names = sorted(z.namelist())
     expected = sorted(['AddOns\\ChartJot.cs', 'ChartJot.Core.dll', 'AdditionalReferences.txt', 'Info.xml'])
     if names != expected:
         sys.exit('package.sh: unexpected entries %r' % names)
-    if b'.NETFramework,Version=v4.8' not in z.read('ChartJot.Core.dll'):
-        sys.exit('package.sh: ChartJot.Core.dll is not the net48 build')
+    if b'.NETFramework,Version=v4.6.2' not in z.read('ChartJot.Core.dll'):
+        sys.exit('package.sh: ChartJot.Core.dll is not the net462 build')
 PY
 
 echo "$ZIP"
