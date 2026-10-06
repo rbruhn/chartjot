@@ -889,49 +889,65 @@ namespace NinjaTrader.NinjaScript.AddOns
 				|| orderState == OrderState.ChangePending || orderState == OrderState.ChangeSubmitted;
 		}
 
+		// Each protective stop order's last seen price, so a status update that does not move it is not a change.
+		private static readonly Dictionary<Order, double> stopPrices = new Dictionary<Order, double>();
+
 		/// <summary>
-		/// Looks at every live stop order of the account/instrument on the closing side of the open position (a sell
-		/// stop for a long, a buy stop for a short). The ATM places one stop per target (Stop1, Stop2), which can sit
-		/// at different prices, so the farthest from entry (the most risk) is passed to addon/core, which keeps it only
-		/// while it is still at risk (#53). <paramref name="changed"/> is the order an event just reported, with its new
-		/// state and price; null when only reading what is working. Account.Orders is read here, never under sync.
+		/// Records the open position's stop when a protective stop order (on the closing side: a sell stop for a long,
+		/// a buy stop for a short) first appears or actually moves. The ATM places one stop per target (Stop1, Stop2)
+		/// at the same price; when the trader moves either one, that move is the stop now. Status updates that do not
+		/// change an order's price are ignored, so two orders reporting in turn cannot make the value jump. addon/core
+		/// keeps the price only while it is still at risk (#53). <paramref name="changed"/> is the order an event just
+		/// reported, with its new state and price; null to pick up whatever is working (after an entry or a restart).
+		/// Account.Orders is read here, never under sync.
 		/// </summary>
 		private static void RecordCurrentStop(Account account, string instrumentFullName, Order changed, OrderState changedState, double changedPrice)
 		{
-			List<KeyValuePair<OrderAction, decimal>> live = new List<KeyValuePair<OrderAction, decimal>>();
-			foreach (Order order in account.Orders.ToList())
+			List<KeyValuePair<Order, double>> candidates = new List<KeyValuePair<Order, double>>();
+			if (changed != null)
 			{
-				if (order.Instrument == null || order.Instrument.FullName != instrumentFullName)
-					continue;
-				bool isChanged = changed != null && ReferenceEquals(order, changed);
-				OrderState orderState = isChanged ? changedState : order.OrderState;
-				double price = isChanged ? changedPrice : order.StopPrice;
-				if (IsLiveStop(order.OrderType, orderState) && price > 0)
-					live.Add(new KeyValuePair<OrderAction, decimal>(order.OrderAction, (decimal)price));
+				if (IsLiveStop(changed.OrderType, changedState) && changedPrice > 0)
+					candidates.Add(new KeyValuePair<Order, double>(changed, changedPrice));
+				else
+					lock (sync)
+						stopPrices.Remove(changed);	// filled, cancelled or rejected: no longer the stop
 			}
-			if (changed != null && !account.Orders.Contains(changed) && IsLiveStop(changed.OrderType, changedState) && changedPrice > 0)
-				live.Add(new KeyValuePair<OrderAction, decimal>(changed.OrderAction, (decimal)changedPrice));
-			if (live.Count == 0)
+			else
+			{
+				foreach (Order order in account.Orders.ToList())
+				{
+					if (order.Instrument != null && order.Instrument.FullName == instrumentFullName
+						&& IsLiveStop(order.OrderType, order.OrderState) && order.StopPrice > 0)
+						candidates.Add(new KeyValuePair<Order, double>(order, order.StopPrice));
+				}
+			}
+			if (candidates.Count == 0)
 				return;
 
 			string accountName = account.Name;
-			decimal stop;
-			bool recorded;
+			decimal stop = 0;
+			bool recorded = false;
 			lock (sync)
 			{
 				OpenTradeInfo open = state.Tracker.OpenTrades.FirstOrDefault(t => t.Account == accountName && t.Instrument.FullName == instrumentFullName);
 				if (open == null)
 					return;
 				bool isLong = open.Direction == Direction.Long;
-				List<decimal> protective = live
-					.Where(p => isLong ? p.Key == OrderAction.Sell : (p.Key == OrderAction.BuyToCover || p.Key == OrderAction.Buy))
-					.Select(p => p.Value)
-					.ToList();
-				if (protective.Count == 0)
-					return;
-				stop = isLong ? protective.Min() : protective.Max();
 				decimal? before = state.StopFor(open.TradeId);
-				recorded = state.RecordStop(accountName, instrumentFullName, stop) && before != stop;
+				foreach (KeyValuePair<Order, double> candidate in candidates)
+				{
+					OrderAction action = candidate.Key.OrderAction;
+					bool closingSide = isLong ? action == OrderAction.Sell : (action == OrderAction.BuyToCover || action == OrderAction.Buy);
+					if (!closingSide)
+						continue;
+					double last;
+					if (stopPrices.TryGetValue(candidate.Key, out last) && last == candidate.Value)
+						continue;	// a status update, not a move
+					stopPrices[candidate.Key] = candidate.Value;
+					if (state.RecordStop(accountName, instrumentFullName, (decimal)candidate.Value))
+						stop = (decimal)candidate.Value;
+				}
+				recorded = stop != 0 && before != stop;
 			}
 			if (!recorded)
 				return;

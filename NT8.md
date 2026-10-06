@@ -301,9 +301,10 @@ after entry, sometimes doesn't).
 Auto-capture it best-effort, read-only (no order placement or modification,
 consistent with every other rule in this document). The trader's ATM places
 one stop order per target (Stop1, Stop2; confirmed in NT8's log 2026-10-05).
-They can sit at different prices, so the **farthest from entry** (the most
-risk) is the one that counts. After Target 1 fills, its stop is cancelled and
-only the remaining one counts. While a position is open,
+Both start at the same price. The stop is taken from the **most recent actual
+move** of either order: the AddOn remembers each stop order's last price, and
+status updates that don't change it are ignored. After Target 1 fills, its stop
+is cancelled and only the remaining one can move. While a position is open,
 watch `Account.OrderUpdate` (and read `Account.Orders` shortly after the
 entry fill, because the ATM may place its stop before the fill is reported,
 and again after a restart) for that account/instrument's working
