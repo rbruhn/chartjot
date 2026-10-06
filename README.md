@@ -128,8 +128,8 @@ places, moves or cancels orders):
 
 - **What counts.** Your ATM's stop is recorded while it's on the **losing
   side** of your average entry. The ATM places one stop per target (Stop1,
-  Stop2); if they differ, the one farthest from entry counts. If you tighten or loosen it
-  while it's still at risk, the new price replaces it.
+  Stop2) at the same price. If you tighten or loosen either one while it's
+  still at risk, that move is the new stop.
 - **What doesn't.** Once the stop moves to breakeven or into profit (after
   Target 1, a trail, or by hand), it stops updating. Example: long 7700, ATM
   stop 7696, loosened to 7694, later moved to breakeven: the trade records
