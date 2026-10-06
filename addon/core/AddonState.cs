@@ -411,6 +411,7 @@ namespace ChartJot.Core
 					// (Executions mode copies fills only) it takes its master's.
 					if (!staged.StopPrice.HasValue)
 						staged.StopPrice = StopFor(masterId);
+					staged.CopierMasterTradeId = masterId;
 				}
 				staged.Notes = string.IsNullOrWhiteSpace(form.Body)
 					? new List<NoteRecord>()
@@ -619,7 +620,8 @@ namespace ChartJot.Core
 				Notes = staged.Notes ?? new List<NoteRecord>(),
 				Screenshot = staged.Screenshot,
 				EntryScreenshot = staged.EntryScreenshot,
-				StopPrice = staged.StopPrice
+				StopPrice = staged.StopPrice,
+				CopierMasterTradeId = staged.CopierMasterTradeId
 			});
 			return Deliveries.Enqueue(tradeId, payload);
 		}

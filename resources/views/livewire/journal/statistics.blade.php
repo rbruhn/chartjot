@@ -45,7 +45,10 @@ new class extends Component {
             : $this->accounts->whereIn('id', $this->selectedAccountIds)->values();
     }
 
-    /** One query for the whole page; every statistic is derived from this Collection. */
+    /**
+     * One query for the whole page; every statistic is derived from this Collection. Every trade of the selected
+     * accounts counts, copier followers included (#79): to see one account on its own, select only that one.
+     */
     #[Computed]
     public function trades(): Collection
     {

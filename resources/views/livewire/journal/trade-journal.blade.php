@@ -45,6 +45,9 @@ new class extends Component {
     #[Url(as: 'needs_note')]
     public bool $needsNote = false;
 
+    /** #79: masters whose follower rows are shown in the list, by uuid. */
+    public array $expandedMasters = [];
+
     #[Url(as: 'trade')]
     public string $selectedUuid = '';
 
@@ -113,9 +116,10 @@ new class extends Component {
     public function trades(): Collection
     {
         return $this->journal->trades()
-            ->with(['account.journal', 'notes', 'screenshot'])
+            ->with(['account.journal', 'notes', 'screenshot', 'followers.account.journal', 'followers.notes'])
             ->withCount([
                 'comments',
+                'followers',
                 'invitations as active_invitations_count' => fn ($q) => $q->active(),
             ])
             ->when($this->dateFrom, fn ($q) => $q->where('entry_at', '>=', Carbon::parse($this->dateFrom)->startOfDay()))
@@ -140,6 +144,8 @@ new class extends Component {
                 ? $q->whereRaw('0 = 1')
                 : $q->whereIn('account_id', $this->selectedAccountIds)
             )
+            // #79: a follower is listed under its master; totals add it back in (totalledTrades)
+            ->listedRows($this->selectedAccountIds)
             ->when($this->needsNote, fn ($q) => $q->doesntHave('notes'))
             ->orderBy('entry_at', 'desc')
             ->get();
@@ -151,10 +157,27 @@ new class extends Component {
         return $this->trades->groupBy(fn (Trade $t) => $t->entry_at_local->format('Y-m-d'));
     }
 
+    /**
+     * #79: the listed rows plus the copier followers under them whose accounts are selected (all, with no
+     * selection). Totals add every trade of the selected accounts; the list only groups followers under their master.
+     */
+    public function withSelectedFollowers(Collection $rows): Collection
+    {
+        return $rows->flatMap(fn (Trade $t) => collect([$t])->concat($this->selectedAccountIds === null
+            ? $t->followers
+            : $t->followers->whereIn('account_id', $this->selectedAccountIds)));
+    }
+
+    #[Computed]
+    public function totalledTrades(): Collection
+    {
+        return $this->withSelectedFollowers($this->trades);
+    }
+
     #[Computed]
     public function summary(): array
     {
-        $trades = $this->trades;
+        $trades = $this->totalledTrades;
         $total  = $trades->count();
         if ($total === 0) {
             return ['total' => 0, 'net_pnl' => 0.0, 'win_rate' => 0, 'avg_win_pts' => 0.0, 'avg_loss_pts' => 0.0, 'journaled' => 0];
@@ -179,8 +202,17 @@ new class extends Component {
         if ($this->selectedUuid === '') return null;
         return $this->journal->trades()
             ->with(['account', 'executions', 'notes', 'exitScreenshots', 'entryScreenshot', 'legs'])
+            ->withCount('followers')
             ->where('uuid', $this->selectedUuid)
             ->first();
+    }
+
+    /** #79: shows or hides a master's follower rows in the list. */
+    public function toggleFollowers(string $uuid): void
+    {
+        $this->expandedMasters = in_array($uuid, $this->expandedMasters, true)
+            ? array_values(array_diff($this->expandedMasters, [$uuid]))
+            : [...$this->expandedMasters, $uuid];
     }
 
     public function selectTrade(string $uuid): void
@@ -716,14 +748,15 @@ new class extends Component {
             @else
                 @foreach($this->grouped as $date => $dayTrades)
                     @php
-                        $dayPnl   = $dayTrades->sum(fn($t) => (float) $t->net_pnl);
+                        $dayTotals = $this->withSelectedFollowers($dayTrades);
+                        $dayPnl   = $dayTotals->sum(fn($t) => (float) $t->net_pnl);
                         $dayLabel = strtoupper(\Carbon\Carbon::parse($date)->format('D M j, Y'));
                     @endphp
                     {{-- Date header --}}
                     <div class="sticky top-0 z-10 flex justify-between items-center px-4 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-xs font-semibold text-gray-500 dark:text-gray-400 tracking-wide">
                         <span>{{ $dayLabel }}</span>
                         <span class="font-normal {{ $dayPnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400' }}">
-                            {{ $dayTrades->count() }} trade{{ $dayTrades->count() !== 1 ? 's' : '' }}
+                            {{ $dayTotals->count() }} trade{{ $dayTotals->count() !== 1 ? 's' : '' }}
                             &middot; {{ $this->pnlDisplay($dayPnl) }}
                         </span>
                     </div>
@@ -802,6 +835,51 @@ new class extends Component {
                                 </div>
                             </div>
                         </button>
+                        {{-- Copier followers (#79): listed under their master, indented, when expanded --}}
+                        @if($trade->followers_count > 0)
+                            @php $expanded = in_array($trade->uuid, $expandedMasters, true); @endphp
+                            <button type="button" wire:click="toggleFollowers('{{ $trade->uuid }}')" aria-expanded="{{ $expanded ? 'true' : 'false' }}"
+                                class="w-full flex items-center gap-1 text-left pl-[5.5rem] pr-4 py-1 border-b border-gray-100 dark:border-gray-700/40 text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:bg-gray-100 dark:hover:bg-gray-800/50">
+                                <svg class="w-3 h-3 flex-shrink-0 transition-transform {{ $expanded ? 'rotate-90' : '' }}" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                                    <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/>
+                                </svg>
+                                <span>Followers ({{ $trade->followers_count }})</span>
+                            </button>
+                            @if($expanded)
+                                @foreach($trade->followers as $follower)
+                                    @php
+                                        $followerPnl = (float) $follower->net_pnl;
+                                        $followerWin = $followerPnl > 0;
+                                    @endphp
+                                    <button
+                                        wire:click="selectTrade('{{ $follower->uuid }}')"
+                                        class="w-full text-left pl-10 pr-4 py-2 border-b border-gray-100 dark:border-gray-700/40 transition-colors
+                                            {{ $selectedUuid === $follower->uuid
+                                                ? 'bg-indigo-50 dark:bg-indigo-950/40 border-l-[3px] border-l-indigo-500'
+                                                : 'border-l-[3px] border-l-transparent hover:bg-gray-100 dark:hover:bg-gray-800/50' }}"
+                                    >
+                                        <div class="flex items-center gap-3 border-l-2 border-gray-200 dark:border-gray-700 pl-3">
+                                            <div class="flex-1 min-w-0">
+                                                <div class="flex items-baseline justify-between gap-2">
+                                                    <div class="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
+                                                        {{ $follower->instrument_symbol }} &times; {{ $follower->quantity }}
+                                                    </div>
+                                                    <div class="text-xs font-semibold flex-shrink-0 {{ $followerWin ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400' }}">
+                                                        {{ $this->ptsDisplay($follower) }}
+                                                    </div>
+                                                </div>
+                                                <div class="flex items-center justify-between gap-2 mt-0.5">
+                                                    <div class="text-xs text-gray-600 dark:text-gray-500 truncate">{{ $follower->account->name }}</div>
+                                                    <div class="text-xs flex-shrink-0 {{ $followerWin ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400' }}">
+                                                        {{ $this->pnlDisplay($followerPnl) }}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </button>
+                                @endforeach
+                            @endif
+                        @endif
                     @endforeach
                 @endforeach
             @endif
@@ -1059,6 +1137,12 @@ new class extends Component {
                                 <div class="text-xs text-gray-600 dark:text-gray-500 uppercase tracking-wide mb-0.5">{{ $label }}</div>
                                 <div class="text-gray-900 dark:text-gray-100 font-medium">
                                     {{ $value }}
+                                    {{-- Copier role (#79): a follower has a master; a master has followers --}}
+                                    @if($label === 'ACCOUNT' && ($t->master_trade_id !== null || $t->followers_count > 0))
+                                        @php $copierRole = $t->master_trade_id !== null ? 'follower' : 'master'; @endphp
+                                        <span data-copier-role="{{ $copierRole }}" class="ml-1 inline-block px-1.5 py-px rounded text-[10px] font-semibold uppercase tracking-wide align-middle
+                                            {{ $copierRole === 'master' ? 'bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300' }}">{{ $copierRole === 'master' ? 'Master' : 'Follower' }}</span>
+                                    @endif
                                     {{-- An Other trade's description (up to 64 characters) sits behind an info icon so the cell stays one line (#75) --}}
                                     @if($label === 'TRADE TYPE' && $t->trade_type === \App\Enums\TradeType::Other && filled($t->trade_type_other))
                                         <x-stats.info-tip label="Other trade type description" class="align-middle">{{ $t->trade_type_other }}</x-stats.info-tip>
@@ -1462,7 +1546,7 @@ new class extends Component {
 
                         <div class="grid grid-cols-2 gap-4 mb-6">
                             @php
-                                $trades = $this->trades;
+                                $trades = $this->totalledTrades;
                                 $winners = $trades->filter(fn($t) => (float)$t->net_pnl > 0);
                                 $losers  = $trades->filter(fn($t) => (float)$t->net_pnl < 0);
                                 $grossWin  = $winners->sum(fn($t) => (float)$t->gross_pnl);

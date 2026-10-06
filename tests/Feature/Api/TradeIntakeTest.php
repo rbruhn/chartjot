@@ -578,3 +578,112 @@ test('a retried delivery does not store a second entry image', function () {
 
     expect(TradeScreenshot::where('kind', ScreenshotKind::Entry)->count())->toBe(1);
 });
+
+// ---------------------------------------------------------------------------
+// Copier followers (#79): a follower names its master's trade_id, and the server links the two in the same
+// journal, whichever arrives first.
+// ---------------------------------------------------------------------------
+function followerOf(string $masterTradeId, array $overrides = []): array
+{
+    return minimalPayload(array_replace_recursive([
+        'account_name'           => 'TEST-ACCT-002',
+        'copier_master_trade_id' => $masterTradeId,
+    ], $overrides));
+}
+
+test('a follower is linked to its master when the master arrived first', function () {
+    [$journal, $token] = journalWithToken();
+    postTrade(minimalPayload(['trade_id' => 'NT8-MASTER-1']), $token)->assertStatus(201);
+
+    postTrade(followerOf('NT8-MASTER-1', ['trade_id' => 'NT8-FOLLOWER-1']), $token)->assertStatus(201);
+
+    $master   = Trade::where('source_trade_id', 'NT8-MASTER-1')->sole();
+    $follower = Trade::where('source_trade_id', 'NT8-FOLLOWER-1')->sole();
+    expect($follower->master_trade_id)->toBe($master->id)
+        ->and($follower->copier_master_source_trade_id)->toBe('NT8-MASTER-1')
+        ->and($master->master_trade_id)->toBeNull()
+        ->and($master->followers->pluck('id')->all())->toBe([$follower->id])
+        ->and($follower->master->is($master))->toBeTrue();
+});
+
+test('a follower that arrives first is linked when its master arrives', function () {
+    [$journal, $token] = journalWithToken();
+    postTrade(followerOf('NT8-MASTER-1', ['trade_id' => 'NT8-FOLLOWER-1']), $token)->assertStatus(201);
+    postTrade(followerOf('NT8-MASTER-1', ['trade_id' => 'NT8-FOLLOWER-2']), $token)->assertStatus(201);
+
+    expect(Trade::whereNotNull('master_trade_id')->count())->toBe(0);
+
+    postTrade(minimalPayload(['trade_id' => 'NT8-MASTER-1']), $token)->assertStatus(201);
+
+    $master = Trade::where('source_trade_id', 'NT8-MASTER-1')->sole();
+    expect($master->followers()->pluck('source_trade_id')->sort()->values()->all())->toBe(['NT8-FOLLOWER-1', 'NT8-FOLLOWER-2']);
+});
+
+test('a follower is never linked to a trade in another journal', function () {
+    [, $otherToken] = journalWithToken();
+    postTrade(minimalPayload(['trade_id' => 'NT8-MASTER-1']), $otherToken)->assertStatus(201);
+    [$journal, $token] = journalWithToken();
+
+    postTrade(followerOf('NT8-MASTER-1', ['trade_id' => 'NT8-FOLLOWER-1']), $token)->assertStatus(201);
+
+    expect(Trade::where('source_trade_id', 'NT8-FOLLOWER-1')->sole()->master_trade_id)->toBeNull();
+});
+
+test('a master in another journal never picks up waiting followers', function () {
+    [, $token] = journalWithToken();
+    postTrade(followerOf('NT8-MASTER-1', ['trade_id' => 'NT8-FOLLOWER-1']), $token)->assertStatus(201);
+    [, $otherToken] = journalWithToken();
+
+    postTrade(minimalPayload(['trade_id' => 'NT8-MASTER-1']), $otherToken)->assertStatus(201);
+
+    expect(Trade::where('source_trade_id', 'NT8-FOLLOWER-1')->sole()->master_trade_id)->toBeNull();
+});
+
+test('links stay one level deep: a follower is never a master', function () {
+    [, $token] = journalWithToken();
+    postTrade(minimalPayload(['trade_id' => 'NT8-MASTER-1']), $token)->assertStatus(201);
+    postTrade(followerOf('NT8-MASTER-1', ['trade_id' => 'NT8-FOLLOWER-1']), $token)->assertStatus(201);
+
+    // Naming a follower as master (in either arrival order) links nothing.
+    postTrade(followerOf('NT8-FOLLOWER-1', ['trade_id' => 'NT8-FOLLOWER-2']), $token)->assertStatus(201);
+    postTrade(followerOf('NT8-LATE-FOLLOWER', ['trade_id' => 'NT8-FOLLOWER-3']), $token)->assertStatus(201);
+    postTrade(followerOf('NT8-MASTER-1', ['trade_id' => 'NT8-LATE-FOLLOWER']), $token)->assertStatus(201);
+
+    expect(Trade::where('source_trade_id', 'NT8-FOLLOWER-2')->sole()->master_trade_id)->toBeNull()
+        ->and(Trade::where('source_trade_id', 'NT8-FOLLOWER-3')->sole()->master_trade_id)->toBeNull();
+});
+
+test('a trade naming itself as its master is not linked', function () {
+    [, $token] = journalWithToken();
+
+    postTrade(followerOf('NT8-SELF', ['trade_id' => 'NT8-SELF']), $token)->assertStatus(201);
+
+    expect(Trade::sole()->master_trade_id)->toBeNull();
+});
+
+test('copier_master_trade_id is optional and may be null', function () {
+    [, $token] = journalWithToken();
+
+    postTrade(minimalPayload(), $token)->assertStatus(201);
+    postTrade(minimalPayload(['copier_master_trade_id' => null]), $token)->assertStatus(201);
+
+    expect(Trade::whereNotNull('copier_master_source_trade_id')->count())->toBe(0);
+});
+
+test('copier_master_trade_id must be a short string', function () {
+    [, $token] = journalWithToken();
+
+    postTrade(minimalPayload(['copier_master_trade_id' => str_repeat('x', 256)]), $token)
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('copier_master_trade_id');
+});
+
+test('deleting a master leaves its followers as normal trades', function () {
+    [, $token] = journalWithToken();
+    postTrade(minimalPayload(['trade_id' => 'NT8-MASTER-1']), $token)->assertStatus(201);
+    postTrade(followerOf('NT8-MASTER-1', ['trade_id' => 'NT8-FOLLOWER-1']), $token)->assertStatus(201);
+
+    Trade::where('source_trade_id', 'NT8-MASTER-1')->sole()->delete();
+
+    expect(Trade::sole()->master_trade_id)->toBeNull();
+});
