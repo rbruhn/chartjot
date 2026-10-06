@@ -66,6 +66,8 @@ new class extends Component {
     public string $stopPriceForm    = '';
 
     public mixed $screenshotUpload = null;
+    /** The name an uploaded image is listed under (#91); optional. */
+    public string $screenshotName = '';
 
     public bool  $editingTrade    = false;
 
@@ -203,7 +205,7 @@ new class extends Component {
     {
         if ($this->selectedUuid === '') return null;
         return $this->journal->trades()
-            ->with(['account', 'executions', 'notes', 'exitScreenshots', 'entryScreenshot', 'legs'])
+            ->with(['account', 'executions', 'notes', 'screenshots', 'legs'])
             ->withCount('followers')
             ->where('uuid', $this->selectedUuid)
             ->first();
@@ -349,7 +351,8 @@ new class extends Component {
     {
         $this->validate([
             'screenshotUpload' => 'required|file|mimes:png,jpeg,jpg|max:10240',
-        ]);
+            'screenshotName'   => 'nullable|string|max:60',
+        ], [], ['screenshotName' => 'name']);
 
         $trade = $this->selectedTrade;
         if (! $trade) return;
@@ -370,9 +373,11 @@ new class extends Component {
             'mime_type' => $this->screenshotUpload->getMimeType(),
             'bytes'     => $this->screenshotUpload->getSize(),
             'source'    => ScreenshotSource::ManualUpload,
+            'caption'   => trim($this->screenshotName) !== '' ? trim($this->screenshotName) : null,
         ]);
 
         $this->screenshotUpload = null;
+        $this->screenshotName   = '';
         unset($this->selectedTrade);
     }
 
@@ -1237,57 +1242,12 @@ new class extends Component {
                     <div class="mb-6">
                         <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Chart</h3>
 
-                        @if($t->exitScreenshots->isNotEmpty())
-                            <div class="space-y-3">
-                                @foreach($t->exitScreenshots as $shot)
-                                    <div style="position:relative;border-radius:0.5rem;overflow:hidden" class="bg-gray-50 dark:bg-gray-800"
-                                        x-data="{ hover: false }" @mouseenter="hover=true" @mouseleave="hover=false">
-                                        <img
-                                            src="{{ route('journal.screenshot', [$t, $shot]) }}"
-                                            alt="Trade chart"
-                                            class="w-full h-auto"
-                                        >
-                                        <button
-                                            x-show="hover"
-                                            type="button"
-                                            onclick="document.getElementById('chart-image-{{ $shot->id }}').showModal()"
-                                            title="Expand image" aria-label="Expand image"
-                                            class="text-gray-500 dark:text-gray-400 hover:text-gray-100" style="position:absolute;top:0.5rem;right:2.75rem;padding:0.375rem;border-radius:0.25rem;background:rgba(0,0,0,0.65);border:none;cursor:pointer;line-height:0"
-                                        >
-                                            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
-                                            </svg>
-                                        </button>
-                                        <x-image-dialog :id="'chart-image-'.$shot->id" :url="route('journal.screenshot', [$t, $shot])" alt="Trade chart" />
-                                        <button
-                                            x-show="hover"
-                                            wire:click="deleteScreenshot({{ $shot->id }})"
-                                            wire:confirm="Delete this image?"
-                                            title="Delete image" aria-label="Delete image"
-                                            class="text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400" style="position:absolute;top:0.5rem;right:0.5rem;padding:0.375rem;border-radius:0.25rem;background:rgba(0,0,0,0.65);border:none;cursor:pointer;line-height:0"
-                                        >
-                                            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                                            </svg>
-                                        </button>
-                                        @if($shot->caption)
-                                            <div class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">{{ $shot->caption }}</div>
-                                        @endif
-                                    </div>
-                                @endforeach
-                            </div>
-                        @endif
-
-                        @if($t->entryScreenshot)
-                            <x-entry-image :id="$t->entryScreenshot->id" :url="route('journal.screenshot', [$t, $t->entryScreenshot])">
-                                <button
-                                    type="button"
-                                    wire:click="deleteScreenshot({{ $t->entryScreenshot->id }})"
-                                    wire:confirm="Delete this image?"
-                                    class="text-xs px-3 py-1 rounded border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400"
-                                >Delete</button>
-                            </x-entry-image>
-                        @endif
+                        {{-- Chart images as named links (#91); none is shown inline --}}
+                        <x-chart-image-links :deletable="true" :images="$t->chartImages()->map(fn ($image) => [
+                            'id'    => $image['screenshot']->id,
+                            'label' => $image['label'],
+                            'url'   => route('journal.screenshot', [$t, $image['screenshot']]),
+                        ])->all()" />
 
                         {{-- Upload area --}}
                         <div
@@ -1336,12 +1296,20 @@ new class extends Component {
                         </div>
 
                         @if($screenshotUpload)
-                            <div class="mt-2 flex items-center justify-between bg-gray-50 dark:bg-gray-800 rounded px-3 py-2">
-                                <span class="text-xs text-gray-500 dark:text-gray-400">{{ $screenshotUpload->getClientOriginalName() }}</span>
-                                <button wire:click="uploadScreenshot"
-                                    class="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1 rounded transition-colors">
-                                    Upload
-                                </button>
+                            <div class="mt-2 bg-gray-50 dark:bg-gray-800 rounded px-3 py-2">
+                                <div class="flex items-center gap-2">
+                                    <input type="text" wire:model="screenshotName" wire:keydown.enter="uploadScreenshot"
+                                        maxlength="60" placeholder="Name (optional), e.g. 15-minute context" aria-label="Image name"
+                                        class="min-w-0 flex-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 text-xs rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                                    <button wire:click="uploadScreenshot"
+                                        class="flex-shrink-0 text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1 rounded transition-colors">
+                                        Upload
+                                    </button>
+                                </div>
+                                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400 truncate">{{ $screenshotUpload->getClientOriginalName() }}</p>
+                                @error('screenshotName')
+                                    <p class="mt-1 text-xs text-red-600 dark:text-red-400">{{ $message }}</p>
+                                @enderror
                             </div>
                         @endif
                     </div>
