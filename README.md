@@ -44,9 +44,11 @@ specification and [`WEB.md`](WEB.md) for the web application reference
 
 ### Installing or updating
 
-Each GitHub Release that changed the AddOn has it attached as
-`ChartJot-AddOn-<version>.zip`, a NinjaScript archive holding `ChartJot.dll`
-and `Info.xml`.
+**Download the current AddOn** from the
+[Chart Jot NT8 AddOn](https://github.com/rbruhn/chartjot/releases/tag/addon)
+release page. It always holds the latest `ChartJot-AddOn-<version>.zip`, a
+NinjaScript archive containing `ChartJot.dll` and `Info.xml`. The app release
+where the AddOn changed also has a copy.
 
 In NinjaTrader's Control Center, go to **Tools → Import → NinjaScript…**,
 pick the zip and click **Import**. NinjaTrader installs `ChartJot.dll` and
@@ -107,6 +109,16 @@ git checkout development
 `release.sh` refuses unless the checkout is exactly the release's commit with
 no local changes. It skips the upload if `addon/core` and `addon/nt8` didn't
 change since the previous release (use `--force` to attach anyway).
+
+Besides attaching the zip to the app release, it updates the fixed
+[`addon` release](https://github.com/rbruhn/chartjot/releases/tag/addon):
+
+- moves its tag to the release's commit;
+- replaces the zip;
+- rewrites its notes;
+- keeps it from being marked "Latest".
+
+App-only releases leave that page alone, so it always has the current AddOn.
 
 **For development**, close NinjaTrader and copy
 `addon/nt8/bin/package/ChartJot.dll` (left by `package.sh`) over the one in
