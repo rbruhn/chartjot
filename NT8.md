@@ -583,11 +583,12 @@ frozen payload with the same `trade_id`.
   accepts the mismatch, so a compile check outside NT8 doesn't catch it.
   `NinjaTraderBuildTests` reads the net462 DLL's references and fails on any
   framework assembly above 4.0.0.0.
-- **Uninstalling (confirmed 2026-10-06).** Deleting `ChartJot.Core.dll` while
-  NinjaTrader's compiled build (`NinjaTrader.Custom.dll`) still contains the
-  AddOn stops NinjaTrader from starting ("Unable to retrieve type info for
-  'NinjaTrader.NinjaScript.AddOnBase'"). Remove the script and reference and
-  compile first; see README, "Uninstalling".
+- **Uninstalling (confirmed 2026-10-06).** The normal uninstall is deleting
+  the AddOn in the NinjaScript Editor, which recompiles without it; the
+  leftover `ChartJot.Core.dll` is harmless. Deleting `ChartJot.Core.dll` on
+  disk while NinjaTrader's compiled build (`NinjaTrader.Custom.dll`) still
+  contains the AddOn stops NinjaTrader from starting ("Unable to retrieve type
+  info for 'NinjaTrader.NinjaScript.AddOnBase'"). See README, "Uninstalling".
 - Keep trade reconstruction (fill aggregation, reversal splitting, averages,
   legs, excursion tracking), payload building, and the retry queue in plain C#
   classes with no NinjaTrader types, covered by unit tests outside NT8.

@@ -84,19 +84,23 @@ including Chart Jot.
 
 ### Uninstalling
 
-Do it in this order, or NinjaTrader won't start. Its last compiled build still
-contains Chart Jot and fails to load without `ChartJot.Core.dll`.
+In NinjaTrader, open the **NinjaScript Editor**, find **ChartJot** under
+**AddOns**, and delete it. NinjaTrader removes `ChartJot.cs` and recompiles,
+and the Chart Jot button is gone. That's all an uninstall needs.
 
-1. With NinjaTrader running, delete `bin\Custom\AddOns\ChartJot.cs` (or remove
-   it in the NinjaScript Editor).
-2. In the NinjaScript Editor's **References**, remove **ChartJot.Core** (and
-   **netstandard**, if an install from before #88 added it).
-3. Press **F5** to compile without Chart Jot.
-4. Close NinjaTrader, then delete `bin\Custom\ChartJot.Core.dll`.
+`ChartJot.Core.dll` and its reference stay in `bin\Custom`, unused and
+harmless, like any library left behind by a removed add-on. To remove them
+too (optional):
 
-If NinjaTrader won't start because the DLL was deleted first, put
-`ChartJot.Core.dll` back in `bin\Custom`, start NinjaTrader, and follow the
-steps above.
+1. In the NinjaScript Editor's **References**, remove **ChartJot.Core** (and
+   **netstandard**, if an install from before #88 added it), then press **F5**.
+2. Close NinjaTrader and delete `bin\Custom\ChartJot.Core.dll`.
+
+**Don't delete Chart Jot's files in Windows Explorer** before doing the above.
+NinjaTrader's last compiled build still contains Chart Jot, and without
+`ChartJot.Core.dll` NinjaTrader won't start. If that happens, put
+`ChartJot.Core.dll` back in `bin\Custom`, start NinjaTrader, and uninstall as
+above.
 
 Your settings, state and images in `%USERPROFILE%\ChartJot\` are left alone.
 
