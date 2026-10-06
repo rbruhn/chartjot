@@ -355,8 +355,8 @@ must never prevent the trader from submitting the trade):
   render delay as exit, below, so the entry fill/marker is drawn), **only when
   "Entry image" is ticked in Chart Jot Settings** (off by default; decided
   2026-10-04). Sent as `entry_screenshot_file` with an `entry_screenshot`
-  object (`captured_at`). The journal shows it behind an "Entry Image" link
-  under the exit image (#72). No **Recapture** for this one; it is a
+  object (`captured_at`). The journal lists it as an "Entry Image" link
+  (#72, #91). No **Recapture** for this one; it is a
   point-in-time record of what the setup looked like at entry.
 - **Exit screenshot**: captured after a short render delay (default 1 second
   after flat) so the exit fill and execution markers are drawn. The trader

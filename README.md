@@ -164,8 +164,13 @@ journal. Switching back needs a token from the real journal again.
   **Recapture** on the form replaces it, for example after you mark up the
   chart.
 - **Entry image**: taken about 1 second after the entry fill, **only when
-  "Entry image" is ticked** in Settings. There's no Recapture for it. The
-  journal shows it behind an "Entry Image" link under the exit image.
+  "Entry image" is ticked** in Settings. There's no Recapture for it.
+- **In the journal** (#91), images aren't shown on the trade page. Under
+  **Chart**, each one is a link that opens it in a pop-up: **Entry Image**,
+  **Exit Image**, then any images you upload. When uploading, you can type a
+  name for the link (up to 60 characters); an image without a name is listed
+  as "Image 1", "Image 2", and so on. Each link has a delete button. A friend
+  you share the trade with sees the same links, without delete.
 - **Which chart.** The picture comes from a chart whose **visible** tab shows
   the trade's instrument. NinjaTrader can't capture a background tab. A chart
   whose Chart Trader account is the trade's account is preferred, and the
