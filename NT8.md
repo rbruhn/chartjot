@@ -560,14 +560,21 @@ frozen payload with the same `trade_id`.
   has no menu bar at all, only icons; look for one with a package/cube icon,
   confirmed to open a window titled "References" with an `add`/`remove` list
   and an "Applied" list of currently-referenced assemblies). Add the DLL there
-  explicitly.
+  explicitly. The packaged AddOn (`addon/package.sh`, #88) does this on import:
+  its `AdditionalReferences.txt` names `ChartJot.Core.dll`, the same file
+  NinjaTrader's own export writes.
 - **A netstandard2.0 library referenced this way also needs an explicit
   reference to `netstandard.dll` itself** (confirmed 2026-09-30), or every
   framework type it exposes in its public surface (`Object`, `Decimal`,
   `Enum`, `IList<>`, `Nullable<>`, ...) fails with CS0012 ("defined in an
   assembly that is not referenced"). The working copy on this machine:
   `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\netstandard.dll`. Add it
-  through the same References window.
+  through the same References window. **Since #88 this no longer applies:**
+  `addon/core` also builds for .NET Framework 4.8 (`net48`), the runtime NT8
+  uses, and that is the DLL installed in NinjaTrader. A net48 DLL needs no
+  `netstandard` reference (checked by compiling `ChartJot.cs` against it with
+  only NinjaScript's references). The netstandard2.0 build remains for the
+  unit tests.
 - Keep trade reconstruction (fill aggregation, reversal splitting, averages,
   legs, excursion tracking), payload building, and the retry queue in plain C#
   classes with no NinjaTrader types, covered by unit tests outside NT8.

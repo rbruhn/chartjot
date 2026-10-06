@@ -43,11 +43,33 @@ specification and [`WEB.md`](WEB.md) for the web application reference
 
 ### Installing or updating
 
+Each GitHub Release has the AddOn attached as `ChartJot-AddOn-<version>.zip`,
+a NinjaScript archive. To build it yourself, run `addon/package.sh`, which
+writes it to `addon/dist/`. It contains:
+
+| File | What it is |
+| --- | --- |
+| `AddOns\ChartJot.cs` | The AddOn source; NinjaTrader compiles it on import |
+| `ChartJot.Core.dll` | `addon/core` built for .NET Framework 4.8, so no `netstandard` reference is needed |
+| `AdditionalReferences.txt` | Tells NinjaTrader to reference `ChartJot.Core.dll` |
+| `Info.xml` | NinjaTrader's export header |
+
+To install it, in NinjaTrader's Control Center go to **Tools → Import →
+NinjaScript…**, pick the zip and click **Import**. NinjaTrader copies the files
+into `bin\Custom`, adds the reference and compiles. Reopen charts (or
+restart) so they get the Chart Jot button.
+
+NinjaTrader's own **Tools → Export → NinjaScript** doesn't produce a working
+package. It records the `ChartJot.Core.dll` reference but leaves the DLL out,
+so use `addon/package.sh`.
+
+**By hand (development):**
+
 1. **Close NinjaTrader.** It locks `ChartJot.Core.dll` while running, so the
    copy fails. A new `ChartJot.cs` with an old DLL shows compile errors such as
    "`TradeImages` could not be found".
 2. Build the DLL: `dotnet build addon/core`.
-3. Copy `addon/core/bin/Debug/netstandard2.0/ChartJot.Core.dll` to
+3. Copy `addon/core/bin/Debug/net48/ChartJot.Core.dll` to
    `Documents\NinjaTrader 8\bin\Custom\`.
 4. Copy `addon/nt8/ChartJot.cs` to `Documents\NinjaTrader 8\bin\Custom\AddOns\`.
 5. Start NinjaTrader, open the NinjaScript Editor and press **F5**. Reopen
@@ -55,9 +77,10 @@ specification and [`WEB.md`](WEB.md) for the web application reference
 
 If only `ChartJot.cs` changed, NinjaTrader can stay open: copy it and press
 F5. The NinjaScript Editor's **References** must include `ChartJot.Core.dll`
-and `netstandard.dll` (one-time setup; see NT8.md, "Platform and
-Architecture Constraints"). Any compile error in another script, for example
-a strategy, blocks every script, including Chart Jot.
+(one-time setup, done for you by an import). An install from before #88 also
+has a `netstandard.dll` reference; it's harmless and can stay. Any compile
+error in another script, for example a strategy, blocks every script,
+including Chart Jot.
 
 ### First-time setup
 

@@ -243,3 +243,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+
+      # The NT8 AddOn as a NinjaScript archive for Tools > Import > NinjaScript (#88).
+      # ubuntu-latest ships the .NET SDK; the net48 build uses reference assemblies from NuGet.
+      - name: Attach the NT8 AddOn package
+        run: |
+          VERSION="${{ needs.calculate-version.outputs.new_version }}"
+          ZIP="$(bash addon/package.sh "$RUNNER_TEMP/addon" | tail -n 1)"
+          gh release upload "$VERSION" "$ZIP" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
