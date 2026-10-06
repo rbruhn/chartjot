@@ -299,12 +299,23 @@ given moment (a trader using an ATM bracket sometimes moves the stop by hand
 after entry, sometimes doesn't).
 
 Auto-capture it best-effort, read-only (no order placement or modification,
-consistent with every other rule in this document): while a position is
-open, watch `Account.OrderUpdate` for `StopMarket`/`StopLimit` orders on that
-account/instrument, and track the current working stop's price, updating it
-whenever it changes (the trader drags it, or the ATM moves it to breakeven).
-Whatever it is when the trade closes (or `null` if there never was one) is
-the starting value. No cross-account or timing-based correlation is needed
+consistent with every other rule in this document). The trader's ATM uses a
+**single** stop order for all contracts, runners included; after Target 1 it
+stays as one order for the remaining contracts. While a position is open,
+watch `Account.OrderUpdate` (and read `Account.Orders` shortly after the
+entry fill, because the ATM may place its stop before the fill is reported,
+and again after a restart) for that account/instrument's working
+`StopMarket`/`StopLimit` order on the closing side (a sell stop for a long, a
+buy stop for a short).
+
+Record its price **only while it is at risk**, on the losing side of the
+average entry: below it for a long, above it for a short (decided
+2026-10-05). That's the ATM's stop, then any tightening or loosening by hand.
+Once the stop moves to breakeven or into profit (after Target 1, a trail, or
+by hand), it stops updating, so the trade keeps the last stop it was actually
+risking. Example: long 7700 with the ATM stop at 7696, loosened to 7694, later
+moved to 7700 for breakeven: the recorded stop is 7694. A trade that never had
+an at-risk stop sends `null`. Each copier follower records its own stop order. No cross-account or timing-based correlation is needed
 here, unlike the now-removed copier matching -- it is the same account, same
 instrument, and normally one open position at a time, so "the working stop
 order while this trade's position was open" is unambiguous.
