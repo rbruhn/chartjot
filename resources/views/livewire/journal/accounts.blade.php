@@ -428,8 +428,8 @@ new class extends Component
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
 
         {{-- Header --}}
-        <div class="flex items-center justify-between">
-            <div>
+        <div class="flex flex-col items-start gap-4 sm:flex-row sm:justify-between sm:gap-6">
+            <div style="max-width:48rem">
                 <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Accounts</h2>
                 <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
                     If you use the Chart Jot AddOn, your accounts appear here on their first trade; then set their type and starting balance.
@@ -438,7 +438,7 @@ new class extends Component
             </div>
             @if(!$creating && !$editingId)
             <button wire:click="startCreate"
-                class="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
                 style="cursor:pointer">
                 <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
                 Add Account
