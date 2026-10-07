@@ -279,6 +279,16 @@ Note text is never written to the log.
 
 ### Notes
 
+- **Accounts.** Don't create accounts in the journal for the AddOn. Each
+  account appears on the Accounts page on its first trade, under its exact
+  NinjaTrader account name (for example `DEMO1234567` on NinjaTrader's own
+  Simulation connection, or a broker account with a suffix like `-04`). Then
+  set its type and starting balance there. Only add accounts by hand for CSV
+  imports, using the exact NinjaTrader account name. If you already created
+  one under a different name, use **Merge** on the Accounts page to move it
+  into the account NinjaTrader sends to: its trades, deposits and
+  withdrawals move over, the NinjaTrader name is kept, it takes the merged
+  account's type and starting balance, and the merged account is deleted.
 - **Playback.** Trades on NinjaTrader's Playback connection come from its
   built-in **Playback101** account. The journal creates that account
   automatically (as a Sim account) the first time one arrives.
