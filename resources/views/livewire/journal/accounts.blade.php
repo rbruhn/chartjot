@@ -35,6 +35,10 @@ new class extends Component
     public string $editTxAmount       = '';
     public string $editTxDate         = '';
 
+    // #99: merging a hand-made account into the one NT8 sends trades to
+    public ?int $mergingId       = null;
+    public string $mergeTargetId = '';
+
     #[Computed]
     public function accounts()
     {
@@ -181,6 +185,68 @@ new class extends Component
         }
 
         unset($this->accounts);
+    }
+
+    public function startMerge(int $id): void
+    {
+        $this->journal->accounts()->findOrFail($id);
+
+        $this->mergingId     = $id;
+        $this->mergeTargetId = '';
+        $this->resetErrorBag('mergeTargetId');
+    }
+
+    public function cancelMerge(): void
+    {
+        $this->mergingId     = null;
+        $this->mergeTargetId = '';
+        $this->resetErrorBag('mergeTargetId');
+    }
+
+    /**
+     * #99: moves the merging account's trades and transactions to the target and deletes it. The target keeps its
+     * name, since that's the NT8 account name trades arrive under. The merging account is the one the trader set up
+     * by hand, so its type and starting balance win; the target's connection and timezone are only filled in where
+     * it has none.
+     */
+    public function merge(): void
+    {
+        $source = $this->journal->accounts()->findOrFail((int) $this->mergingId);
+
+        $this->validate([
+            'mergeTargetId' => [
+                'required',
+                'integer',
+                Rule::notIn([$source->id]),
+                Rule::exists('accounts', 'id')->where('journal_id', $this->journal->id),
+            ],
+        ], [
+            'mergeTargetId.required' => 'Choose the account to merge into.',
+            'mergeTargetId.not_in'   => 'Choose a different account to merge into.',
+            'mergeTargetId.exists'   => 'Choose an account in this journal.',
+        ]);
+
+        $target = $this->journal->accounts()->findOrFail((int) $this->mergeTargetId);
+
+        DB::transaction(function () use ($source, $target) {
+            $source->trades()->update(['account_id' => $target->id]);
+            $source->transactions()->update(['account_id' => $target->id]);
+
+            $target->update([
+                'account_type'     => $source->account_type,
+                'starting_balance' => $source->starting_balance ?? $target->starting_balance,
+                'connection'       => $target->connection ?? $source->connection,
+                'timezone'         => $target->timezone ?? $source->timezone,
+            ]);
+
+            $source->delete();
+        });
+
+        if ($this->expandedAccountId === $source->id) {
+            $this->expandedAccountId = null;
+        }
+        $this->cancelMerge();
+        unset($this->accounts, $this->expandedTransactions);
     }
 
     public function toggleTransactions(int $id): void
@@ -362,16 +428,17 @@ new class extends Component
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
 
         {{-- Header --}}
-        <div class="flex items-center justify-between">
-            <div>
+        <div class="flex flex-col items-start gap-4 sm:flex-row sm:justify-between sm:gap-6">
+            <div style="max-width:48rem">
                 <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Accounts</h2>
                 <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
-                    Manage your trading accounts. Create accounts here before importing trades from NinjaTrader.
+                    If you use the Chart Jot AddOn, your accounts appear here on their first trade; then set their type and starting balance.
+                    Only add accounts by hand for CSV imports, using the exact NinjaTrader account name.
                 </p>
             </div>
             @if(!$creating && !$editingId)
             <button wire:click="startCreate"
-                class="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
                 style="cursor:pointer">
                 <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
                 Add Account
@@ -460,9 +527,9 @@ new class extends Component
             <p class="text-gray-500 dark:text-gray-400 text-sm">No accounts yet. Add your first account to get started.</p>
         </div>
         @else
-        <div class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900" style="overflow:hidden">
+        <div class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900" style="overflow-x:auto">
             <table style="width:100%;border-collapse:collapse;font-size:0.875rem">
-                <thead>
+                <thead style="white-space:nowrap">
                     <tr class="border-b border-gray-200 dark:border-gray-700">
                         <th class="text-gray-500 dark:text-gray-400" style="text-align:left;padding:0.75rem 1rem;font-weight:500;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">Name</th>
                         <th class="text-gray-500 dark:text-gray-400" style="text-align:left;padding:0.75rem 1rem;font-weight:500;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">Type</th>
@@ -481,7 +548,7 @@ new class extends Component
                         $pnlClass  = $netPnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400';
                     @endphp
                     <tr wire:key="account-{{ $account->id }}">
-                        <td class="text-gray-900 dark:text-gray-50" style="padding:0.875rem 1rem;font-weight:500">
+                        <td class="text-gray-900 dark:text-gray-50" style="padding:0.875rem 1rem;font-weight:500;white-space:nowrap">
                             {{ $account->name }}
                             @if($account->connection)
                             <span class="text-gray-500 dark:text-gray-500" style="margin-left:0.5rem;font-size:0.75rem">{{ $account->connection }}</span>
@@ -527,6 +594,14 @@ new class extends Component
                                 style="display:inline-flex;align-items:center;vertical-align:middle;padding:0.3125rem;cursor:pointer;margin-right:0.25rem">
                                 <x-heroicon-o-pencil-square class="h-4 w-4" />
                             </button>
+                            @if($this->accounts->count() > 1)
+                            <button wire:click="startMerge({{ $account->id }})"
+                                title="Merge into another account" aria-label="Merge into another account"
+                                class="rounded border {{ $mergingId === $account->id ? 'border-blue-400 bg-blue-50 text-blue-700 dark:border-blue-500 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-300 bg-white text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400' }} hover:text-gray-900 dark:hover:text-gray-100"
+                                style="display:inline-flex;align-items:center;vertical-align:middle;padding:0.3125rem;cursor:pointer;margin-right:0.25rem">
+                                <x-heroicon-o-arrows-pointing-in class="h-4 w-4" />
+                            </button>
+                            @endif
                             @if($account->trades_count > 0)
                             <button wire:click="clearTrades({{ $account->id }})"
                                 wire:confirm="Clear all {{ number_format($account->trades_count) }} trade(s) from &quot;{{ $account->name }}&quot;? All trades and images will be lost. This cannot be undone."
@@ -545,6 +620,46 @@ new class extends Component
                             </button>
                         </td>
                     </tr>
+                    @if($mergingId === $account->id)
+                    <tr wire:key="account-{{ $account->id }}-merge">
+                        <td colspan="7" class="bg-gray-50 dark:bg-gray-800/50" style="padding:1rem 1.25rem">
+                            <h4 class="text-gray-700 dark:text-gray-300" style="font-size:0.75rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.5rem">
+                                Merge &ldquo;{{ $account->name }}&rdquo; into another account
+                            </h4>
+                            <p class="text-gray-600 dark:text-gray-400" style="font-size:0.8125rem;margin-bottom:0.75rem;max-width:48rem">
+                                Use this when NinjaTrader sent trades under a different name than the account you created.
+                                Choose the account named exactly as in NinjaTrader. Its name is kept; it takes this account's
+                                type{{ $account->starting_balance !== null ? ' and starting balance' : '' }},
+                                and this account's {{ number_format($account->trades_count) }} trade(s) and its deposits and withdrawals move to it.
+                                &ldquo;{{ $account->name }}&rdquo; is then deleted.
+                            </p>
+                            <div style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:flex-start">
+                                <div>
+                                    <select wire:model="mergeTargetId" aria-label="Merge into"
+                                        class="rounded-md border border-gray-300 bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                                        style="padding:0.375rem 2rem 0.375rem 0.75rem;font-size:0.8125rem">
+                                        <option value="">Merge into…</option>
+                                        @foreach($this->accounts->where('id', '!=', $account->id) as $target)
+                                        <option value="{{ $target->id }}">{{ $target->name }}{{ $target->connection ? ' ('.$target->connection.')' : '' }}</option>
+                                        @endforeach
+                                    </select>
+                                    @error('mergeTargetId')<p class="mt-1 text-xs text-red-500 dark:text-red-400">{{ $message }}</p>@enderror
+                                </div>
+                                <button wire:click="merge"
+                                    wire:confirm="Merge &quot;{{ $account->name }}&quot; into the selected account? &quot;{{ $account->name }}&quot; will be deleted. This cannot be undone."
+                                    class="rounded-md bg-blue-600 text-white hover:bg-blue-700"
+                                    style="padding:0.375rem 1rem;font-size:0.8125rem;font-weight:500;cursor:pointer">
+                                    Merge
+                                </button>
+                                <button wire:click="cancelMerge"
+                                    class="rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                                    style="padding:0.375rem 1rem;font-size:0.8125rem;cursor:pointer">
+                                    Cancel
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    @endif
                     @if($expandedAccountId === $account->id && $account->account_type === AccountType::Funded)
                     <tr wire:key="account-{{ $account->id }}-transactions">
                         <td colspan="7" class="bg-gray-50 dark:bg-gray-800/50" style="padding:1rem 1.25rem">
