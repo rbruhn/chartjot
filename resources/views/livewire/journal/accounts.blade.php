@@ -527,9 +527,9 @@ new class extends Component
             <p class="text-gray-500 dark:text-gray-400 text-sm">No accounts yet. Add your first account to get started.</p>
         </div>
         @else
-        <div class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900" style="overflow:hidden">
+        <div class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900" style="overflow-x:auto">
             <table style="width:100%;border-collapse:collapse;font-size:0.875rem">
-                <thead>
+                <thead style="white-space:nowrap">
                     <tr class="border-b border-gray-200 dark:border-gray-700">
                         <th class="text-gray-500 dark:text-gray-400" style="text-align:left;padding:0.75rem 1rem;font-weight:500;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">Name</th>
                         <th class="text-gray-500 dark:text-gray-400" style="text-align:left;padding:0.75rem 1rem;font-weight:500;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">Type</th>
@@ -548,7 +548,7 @@ new class extends Component
                         $pnlClass  = $netPnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400';
                     @endphp
                     <tr wire:key="account-{{ $account->id }}">
-                        <td class="text-gray-900 dark:text-gray-50" style="padding:0.875rem 1rem;font-weight:500">
+                        <td class="text-gray-900 dark:text-gray-50" style="padding:0.875rem 1rem;font-weight:500;white-space:nowrap">
                             {{ $account->name }}
                             @if($account->connection)
                             <span class="text-gray-500 dark:text-gray-500" style="margin-left:0.5rem;font-size:0.75rem">{{ $account->connection }}</span>
