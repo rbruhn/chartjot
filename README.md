@@ -311,3 +311,7 @@ After changing the payload, regenerate them with
 ```bash
 php artisan test
 ```
+
+## License
+
+[MIT](LICENSE)
