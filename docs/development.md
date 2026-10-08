@@ -110,3 +110,29 @@ composer dev
 ```
 
 This runs the web server, the queue worker and Vite together.
+
+## Moving a journal from the hosted site to a self-hosted copy
+
+A one-time move for one trader (#106). On the hosted server:
+
+```bash
+php artisan journal:export friend@example.com
+```
+
+The user can be given by email or id. It writes
+`storage/app/exports/journal-<id>-<date>.zip` (`--path=` for another folder)
+with the accounts, deposits and withdrawals, trades with their executions,
+legs, notes, stop prices and copier links, and the chart images. Friends'
+comments, invitations and the intake token aren't included. Copy the zip off
+the server (scp/SFTP) and give it to the trader.
+
+On the self-hosted copy, after opening the journal once so the owner exists:
+
+```bash
+php artisan journal:import ~/journal-2-2026-10-08-152054.zip
+```
+
+It imports into the only user's journal (`--email=` picks one when there are
+several), sets the time zone if the journal has none, and prints a summary.
+Accounts with the same name are reused, and trades that already exist are
+skipped, so running it twice is harmless.
