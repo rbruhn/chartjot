@@ -71,7 +71,17 @@ namespace ChartJot.Core
 		private readonly TimeSpan timeout;
 		private readonly Func<DateTimeOffset> clock;
 
-		/// <param name="allowInsecureHttp">Only for a local development server. Production requires HTTPS.</param>
+		/// <summary>
+		/// Whether the AddOn may send to this endpoint: HTTPS, or plain HTTP to a journal on this PC (localhost,
+		/// 127.0.0.1, ::1), which is how a self-hosted journal runs (#102). The trades never leave the machine then.
+		/// </summary>
+		public static bool IsAllowedEndpoint(Uri uri)
+		{
+			return uri != null && uri.IsAbsoluteUri
+				&& (uri.Scheme == Uri.UriSchemeHttps || (uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback));
+		}
+
+		/// <param name="allowInsecureHttp">Only for a local development server on another host name. HTTP to this PC is always allowed.</param>
 		public TradeDelivery(HttpClient client, string endpoint, string token, string addonVersion, TimeSpan timeout,
 			Func<DateTimeOffset> clock = null, bool allowInsecureHttp = false)
 		{
@@ -89,8 +99,8 @@ namespace ChartJot.Core
 			Uri uri;
 			if (!Uri.TryCreate(endpoint, UriKind.Absolute, out uri))
 				throw new ArgumentException("The journal endpoint must be an absolute URL.", "endpoint");
-			if (uri.Scheme != Uri.UriSchemeHttps && !(allowInsecureHttp && uri.Scheme == Uri.UriSchemeHttp))
-				throw new ArgumentException("The journal endpoint must use HTTPS.", "endpoint");
+			if (!IsAllowedEndpoint(uri) && !(allowInsecureHttp && uri.Scheme == Uri.UriSchemeHttp))
+				throw new ArgumentException("The journal endpoint must use HTTPS, or HTTP to this PC.", "endpoint");
 
 			this.client = client;
 			this.endpoint = uri;

@@ -70,7 +70,7 @@ The current Chart Jot AddOn for NinjaTrader 8: **version $VERSION**, from releas
 
 **Uninstall:** **Tools → Remove NinjaScript Assembly → ChartJot**, then restart NinjaTrader.
 
-Setup, settings and the full guide: [README, "NT8 AddOn"](https://github.com/rbruhn/chartjot#nt8-addon).
+Setup, settings and the full guide: [the AddOn guide](https://github.com/rbruhn/chartjot/blob/main/docs/addon.md).
 EOF
 
 git tag -f "$ADDON_TAG" "$COMMIT" >/dev/null
