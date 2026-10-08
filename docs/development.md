@@ -77,7 +77,10 @@ Besides attaching the zip to the app release, it updates the fixed
 [`addon` release](https://github.com/rbruhn/chartjot/releases/tag/addon):
 
 - moves its tag to the release's commit;
-- replaces the zip;
+- replaces the zip, both as `ChartJot-AddOn-<version>.zip` and as
+  `ChartJot-AddOn.zip`, so
+  `https://github.com/rbruhn/chartjot/releases/download/addon/ChartJot-AddOn.zip`
+  always downloads the current AddOn (#122);
 - rewrites its notes;
 - keeps it from being marked "Latest".
 
