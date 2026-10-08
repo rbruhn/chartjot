@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Actions;
 
+use App\Support\Demo;
 use App\Support\SelfHostedPassword;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cookie;
@@ -14,7 +15,8 @@ class Logout
      */
     public function __invoke(): void
     {
-        Auth::guard('web')->logout();
+        // Signing out may rotate the remember token; the read-only demo (#115) must still be able to.
+        Demo::allowingWrites(fn () => Auth::guard('web')->logout());
 
         Session::invalidate();
         Session::regenerateToken();

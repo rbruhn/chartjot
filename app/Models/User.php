@@ -15,7 +15,7 @@ use Illuminate\Notifications\Notifiable;
 use Spiritix\LadaCache\Database\LadaCacheTrait;
 
 #[ObservedBy([UserObserver::class])]
-#[Fillable(['name', 'email', 'password', 'status', 'is_admin'])]
+#[Fillable(['name', 'email', 'password', 'status', 'is_admin', 'is_demo'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
@@ -29,6 +29,7 @@ class User extends Authenticatable
             'password'          => 'hashed',
             'status'            => UserStatus::class,
             'is_admin'          => 'boolean',
+            'is_demo'           => 'boolean',
         ];
     }
 
@@ -40,6 +41,12 @@ class User extends Authenticatable
     public function isAdmin(): bool
     {
         return (bool) $this->is_admin;
+    }
+
+    /** #115: the read-only demo account. */
+    public function isDemo(): bool
+    {
+        return (bool) $this->is_demo;
     }
 
     public function isActive(): bool

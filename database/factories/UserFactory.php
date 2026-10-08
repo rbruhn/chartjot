@@ -44,4 +44,10 @@ class UserFactory extends Factory
     {
         return $this->state(['is_admin' => true, 'status' => UserStatus::Active]);
     }
+
+    /** #115: the read-only demo account. */
+    public function demo(): static
+    {
+        return $this->state(['is_demo' => true, 'status' => UserStatus::Active]);
+    }
 }
