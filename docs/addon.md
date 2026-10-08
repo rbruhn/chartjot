@@ -6,11 +6,14 @@ It needs a running journal to send to. If you haven't set one up yet, start with
 
 ## Installing or updating
 
-**Download the current AddOn** from the
-[Chart Jot NT8 AddOn](https://github.com/rbruhn/chartjot/releases/tag/addon)
-release page. It always holds the latest `ChartJot-AddOn-<version>.zip`, a
-NinjaScript archive containing `ChartJot.dll` and `Info.xml`. The app release
-where the AddOn changed also has a copy.
+**[Download the current AddOn](https://github.com/rbruhn/chartjot/releases/download/addon/ChartJot-AddOn.zip)** (`ChartJot-AddOn.zip`). This link
+always gets the latest version. It's a NinjaScript archive containing
+`ChartJot.dll` and `Info.xml`.
+
+The [Chart Jot NT8 AddOn](https://github.com/rbruhn/chartjot/releases/tag/addon)
+release page has the same file named with its version
+(`ChartJot-AddOn-<version>.zip`), and the app release where the AddOn changed
+also has a copy.
 
 In NinjaTrader's Control Center, go to **Tools → Import → NinjaScript…**,
 pick the zip and click **Import**. NinjaTrader installs `ChartJot.dll` and
