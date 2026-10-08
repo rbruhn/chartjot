@@ -19,6 +19,8 @@
 - **Hosted** (`false`): the multi-user app with registration, admin approval,
   friends and sharing. Set `QUEUE_CONNECTION=redis`, `CACHE_STORE=redis` and
   `LADA_CACHE_ACTIVE=true`, configure mail, and run Horizon.
+  `CHARTJOT_REGISTRATION=false` closes sign-ups: the registration page is 404
+  and the links to it are hidden; existing users log in as before.
 
 The tests always run hosted (`phpunit.xml`); `tests/Feature/SelfHostedModeTest.php`
 switches self-hosted mode on.

@@ -8,7 +8,7 @@ use Livewire\Volt\Volt;
 // (issue #102) has no login, so these are all 404 there.
 Route::middleware(['multi-user', 'guest'])->group(function () {
     Volt::route('register', 'pages.auth.register')
-        ->middleware('throttle:6,1')
+        ->middleware(['registration', 'throttle:6,1'])
         ->name('register');
 
     Volt::route('register/pending', 'pages.auth.pending-approval')
