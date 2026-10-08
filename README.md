@@ -1,7 +1,7 @@
 # Chart Jot
 
 A personal trading journal for NinjaTrader 8 traders. Trades are sent
-automatically from a custom NT8 AddOn via a REST API, or imported manually
+automatically from a custom [NT8 AddOn](https://github.com/rbruhn/chartjot/releases/download/addon/ChartJot-AddOn.zip) via a REST API, or imported manually
 from a CSV export of NT8's Trade Performance → Executions screen. Review
 trades, add notes, attach screenshots, and track performance across accounts.
 
@@ -36,10 +36,12 @@ Then open http://localhost:8000.
 
 ## Get the AddOn
 
-Download the current `ChartJot-AddOn-<version>.zip` from the
-[Chart Jot NT8 AddOn](https://github.com/rbruhn/chartjot/releases/tag/addon)
-release page, and import it in NinjaTrader with **Tools → Import →
+**[Download the current AddOn](https://github.com/rbruhn/chartjot/releases/download/addon/ChartJot-AddOn.zip)** (`ChartJot-AddOn.zip`). This link
+always gets the latest version. Import it in NinjaTrader with **Tools → Import →
 NinjaScript…**. See [Installing or updating](docs/addon.md#installing-or-updating).
+
+The [Chart Jot NT8 AddOn](https://github.com/rbruhn/chartjot/releases/tag/addon)
+release page has the same file named with its version, and the release notes.
 
 ## License
 
