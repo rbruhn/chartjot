@@ -99,13 +99,13 @@
                 <div class="mt-5 space-y-4">
                     <div>
                         <x-input-label for="ingest-url" value="Endpoint URL" />
-                        <x-text-input id="ingest-url" type="text" class="mt-1 block w-full font-mono text-sm" :value="url('/api/v1/trades')" readonly />
+                        <x-copy-input id="ingest-url" class="mt-1" :value="url('/api/v1/trades')" label="Copy endpoint URL" />
                     </div>
 
                     @if ($ingestToken)
                         <div>
                             <x-input-label for="ingest-token" value="New intake token" />
-                            <x-text-input id="ingest-token" type="text" class="mt-1 block w-full font-mono text-sm" :value="$ingestToken" readonly />
+                            <x-copy-input id="ingest-token" class="mt-1" :value="$ingestToken" label="Copy token" />
                             <p class="mt-2 text-sm text-amber-700 dark:text-amber-300">
                                 Copy this token now. It will not be shown again.
                             </p>

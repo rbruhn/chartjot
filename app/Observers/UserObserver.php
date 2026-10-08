@@ -5,6 +5,7 @@ namespace App\Observers;
 use App\Mail\NewUserRegistered;
 use App\Models\Journal;
 use App\Models\User;
+use App\Support\Demo;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Session;
@@ -19,9 +20,9 @@ class UserObserver
             Session::flash('journal_ingest_token', $token);
         }
 
-        // Admins and the self-hosted owner (issue #102) aren't registrations
-        // anyone has to approve.
-        if ($user->is_admin || config('chartjot.self_hosted')) {
+        // Admins, the self-hosted owner (issue #102) and the demo account (#115)
+        // aren't registrations anyone has to approve.
+        if ($user->is_admin || $user->is_demo || config('chartjot.self_hosted')) {
             return;
         }
 
@@ -45,6 +46,21 @@ class UserObserver
         }
 
         return User::where('is_admin', true)->get();
+    }
+
+    /** #115: the demo account itself can't be changed, whoever is signed in (Profile signs out before deleting). */
+    public function updating(User $user): void
+    {
+        if ($user->getOriginal('is_demo')) {
+            Demo::ensureWritableUnlessAllowed();
+        }
+    }
+
+    public function deleting(User $user): void
+    {
+        if ($user->getOriginal('is_demo')) {
+            Demo::ensureWritableUnlessAllowed();
+        }
     }
 
     public function updated(User $user): void {}

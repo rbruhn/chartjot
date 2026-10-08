@@ -22,6 +22,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Registration
+    |--------------------------------------------------------------------------
+    |
+    | Hosted mode only (#117). When off, the registration page is 404 and
+    | the links to it are hidden. Existing users log in as before, and
+    | anyone already waiting for approval can still be approved.
+    |
+    */
+
+    'registration' => (bool) env('CHARTJOT_REGISTRATION', true),
+
+    /*
+    |--------------------------------------------------------------------------
     | Self-Hosted Password
     |--------------------------------------------------------------------------
     |

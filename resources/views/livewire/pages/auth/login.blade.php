@@ -49,11 +49,13 @@ new #[Layout('layouts.guest')] class extends Component
             </label>
         </div>
 
-        <div class="flex items-center justify-between mt-4">
+        <div @class(['flex items-center mt-4', 'justify-between' => config('chartjot.registration'), 'justify-end' => ! config('chartjot.registration')])>
+            @if (config('chartjot.registration'))
             <a href="{{ route('register') }}" wire:navigate
                class="inline-flex items-center px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-500 rounded-md font-semibold text-xs text-gray-700 dark:text-gray-300 uppercase tracking-widest shadow-sm hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 transition ease-in-out duration-150">
                 {{ __('Create an account') }}
             </a>
+            @endif
 
             <div class="flex items-center gap-3">
                 @if (Route::has('password.request'))
@@ -69,4 +71,13 @@ new #[Layout('layouts.guest')] class extends Component
             </div>
         </div>
     </form>
+
+    {{-- #115 --}}
+    @if (\App\Models\User::where('is_demo', true)->exists())
+        <p class="mt-6 text-center text-sm text-gray-600 dark:text-gray-400">
+            {{ __('Just looking?') }}
+            <a href="{{ route('demo') }}" class="font-medium text-indigo-600 hover:underline dark:text-indigo-400">{{ __('View the demo') }}</a>:
+            {{ __('a sample journal, read-only, no sign-up.') }}
+        </p>
+    @endif
 </div>

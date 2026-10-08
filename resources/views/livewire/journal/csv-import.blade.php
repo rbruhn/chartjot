@@ -1,5 +1,6 @@
 <?php
 
+use App\Support\Demo;
 use App\Jobs\ImportExecutionsCsv;
 use App\Models\Journal;
 use Illuminate\Support\Facades\Cache;
@@ -44,6 +45,7 @@ new class extends Component
         }
 
         $this->validate();
+        Demo::ensureWritable(); // #115: before the file is stored
 
         $this->state    = 'uploading';
         $this->importId = Str::uuid()->toString();
