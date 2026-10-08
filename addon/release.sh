@@ -62,11 +62,17 @@ echo "Attached $ZIP_NAME to release $TAG"
 VERSION="${ZIP_NAME#ChartJot-AddOn-}"
 VERSION="${VERSION%.zip}"
 NOTES="$(mktemp)"
-trap 'rm -f "$NOTES"' EXIT
+# #122: the same zip under a name without the version, so
+# https://github.com/rbruhn/chartjot/releases/download/addon/ChartJot-AddOn.zip always downloads the current AddOn.
+LATEST_NAME="ChartJot-AddOn.zip"
+LATEST_DIR="$(mktemp -d)"
+LATEST="$LATEST_DIR/$LATEST_NAME"
+cp "$ZIP" "$LATEST"
+trap 'rm -f "$NOTES"; rm -rf "$LATEST_DIR"' EXIT
 cat > "$NOTES" <<EOF
 The current Chart Jot AddOn for NinjaTrader 8: **version $VERSION**, from release [$TAG](https://github.com/rbruhn/chartjot/releases/tag/$TAG). This page always holds the latest AddOn. It's replaced whenever a new version is released.
 
-**Install or update:** download \`$ZIP_NAME\` below. In NinjaTrader's Control Center, go to **Tools → Import → NinjaScript…**, pick the zip and click **Import**. Then reopen your charts, so they get the Chart Jot button.
+**Install or update:** download \`$ZIP_NAME\` below, or use the [permanent download link](https://github.com/rbruhn/chartjot/releases/download/$ADDON_TAG/$LATEST_NAME), which always gets the current version. In NinjaTrader's Control Center, go to **Tools → Import → NinjaScript…**, pick the zip and click **Import**. Then reopen your charts, so they get the Chart Jot button.
 
 **Uninstall:** **Tools → Remove NinjaScript Assembly → ChartJot**, then restart NinjaTrader.
 
@@ -78,14 +84,14 @@ git push --quiet --force origin "refs/tags/$ADDON_TAG"
 
 if "$GH" release view "$ADDON_TAG" >/dev/null 2>&1; then
     "$GH" release edit "$ADDON_TAG" --title "Chart Jot NT8 AddOn" --notes-file "$NOTES" --latest=false
-    # Upload the new zip before removing the old ones, so the page is never empty.
-    "$GH" release upload "$ADDON_TAG" "$ZIP" --clobber
+    # Upload the new zips before removing the old ones, so the page is never empty.
+    "$GH" release upload "$ADDON_TAG" "$ZIP" "$LATEST" --clobber
     "$GH" release view "$ADDON_TAG" --json assets -q '.assets[].name' | while read -r asset; do
-        if [ -n "$asset" ] && [ "$asset" != "$ZIP_NAME" ]; then
+        if [ -n "$asset" ] && [ "$asset" != "$ZIP_NAME" ] && [ "$asset" != "$LATEST_NAME" ]; then
             "$GH" release delete-asset "$ADDON_TAG" "$asset" --yes
         fi
     done
 else
-    "$GH" release create "$ADDON_TAG" "$ZIP" --verify-tag --title "Chart Jot NT8 AddOn" --notes-file "$NOTES" --latest=false
+    "$GH" release create "$ADDON_TAG" "$ZIP" "$LATEST" --verify-tag --title "Chart Jot NT8 AddOn" --notes-file "$NOTES" --latest=false
 fi
 echo "Updated the fixed AddOn release: https://github.com/rbruhn/chartjot/releases/tag/$ADDON_TAG"
