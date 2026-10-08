@@ -13,12 +13,26 @@ return [
     | and trade sharing are switched off. The AddOn API still needs its
     | journal token.
     |
-    | Anyone who can reach the site sees the journal, so only use this where
-    | the site isn't reachable from the internet (your own PC or network).
+    | Without a password (below), anyone who can reach the site sees the
+    | journal, so set one unless the site only runs on your own PC.
     |
     */
 
     'self_hosted' => (bool) env('CHARTJOT_SELF_HOSTED', false),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Self-Hosted Password
+    |--------------------------------------------------------------------------
+    |
+    | Optional. When set, each browser has to enter it once before it can
+    | see the journal (it's remembered for a year). Changing it locks every
+    | browser again. Leave it empty for no password, e.g. when the journal
+    | only runs on your own PC.
+    |
+    */
+
+    'password' => env('CHARTJOT_PASSWORD'),
 
     /*
     |--------------------------------------------------------------------------

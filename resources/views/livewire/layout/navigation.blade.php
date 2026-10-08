@@ -98,13 +98,13 @@ new class extends Component
                         </div>
 
                         <!-- Authentication -->
-                        @unless (config('chartjot.self_hosted'))
+                        @if (! config('chartjot.self_hosted') || \App\Support\SelfHostedPassword::isRequired())
                         <button wire:click="logout" class="w-full text-start">
                             <x-dropdown-link>
                                 {{ __('Log Out') }}
                             </x-dropdown-link>
                         </button>
-                        @endunless
+                        @endif
                     </x-slot>
                 </x-dropdown>
             </div>
@@ -184,13 +184,13 @@ new class extends Component
                 </div>
 
                 <!-- Authentication -->
-                @unless (config('chartjot.self_hosted'))
+                @if (! config('chartjot.self_hosted') || \App\Support\SelfHostedPassword::isRequired())
                 <button wire:click="logout" class="w-full text-start">
                     <x-responsive-nav-link>
                         {{ __('Log Out') }}
                     </x-responsive-nav-link>
                 </button>
-                @endunless
+                @endif
             </div>
         </div>
     </div>
