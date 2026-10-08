@@ -69,8 +69,12 @@ class TradeIntakeController extends Controller
                 'occurred_at'     => now(),
             ]);
 
-            Mail::to($journal->user()->value('email'))
-                ->send(new FailedImportsMail($journal->name, [$failure]));
+            // Self-hosted mode (issue #102) needs no mail server; the AddOn
+            // shows the 422 message instead.
+            if (! config('chartjot.self_hosted')) {
+                Mail::to($journal->user()->value('email'))
+                    ->send(new FailedImportsMail($journal->name, [$failure]));
+            }
 
             return response()->json([
                 'message' => $e->getMessage(),

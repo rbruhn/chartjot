@@ -45,7 +45,7 @@ Provide an AddOn settings surface with these values:
 
 | Setting | Requirement |
 | --- | --- |
-| `Journal endpoint URL` | Required HTTPS base endpoint, e.g. `https://journal.example.com/api/v1/trades` |
+| `Journal endpoint URL` | Required HTTPS base endpoint, e.g. `https://journal.example.com/api/v1/trades`. Plain HTTP is accepted only to this PC (`localhost`, `127.0.0.1`, `::1`), for a self-hosted journal (#102) |
 | `Journal intake token` | Required bearer token copied from Chart Jot settings; mask in the UI and do not log it |
 | `Data folder` | Where the AddOn stores its state file, delivery queue, screenshots and logs. Defaults to `%USERPROFILE%\ChartJot\` (visible in File Explorer next to Desktop/Documents, and outside the folders OneDrive's automatic backup redirects by default); the trader may change it. Settings screen includes an "Open folder" button and warns if the chosen folder is inside a cloud-sync folder (OneDrive, Dropbox, Google Drive) |
 | `Instrument/chart scope` | The AddOn must clearly indicate which chart/instrument owns notes and screenshots |
@@ -54,8 +54,8 @@ Provide an AddOn settings surface with these values:
 | `Retry behavior` | Enabled by default; show queued/failed deliveries and permit manual retry |
 | `Verbose diagnostics` | Disabled by default; when enabled, note content may be written to the diagnostic log |
 
-Validate the endpoint as an absolute HTTPS URL in production. Do not embed a
-token in a URL or query string.
+Validate the endpoint as an absolute HTTPS URL, or an HTTP URL to this PC. Do
+not embed a token in a URL or query string.
 
 When a Playback account is monitored, timestamps are the historical playback
 times NT8 reports. They must be sent as-is and never replaced with wall-clock

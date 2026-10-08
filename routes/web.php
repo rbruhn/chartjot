@@ -5,6 +5,7 @@ use App\Http\Controllers\JournalAccountsController;
 use App\Http\Controllers\JournalController;
 use App\Http\Controllers\JournalSettingsController;
 use App\Http\Controllers\JournalStatisticsController;
+use App\Http\Controllers\SelfHostedUnlockController;
 use App\Http\Controllers\SharedTradeController;
 use App\Http\Controllers\TradeCommentController;
 use App\Http\Controllers\TradeScreenshotController;
@@ -12,6 +13,13 @@ use Illuminate\Support\Facades\Route;
 use Livewire\Volt\Volt;
 
 Route::redirect('/', '/journal');
+
+// Self-hosted mode's optional password (issue #102); 404 unless one is set.
+Route::get('unlock', [SelfHostedUnlockController::class, 'show'])
+    ->name('self-hosted.unlock');
+Route::post('unlock', [SelfHostedUnlockController::class, 'store'])
+    ->middleware('throttle:6,1')
+    ->name('self-hosted.unlock.store');
 
 Route::get('journal', [JournalController::class, 'index'])
     ->middleware(['auth', 'active'])
@@ -26,7 +34,7 @@ Route::get('accounts', [JournalAccountsController::class, 'index'])
     ->name('journal.accounts');
 
 Route::get('friends', [FriendsController::class, 'index'])
-    ->middleware(['auth', 'active'])
+    ->middleware(['multi-user', 'auth', 'active'])
     ->name('friends.index');
 
 Route::get('journal/settings', [JournalSettingsController::class, 'edit'])
@@ -48,7 +56,7 @@ Route::get('journal/trades/{trade:uuid}/screenshots/{screenshot}', [TradeScreens
 // Standalone shared-trade page for invited friends (issue #18). Outside the
 // journal routes on purpose: its own bare layout, and every request is
 // re-authorized by TradePolicy::viewShared / comment.
-Route::middleware(['auth', 'active'])->group(function () {
+Route::middleware(['multi-user', 'auth', 'active'])->group(function () {
     Route::get('trades/{trade:uuid}/shared', [SharedTradeController::class, 'show'])
         ->name('trades.shared');
     Route::get('trades/{trade:uuid}/shared/screenshots/{screenshot}', [SharedTradeController::class, 'screenshot'])
@@ -68,7 +76,7 @@ Route::view('profile', 'profile')
     ->middleware(['auth', 'active'])
     ->name('profile');
 
-Route::middleware(['auth', 'active', 'admin'])->group(function () {
+Route::middleware(['multi-user', 'auth', 'active', 'admin'])->group(function () {
     Volt::route('admin/users', 'admin.users')->name('admin.users');
 });
 
