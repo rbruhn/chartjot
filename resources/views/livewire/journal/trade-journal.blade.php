@@ -932,11 +932,13 @@ new class extends Component {
                                         {{ $this->ptsDisplay($t) }}
                                     </div>
                                 </div>
+                                @can('invite', $t)
                                 <button wire:click="$toggle('showInvite')"
                                     title="Invite a friend to comment" aria-label="Invite a friend to comment"
                                     class="text-xs px-3 py-1.5 rounded border transition-colors {{ $showInvite ? 'border-indigo-400 dark:border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-500' }}">
                                     <x-heroicon-o-user-plus class="h-4 w-4" />
                                 </button>
+                                @endcan
                                 <button wire:click="startEditTrade"
                                     title="Edit" aria-label="Edit"
                                     class="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
@@ -980,7 +982,7 @@ new class extends Component {
                         @endif
                     </p>
 
-                    @if($showInvite && !$editingTrade)
+                    @if($showInvite && !$editingTrade && auth()->user()->can('invite', $t))
                     {{-- Invite a friend to comment --}}
                     <div class="mb-6 rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3">
                         <div class="flex items-center justify-between gap-3 mb-2">

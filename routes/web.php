@@ -26,7 +26,7 @@ Route::get('accounts', [JournalAccountsController::class, 'index'])
     ->name('journal.accounts');
 
 Route::get('friends', [FriendsController::class, 'index'])
-    ->middleware(['auth', 'active'])
+    ->middleware(['multi-user', 'auth', 'active'])
     ->name('friends.index');
 
 Route::get('journal/settings', [JournalSettingsController::class, 'edit'])
@@ -48,7 +48,7 @@ Route::get('journal/trades/{trade:uuid}/screenshots/{screenshot}', [TradeScreens
 // Standalone shared-trade page for invited friends (issue #18). Outside the
 // journal routes on purpose: its own bare layout, and every request is
 // re-authorized by TradePolicy::viewShared / comment.
-Route::middleware(['auth', 'active'])->group(function () {
+Route::middleware(['multi-user', 'auth', 'active'])->group(function () {
     Route::get('trades/{trade:uuid}/shared', [SharedTradeController::class, 'show'])
         ->name('trades.shared');
     Route::get('trades/{trade:uuid}/shared/screenshots/{screenshot}', [SharedTradeController::class, 'screenshot'])
@@ -68,7 +68,7 @@ Route::view('profile', 'profile')
     ->middleware(['auth', 'active'])
     ->name('profile');
 
-Route::middleware(['auth', 'active', 'admin'])->group(function () {
+Route::middleware(['multi-user', 'auth', 'active', 'admin'])->group(function () {
     Volt::route('admin/users', 'admin.users')->name('admin.users');
 });
 

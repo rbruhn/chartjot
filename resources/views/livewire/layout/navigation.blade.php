@@ -38,10 +38,12 @@ new class extends Component
                     <x-nav-link :href="route('journal.accounts')" :active="request()->routeIs('journal.accounts')" wire:navigate>
                         {{ __('Accounts') }}
                     </x-nav-link>
+                    @unless (config('chartjot.self_hosted'))
                     <x-nav-link :href="route('friends.index')" :active="request()->routeIs('friends.index')" wire:navigate>
                         {{ __('Friends') }}
                     </x-nav-link>
-                    @if (auth()->user()?->isAdmin())
+                    @endunless
+                    @if (! config('chartjot.self_hosted') && auth()->user()?->isAdmin())
                         <x-nav-link :href="route('admin.users')" :active="request()->routeIs('admin.*')" wire:navigate>
                             {{ __('Admin') }}
                         </x-nav-link>
@@ -96,11 +98,13 @@ new class extends Component
                         </div>
 
                         <!-- Authentication -->
+                        @unless (config('chartjot.self_hosted'))
                         <button wire:click="logout" class="w-full text-start">
                             <x-dropdown-link>
                                 {{ __('Log Out') }}
                             </x-dropdown-link>
                         </button>
+                        @endunless
                     </x-slot>
                 </x-dropdown>
             </div>
@@ -129,10 +133,12 @@ new class extends Component
             <x-responsive-nav-link :href="route('journal.accounts')" :active="request()->routeIs('journal.accounts')" wire:navigate>
                 {{ __('Accounts') }}
             </x-responsive-nav-link>
+            @unless (config('chartjot.self_hosted'))
             <x-responsive-nav-link :href="route('friends.index')" :active="request()->routeIs('friends.index')" wire:navigate>
                 {{ __('Friends') }}
             </x-responsive-nav-link>
-            @if (auth()->user()?->isAdmin())
+            @endunless
+            @if (! config('chartjot.self_hosted') && auth()->user()?->isAdmin())
                 <x-responsive-nav-link :href="route('admin.users')" :active="request()->routeIs('admin.*')" wire:navigate>
                     {{ __('Admin') }}
                 </x-responsive-nav-link>
@@ -178,11 +184,13 @@ new class extends Component
                 </div>
 
                 <!-- Authentication -->
+                @unless (config('chartjot.self_hosted'))
                 <button wire:click="logout" class="w-full text-start">
                     <x-responsive-nav-link>
                         {{ __('Log Out') }}
                     </x-responsive-nav-link>
                 </button>
+                @endunless
             </div>
         </div>
     </div>
