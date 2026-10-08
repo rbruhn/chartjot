@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\AuthenticateJournalToken;
 use App\Http\Middleware\EnsureMultiUser;
+use App\Http\Middleware\EnsureRegistrationIsOpen;
 use App\Http\Middleware\EnsureUserIsActive;
 use App\Http\Middleware\EnsureUserIsAdmin;
 use App\Http\Middleware\SignInSelfHostedOwner;
@@ -25,6 +26,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'admin'          => EnsureUserIsAdmin::class,
             'journal.token'  => AuthenticateJournalToken::class,
             'multi-user'     => EnsureMultiUser::class,
+            'registration'   => EnsureRegistrationIsOpen::class,
         ]);
 
         // Self-hosted mode (issue #102): no login, every browser request is

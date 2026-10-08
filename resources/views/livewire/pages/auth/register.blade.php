@@ -18,6 +18,9 @@ new #[Layout('layouts.guest')] class extends Component
 
     public function register(): void
     {
+        // #117: the form posts to /livewire/update, past the route's middleware, so check here too.
+        abort_unless(config('chartjot.registration'), 404);
+
         $validated = $this->validate([
             'name'     => ['required', 'string', 'max:255'],
             'email'    => ['required', 'string', 'lowercase', 'email', 'max:255', 'unique:'.User::class],
