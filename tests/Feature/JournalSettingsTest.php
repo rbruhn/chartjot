@@ -107,7 +107,7 @@ test('the new intake token has a copy button', function () {
         ->withSession(['journal_ingest_token' => 'tok_123'])
         ->get(route('journal.settings.edit'))
         ->assertOk()
-        ->assertSeeHtml('x-ref="token"')
+        ->assertSeeHtml('x-ref="box"')
         ->assertSeeHtml('value="tok_123"')
         ->assertSeeHtml('aria-label="Copy token"')
         ->assertSeeHtml('navigator.clipboard.writeText(box.value)');
@@ -122,4 +122,16 @@ test('there is no copy button when no new token is shown', function () {
         ->get(route('journal.settings.edit'))
         ->assertOk()
         ->assertDontSeeHtml('aria-label="Copy token"');
+});
+
+test('the endpoint URL has a copy button', function () {
+    $user = User::factory()->create();
+
+    $this->actingAs($user)
+        ->withSession(['journal_ingest_token' => null])
+        ->get(route('journal.settings.edit'))
+        ->assertOk()
+        ->assertSeeHtml('id="ingest-url"')
+        ->assertSeeHtml('value="'.url('/api/v1/trades').'"')
+        ->assertSeeHtml('aria-label="Copy endpoint URL"');
 });
