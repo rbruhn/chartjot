@@ -2,7 +2,9 @@
 
 namespace App\Livewire\Actions;
 
+use App\Support\SelfHostedPassword;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\Session;
 
 class Logout
@@ -16,5 +18,10 @@ class Logout
 
         Session::invalidate();
         Session::regenerateToken();
+
+        // Self-hosted with a password (issue #102): logging out locks this browser.
+        if (SelfHostedPassword::isRequired()) {
+            Cookie::queue(SelfHostedPassword::forgetCookie());
+        }
     }
 }

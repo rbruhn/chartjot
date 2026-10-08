@@ -1,10 +1,13 @@
 <?php
 
+use App\Livewire\Actions\Logout;
 use App\Mail\NewUserRegistered;
 use App\Models\Account;
 use App\Models\Trade;
 use App\Models\User;
+use App\Support\SelfHostedPassword;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\Mail;
 
 uses(LazilyRefreshDatabase::class);
@@ -114,6 +117,90 @@ test('the owner cannot invite anyone to a trade', function () {
     $trade   = Trade::factory()->create(['journal_id' => $owner->journal->id, 'account_id' => $account->id]);
 
     expect($owner->can('invite', $trade))->toBeFalse();
+});
+
+// ---------------------------------------------------------------------------
+// Optional password
+// ---------------------------------------------------------------------------
+
+/** Unlocks the journal and returns the unlock cookie's value. */
+function unlockJournal($test, string $password = 'open sesame'): string
+{
+    $response = $test->post('/unlock', ['password' => $password]);
+    $response->assertRedirect('/journal')->assertCookie(SelfHostedPassword::COOKIE);
+
+    return $response->getCookie(SelfHostedPassword::COOKIE)->getValue();
+}
+
+test('with a password, a new browser is sent to the unlock page', function () {
+    config(['chartjot.password' => 'open sesame']);
+
+    $this->get('/journal')->assertRedirect('/unlock');
+    $this->get('/unlock')->assertOk()->assertSee('Unlock');
+
+    $this->assertGuest();
+    expect(User::count())->toBe(0);
+});
+
+test('a wrong password keeps the journal locked', function () {
+    config(['chartjot.password' => 'open sesame']);
+
+    $this->post('/unlock', ['password' => 'nope'])
+        ->assertSessionHasErrors('password')
+        ->assertCookieMissing(SelfHostedPassword::COOKIE);
+
+    $this->get('/journal')->assertRedirect('/unlock');
+});
+
+test('the right password unlocks the journal and returns to the page asked for', function () {
+    config(['chartjot.password' => 'open sesame']);
+
+    $this->get('/accounts')->assertRedirect('/unlock');
+    $this->post('/unlock', ['password' => 'open sesame'])
+        ->assertRedirect('/accounts')
+        ->assertCookie(SelfHostedPassword::COOKIE);
+});
+
+test('an unlocked browser stays signed in as the owner', function () {
+    config(['chartjot.password' => 'open sesame']);
+    $cookie = unlockJournal($this);
+
+    $this->withCookie(SelfHostedPassword::COOKIE, $cookie)->get('/journal')
+        ->assertOk()
+        ->assertSee('Log Out');
+
+    $this->assertAuthenticatedAs(User::sole());
+});
+
+test('changing the password locks every browser again', function () {
+    config(['chartjot.password' => 'open sesame']);
+    $cookie = unlockJournal($this);
+    $this->withCookie(SelfHostedPassword::COOKIE, $cookie)->get('/journal')->assertOk();
+
+    config(['chartjot.password' => 'something new']);
+
+    $this->withCookie(SelfHostedPassword::COOKIE, $cookie)->get('/journal')->assertRedirect('/unlock');
+    $this->assertGuest();
+});
+
+test('logging out locks the browser', function () {
+    config(['chartjot.password' => 'open sesame']);
+
+    app(Logout::class)();
+
+    expect(Cookie::hasQueued(SelfHostedPassword::COOKIE))->toBeTrue()
+        ->and(Cookie::queued(SelfHostedPassword::COOKIE)->getExpiresTime())->toBeLessThan(time());
+});
+
+test('the unlock page does not exist without a password', function () {
+    $this->get('/unlock')->assertNotFound();
+    $this->post('/unlock', ['password' => 'anything'])->assertNotFound();
+});
+
+test('the unlock page does not exist when self-hosted mode is off', function () {
+    config(['chartjot.self_hosted' => false, 'chartjot.password' => 'open sesame']);
+
+    $this->get('/unlock')->assertNotFound();
 });
 
 // ---------------------------------------------------------------------------

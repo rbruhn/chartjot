@@ -5,6 +5,7 @@ use App\Http\Controllers\JournalAccountsController;
 use App\Http\Controllers\JournalController;
 use App\Http\Controllers\JournalSettingsController;
 use App\Http\Controllers\JournalStatisticsController;
+use App\Http\Controllers\SelfHostedUnlockController;
 use App\Http\Controllers\SharedTradeController;
 use App\Http\Controllers\TradeCommentController;
 use App\Http\Controllers\TradeScreenshotController;
@@ -12,6 +13,13 @@ use Illuminate\Support\Facades\Route;
 use Livewire\Volt\Volt;
 
 Route::redirect('/', '/journal');
+
+// Self-hosted mode's optional password (issue #102); 404 unless one is set.
+Route::get('unlock', [SelfHostedUnlockController::class, 'show'])
+    ->name('self-hosted.unlock');
+Route::post('unlock', [SelfHostedUnlockController::class, 'store'])
+    ->middleware('throttle:6,1')
+    ->name('self-hosted.unlock.store');
 
 Route::get('journal', [JournalController::class, 'index'])
     ->middleware(['auth', 'active'])
