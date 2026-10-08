@@ -741,3 +741,23 @@ test('the Delete All warning is hidden when there are no accounts', function () 
         ->test('journal.accounts', ['journal' => $journal])
         ->assertDontSee('Delete All Accounts');
 });
+
+test('after deleteAll the journal and statistics pages still load', function () {
+    [$user, $journal] = accountsUser();
+    $journal->update(['timezone' => 'America/New_York']);
+    $account = Account::factory()->create(['journal_id' => $journal->id]);
+    $trade   = tradeInAccount($account);
+    TradeExecution::factory()->create(['trade_id' => $trade->id]);
+
+    $this->actingAs($user)->get('/journal')->assertOk();
+    $this->actingAs($user)->get('/journal/statistics')->assertOk();
+
+    Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal])
+        ->call('deleteAll');
+
+    $this->actingAs($user)->get('/journal')->assertOk();
+    $this->actingAs($user)->get('/journal/statistics')->assertOk();
+    expect(Trade::where('journal_id', $journal->id)->count())->toBe(0)
+        ->and(TradeExecution::where('trade_id', $trade->id)->count())->toBe(0);
+});
