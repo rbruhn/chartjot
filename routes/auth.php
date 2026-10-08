@@ -4,7 +4,9 @@ use App\Http\Controllers\Auth\VerifyEmailController;
 use Illuminate\Support\Facades\Route;
 use Livewire\Volt\Volt;
 
-Route::middleware('guest')->group(function () {
+// Accounts and logins only exist with several users; self-hosted mode
+// (issue #102) has no login, so these are all 404 there.
+Route::middleware(['multi-user', 'guest'])->group(function () {
     Volt::route('register', 'pages.auth.register')
         ->middleware('throttle:6,1')
         ->name('register');
@@ -24,7 +26,7 @@ Route::middleware('guest')->group(function () {
         ->name('password.reset');
 });
 
-Route::middleware('auth')->group(function () {
+Route::middleware(['multi-user', 'auth'])->group(function () {
     Volt::route('verify-email', 'pages.auth.verify-email')
         ->name('verification.notice');
 

@@ -15,10 +15,13 @@ use App\Models\User;
  */
 class TradePolicy
 {
-    /** Invite friends to this trade, or revoke their invitations: owner only. */
+    /**
+     * Invite friends to this trade, or revoke their invitations: owner only.
+     * Never in self-hosted mode (issue #102), which has no friends.
+     */
     public function invite(User $user, Trade $trade): bool
     {
-        return $trade->isOwnedBy($user);
+        return ! config('chartjot.self_hosted') && $trade->isOwnedBy($user);
     }
 
     /**

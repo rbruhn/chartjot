@@ -95,6 +95,7 @@ namespace ChartJot.Core.Tests
 		[InlineData("")]
 		[InlineData("journal.example.com/api/v1/trades")]
 		[InlineData("http://journal.example.com/api/v1/trades")]
+		[InlineData("http://192.168.1.20:8000/api/v1/trades")]
 		[InlineData("ftp://journal.example.com/api/v1/trades")]
 		[InlineData("https://journal.example.com/api/v1/trades?token=abc")]
 		[InlineData("https://user:secret@journal.example.com/api/v1/trades")]
@@ -104,6 +105,18 @@ namespace ChartJot.Core.Tests
 			settings.EndpointUrl = endpoint;
 
 			Assert.Single(settings.Validate());
+		}
+
+		[Theory]
+		[InlineData("http://localhost:8000/api/v1/trades")]
+		[InlineData("http://127.0.0.1:8000/api/v1/trades")]
+		[InlineData("http://[::1]:8000/api/v1/trades")]
+		public void Validate_AcceptsHttpToAJournalOnThisPc(string endpoint)
+		{
+			AddonSettings settings = Valid();
+			settings.EndpointUrl = endpoint;
+
+			Assert.Empty(settings.Validate());
 		}
 
 		[Fact]

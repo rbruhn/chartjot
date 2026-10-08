@@ -7,6 +7,7 @@ use App\Models\Account;
 use App\Models\AccountTransaction;
 use App\Models\Journal;
 use App\Models\Trade;
+use App\Models\TradeComment;
 use App\Models\TradeExecution;
 use App\Models\TradeNote;
 use App\Models\TradeScreenshot;
@@ -660,4 +661,103 @@ test('cannot edit or delete a transaction belonging to another account', functio
             ->call('saveTransaction'))->toThrow(ModelNotFoundException::class);
         expect((float) $tx->fresh()->amount)->toBe(100.0);
     }
+});
+
+// ---------------------------------------------------------------------------
+// Delete All Accounts (#108)
+// ---------------------------------------------------------------------------
+
+test('deleteAll removes every account with its trades, transactions and image files', function () {
+    Storage::fake('local');
+    [$user, $journal] = accountsUser();
+    $funded = Account::factory()->create(['journal_id' => $journal->id]);
+    $sim    = Account::factory()->create(['journal_id' => $journal->id]);
+    $trade  = tradeInAccount($funded);
+    tradeInAccount($sim);
+    TradeExecution::factory()->create(['trade_id' => $trade->id]);
+    TradeNote::factory()->create(['trade_id' => $trade->id, 'created_by' => $user->id]);
+    AccountTransaction::factory()->create(['account_id' => $funded->id]);
+
+    $shot = "trade-screenshots/{$journal->id}/{$trade->uuid}.png";
+    Storage::disk('local')->put($shot, 'image');
+    TradeScreenshot::factory()->create(['trade_id' => $trade->id, 'disk' => 'local', 'path' => $shot]);
+    $commentImage = "trade-comment-images/{$trade->id}/c.png";
+    Storage::disk('local')->put($commentImage, 'image');
+    TradeComment::factory()->create(['trade_id' => $trade->id, 'user_id' => $user->id, 'image_disk' => 'local', 'image_path' => $commentImage, 'image_mime_type' => 'image/png']);
+
+    Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal])
+        ->call('deleteAll')
+        ->assertHasNoErrors()
+        ->assertSee('No accounts yet');
+
+    expect(Account::count())->toBe(0)
+        ->and(Trade::count())->toBe(0)
+        ->and(TradeExecution::count())->toBe(0)
+        ->and(TradeNote::count())->toBe(0)
+        ->and(TradeScreenshot::count())->toBe(0)
+        ->and(TradeComment::count())->toBe(0)
+        ->and(AccountTransaction::count())->toBe(0)
+        ->and(Journal::find($journal->id))->not->toBeNull();
+    Storage::disk('local')->assertMissing($shot);
+    Storage::disk('local')->assertMissing($commentImage);
+});
+
+test('deleteAll leaves other journals alone', function () {
+    [$user, $journal] = accountsUser();
+    Account::factory()->create(['journal_id' => $journal->id]);
+    [, $otherJournal] = accountsUser();
+    $other = Account::factory()->create(['journal_id' => $otherJournal->id]);
+    tradeInAccount($other);
+
+    Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal])
+        ->call('deleteAll');
+
+    expect(Account::pluck('id')->all())->toBe([$other->id])
+        ->and(Trade::count())->toBe(1);
+});
+
+test('the Delete All warning shows what will be removed and asks for DELETE', function () {
+    [$user, $journal] = accountsUser();
+    $account = Account::factory()->create(['journal_id' => $journal->id]);
+    tradeInAccount($account);
+    tradeInAccount($account);
+    AccountTransaction::factory()->create(['account_id' => $account->id]);
+
+    Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal])
+        ->assertSee('Delete All Accounts')
+        ->assertSeeInOrder(['removes 1 account,', '2 trades with their notes and images,', 'and 1 deposit/withdrawal.'])
+        ->assertSeeHtml('wire:click="deleteAll"')
+        ->assertSeeHtml('Delete 1 account and 2 trades?')
+        ->assertSeeHtml('Type DELETE to confirm|DELETE');
+});
+
+test('the Delete All warning is hidden when there are no accounts', function () {
+    [$user, $journal] = accountsUser();
+
+    Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal])
+        ->assertDontSee('Delete All Accounts');
+});
+
+test('after deleteAll the journal and statistics pages still load', function () {
+    [$user, $journal] = accountsUser();
+    $journal->update(['timezone' => 'America/New_York']);
+    $account = Account::factory()->create(['journal_id' => $journal->id]);
+    $trade   = tradeInAccount($account);
+    TradeExecution::factory()->create(['trade_id' => $trade->id]);
+
+    $this->actingAs($user)->get('/journal')->assertOk();
+    $this->actingAs($user)->get('/journal/statistics')->assertOk();
+
+    Livewire::actingAs($user)
+        ->test('journal.accounts', ['journal' => $journal])
+        ->call('deleteAll');
+
+    $this->actingAs($user)->get('/journal')->assertOk();
+    $this->actingAs($user)->get('/journal/statistics')->assertOk();
+    expect(Trade::where('journal_id', $journal->id)->count())->toBe(0)
+        ->and(TradeExecution::where('trade_id', $trade->id)->count())->toBe(0);
 });
