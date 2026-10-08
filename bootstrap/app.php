@@ -1,8 +1,11 @@
 <?php
 
 use App\Http\Middleware\AuthenticateJournalToken;
+use App\Http\Middleware\EnsureMultiUser;
 use App\Http\Middleware\EnsureUserIsActive;
 use App\Http\Middleware\EnsureUserIsAdmin;
+use App\Http\Middleware\SignInSelfHostedOwner;
+use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -21,7 +24,17 @@ return Application::configure(basePath: dirname(__DIR__))
             'active'         => EnsureUserIsActive::class,
             'admin'          => EnsureUserIsAdmin::class,
             'journal.token'  => AuthenticateJournalToken::class,
+            'multi-user'     => EnsureMultiUser::class,
         ]);
+
+        // Self-hosted mode (issue #102): no login, every browser request is
+        // signed in as the owner. It needs the session, and has to run before
+        // `auth` so that never redirects to the (disabled) login page.
+        $middleware->web(append: [SignInSelfHostedOwner::class]);
+        $middleware->prependToPriorityList(
+            before: AuthenticatesRequests::class,
+            prepend: SignInSelfHostedOwner::class,
+        );
 
         // Resolve the journal token before route-model binding, so an
         // unauthenticated request never touches the {trade} lookup. Throttle
