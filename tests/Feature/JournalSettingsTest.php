@@ -99,3 +99,27 @@ test('csv import dropzone is available once an account exists', function () {
         ->assertSee('Drop your NT8 Executions CSV here')
         ->assertDontSee('Create at least one');
 });
+
+test('the new intake token has a copy button', function () {
+    $user = User::factory()->create();
+
+    $this->actingAs($user)
+        ->withSession(['journal_ingest_token' => 'tok_123'])
+        ->get(route('journal.settings.edit'))
+        ->assertOk()
+        ->assertSeeHtml('x-ref="token"')
+        ->assertSeeHtml('value="tok_123"')
+        ->assertSeeHtml('aria-label="Copy token"')
+        ->assertSeeHtml('navigator.clipboard.writeText(box.value)');
+});
+
+test('there is no copy button when no new token is shown', function () {
+    $user = User::factory()->create();
+
+    // Creating a user flashes its first token; clear it so none is shown.
+    $this->actingAs($user)
+        ->withSession(['journal_ingest_token' => null])
+        ->get(route('journal.settings.edit'))
+        ->assertOk()
+        ->assertDontSeeHtml('aria-label="Copy token"');
+});
