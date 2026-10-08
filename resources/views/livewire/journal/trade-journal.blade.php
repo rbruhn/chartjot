@@ -1,5 +1,6 @@
 <?php
 
+use App\Support\Demo;
 use App\Enums\Direction;
 use App\Enums\ExitReason;
 use App\Enums\InvitationStatus;
@@ -353,6 +354,7 @@ new class extends Component {
             'screenshotUpload' => 'required|file|mimes:png,jpeg,jpg|max:10240',
             'screenshotName'   => 'nullable|string|max:60',
         ], [], ['screenshotName' => 'name']);
+        Demo::ensureWritable(); // #115: before the file is stored
 
         $trade = $this->selectedTrade;
         if (! $trade) return;
@@ -383,6 +385,8 @@ new class extends Component {
 
     public function deleteScreenshot(int $id): void
     {
+        Demo::ensureWritable(); // #115: the files are deleted before the rows
+
         $shot = TradeScreenshot::whereHas('trade', fn ($q) => $q->where('journal_id', $this->journal->id))
             ->findOrFail($id);
 
@@ -515,6 +519,8 @@ new class extends Component {
 
     public function deleteTrade(string $uuid): void
     {
+        Demo::ensureWritable(); // #115: the files are deleted before the rows
+
         $trade = $this->journal->trades()
             ->with('screenshots')
             ->where('uuid', $uuid)
