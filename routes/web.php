@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\DemoController;
 use App\Http\Controllers\FriendsController;
 use App\Http\Controllers\JournalAccountsController;
 use App\Http\Controllers\JournalController;
@@ -13,6 +14,11 @@ use Illuminate\Support\Facades\Route;
 use Livewire\Volt\Volt;
 
 Route::redirect('/', '/journal');
+
+// #115: "View the demo" on the login page signs in as the read-only demo account.
+Route::get('demo', DemoController::class)
+    ->middleware(['multi-user', 'guest', 'throttle:20,1'])
+    ->name('demo');
 
 // Self-hosted mode's optional password (issue #102); 404 unless one is set.
 Route::get('unlock', [SelfHostedUnlockController::class, 'show'])

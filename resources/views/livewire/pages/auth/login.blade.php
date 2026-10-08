@@ -69,4 +69,13 @@ new #[Layout('layouts.guest')] class extends Component
             </div>
         </div>
     </form>
+
+    {{-- #115 --}}
+    @if (\App\Models\User::where('is_demo', true)->exists())
+        <p class="mt-6 text-center text-sm text-gray-600 dark:text-gray-400">
+            {{ __('Just looking?') }}
+            <a href="{{ route('demo') }}" class="font-medium text-indigo-600 hover:underline dark:text-indigo-400">{{ __('View the demo') }}</a>:
+            {{ __('a sample journal, read-only, no sign-up.') }}
+        </p>
+    @endif
 </div>

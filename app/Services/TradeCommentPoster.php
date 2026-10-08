@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\Demo;
 use App\Enums\InvitationStatus;
 use App\Mail\NewTradeCommentMail;
 use App\Models\Trade;
@@ -33,6 +34,7 @@ class TradeCommentPoster
     {
         // Re-checked on every post: a revoked invitee gets a 404.
         abort_unless($author->can('comment', $trade), 404);
+        Demo::ensureWritable(); // #115: before an image is stored
 
         $data = Validator::make($input, [
             'body'              => ['required', 'string', 'max:5000'],
