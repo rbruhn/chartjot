@@ -3,6 +3,7 @@
 !/README.md
 !/NT.md
 !/NT8.md
+!/docs/*.md
 .DS_Store
 .editorconfig
 .env

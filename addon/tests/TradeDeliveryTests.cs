@@ -380,6 +380,7 @@ namespace ChartJot.Core.Tests
 
 		[Theory]
 		[InlineData("http://journal.test/api/v1/trades")]
+		[InlineData("http://192.168.1.20:8000/api/v1/trades")]
 		[InlineData("/api/v1/trades")]
 		[InlineData("not a url")]
 		public void Constructor_RejectsAnEndpointThatIsNotAbsoluteHttps(string endpoint)
@@ -388,9 +389,18 @@ namespace ChartJot.Core.Tests
 		}
 
 		[Fact]
-		public void Constructor_AllowsHttpOnlyWhenAskedFor()
+		public void Constructor_AllowsHttpToAnotherHostOnlyWhenAskedFor()
 		{
-			new TradeDelivery(new HttpClient(), "http://localhost:8000/api/v1/trades", Token, "1.0.0", TimeSpan.FromSeconds(30), allowInsecureHttp: true);
+			new TradeDelivery(new HttpClient(), "http://journal.test/api/v1/trades", Token, "1.0.0", TimeSpan.FromSeconds(30), allowInsecureHttp: true);
+		}
+
+		[Theory]
+		[InlineData("http://localhost:8000/api/v1/trades")]
+		[InlineData("http://127.0.0.1:8000/api/v1/trades")]
+		[InlineData("http://[::1]:8000/api/v1/trades")]
+		public void Constructor_AllowsHttpToAJournalOnThisPc(string endpoint)
+		{
+			new TradeDelivery(new HttpClient(), endpoint, Token, "1.0.0", TimeSpan.FromSeconds(30));
 		}
 
 		[Fact]

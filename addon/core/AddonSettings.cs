@@ -94,8 +94,8 @@ namespace ChartJot.Core
 			Uri uri;
 			if (string.IsNullOrWhiteSpace(EndpointUrl))
 				errors.Add("The journal endpoint URL is required.");
-			else if (!Uri.TryCreate(EndpointUrl.Trim(), UriKind.Absolute, out uri) || uri.Scheme != Uri.UriSchemeHttps)
-				errors.Add("The journal endpoint must be an absolute https:// URL.");
+			else if (!Uri.TryCreate(EndpointUrl.Trim(), UriKind.Absolute, out uri) || !TradeDelivery.IsAllowedEndpoint(uri))
+				errors.Add("The journal endpoint must be an absolute https:// URL, or http://localhost for a journal on this PC.");
 			else if (!string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.UserInfo))
 				errors.Add("The journal endpoint must not contain a query string or credentials; the token goes in the token field.");
 
