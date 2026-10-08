@@ -19,7 +19,9 @@ class UserObserver
             Session::flash('journal_ingest_token', $token);
         }
 
-        if ($user->is_admin) {
+        // Admins and the self-hosted owner (issue #102) aren't registrations
+        // anyone has to approve.
+        if ($user->is_admin || config('chartjot.self_hosted')) {
             return;
         }
 
