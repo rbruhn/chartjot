@@ -105,7 +105,32 @@
                     @if ($ingestToken)
                         <div>
                             <x-input-label for="ingest-token" value="New intake token" />
-                            <x-text-input id="ingest-token" type="text" class="mt-1 block w-full font-mono text-sm" :value="$ingestToken" readonly />
+                            {{-- #111: copy button. navigator.clipboard needs https or localhost; elsewhere fall back to selecting the box and execCommand. --}}
+                            <div class="mt-1 flex items-center gap-2"
+                                x-data="{
+                                    copied: false,
+                                    async copy() {
+                                        const box = $refs.token;
+                                        try {
+                                            await navigator.clipboard.writeText(box.value);
+                                        } catch (e) {
+                                            box.select();
+                                            document.execCommand('copy');
+                                        }
+                                        this.copied = true;
+                                        setTimeout(() => this.copied = false, 2000);
+                                    },
+                                }">
+                                <x-text-input id="ingest-token" x-ref="token" type="text" class="block w-full font-mono text-sm" :value="$ingestToken" readonly />
+                                <button type="button" x-on:click="copy()"
+                                    title="Copy token" aria-label="Copy token"
+                                    class="inline-flex shrink-0 items-center gap-1 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:border-gray-400 hover:text-gray-900 dark:border-gray-600 dark:text-gray-300 dark:hover:border-gray-500 dark:hover:text-gray-100"
+                                    style="cursor:pointer">
+                                    <x-heroicon-o-clipboard-document class="h-5 w-5" x-show="! copied" />
+                                    <x-heroicon-o-check class="h-5 w-5 text-green-600 dark:text-green-400" x-show="copied" style="display:none" />
+                                    <span x-show="copied" style="display:none" class="text-green-600 dark:text-green-400">Copied</span>
+                                </button>
+                            </div>
                             <p class="mt-2 text-sm text-amber-700 dark:text-amber-300">
                                 Copy this token now. It will not be shown again.
                             </p>
