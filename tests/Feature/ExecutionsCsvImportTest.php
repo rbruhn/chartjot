@@ -3,6 +3,7 @@
 use App\Enums\AccountType;
 use App\Enums\Direction;
 use App\Enums\ExitReason;
+use App\Jobs\ImportExecutionsCsv;
 use App\Models\Account;
 use App\Models\FailedTradeImport;
 use App\Models\Journal;
@@ -11,7 +12,9 @@ use App\Models\TradeExecution;
 use App\Models\User;
 use App\Services\ExecutionsCsvImporter;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Queue;
 
 uses(LazilyRefreshDatabase::class);
 
@@ -424,4 +427,33 @@ test('each account timestamp is parsed using that account own timezone, not the 
 
     // Same local wall-clock time, 3 hours apart once converted to UTC.
     expect($nyTrade->entry_at->diffInHours($laTrade->entry_at))->toBe(3.0);
+});
+
+// ---------------------------------------------------------------------------
+// Upload component & Settings page
+// ---------------------------------------------------------------------------
+
+test('a journal with no accounts yet can upload an Executions export', function () {
+    Storage::fake('local');
+    Queue::fake();
+    $journal = journal([]);
+
+    Livewire\Livewire::actingAs($journal->user)
+        ->test('journal.csv-import', ['journal' => $journal])
+        ->assertSeeHtml('id="csv-file-input"')
+        ->assertDontSee('Create at least one')
+        ->set('csvFile', UploadedFile::fake()->createWithContent('Executions.csv', file_get_contents(base_path('tests/Fixtures/ninjatrader/Executions.csv'))))
+        ->assertSet('state', 'processing')
+        ->assertHasNoErrors();
+
+    Queue::assertPushed(ImportExecutionsCsv::class);
+});
+
+test('the Settings page says unknown accounts are created on import', function () {
+    $journal = journal([]);
+
+    $this->actingAs($journal->user)->get(route('journal.settings.edit'))
+        ->assertOk()
+        ->assertSee('journal yet are created; check their type and balance', false)
+        ->assertDontSee('Accounts must already exist');
 });
