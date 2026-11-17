@@ -1,9 +1,10 @@
-# CI/CD Deployment Workflow with Semantic Versioning
+# Release Workflow with Semantic Versioning
 #
 # WORKFLOW:
-# - Push to 'main' (via merged PR) → Calculates version → Builds Vite assets →
-#   Deploys to PRODUCTION via Deployer → Creates GitHub release (only on success)
-# - Push to 'development' does NOT trigger this workflow (no deploy target for it)
+# - Push to 'main' (via merged PR) → Calculates version → Creates GitHub release
+# - Push to 'development' does NOT trigger this workflow
+# - Nothing is deployed: there is no production server. Each install updates itself
+#   with git pull (docs/install-windows.md, docs/install-macos.md → Updating).
 #
 # VERSION CONTROL:
 # Use commit message tags to control version bumps:
@@ -11,11 +12,12 @@
 # - [minor] or [feature] → Minor version bump (1.0.0 → 1.1.0)
 # - Default (no tag) → Patch version bump (1.0.0 → 1.0.1)
 #
-# SKIP DEPLOYMENT:
-# Add [skip deploy] or [no deploy] to your commit message to push without deploying
+# SKIP RELEASE:
+# Add [skip release] (or the older [skip deploy] / [no deploy]) to your commit message
+# to push to main without a version or release
 #
 
-name: Build and Deploy
+name: Release
 
 on:
   push:
@@ -28,7 +30,7 @@ permissions:
 jobs:
   calculate-version:
     runs-on: ubuntu-latest
-    if: "!contains(github.event.head_commit.message, '[skip deploy]') && !contains(github.event.head_commit.message, '[no deploy]')"
+    if: "!contains(github.event.head_commit.message, '[skip release]') && !contains(github.event.head_commit.message, '[skip deploy]') && !contains(github.event.head_commit.message, '[no deploy]')"
     outputs:
       new_version: ${{ steps.new_version.outputs.new_version }}
       current_version: ${{ steps.version_bump.outputs.current_version }}
@@ -115,96 +117,11 @@ jobs:
           echo "New version: $NEW_VERSION"
           echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
 
-  build-and-deploy:
-    needs: calculate-version
-    runs-on: ubuntu-latest
-    environment: production
-    if: "!contains(github.event.head_commit.message, '[skip deploy]') && !contains(github.event.head_commit.message, '[no deploy]')"
-    # The repository is private: the server downloads this run's build artifact with GITHUB_TOKEN
-    # (deploy:ci-artifacts), which needs actions: read on top of contents: read.
-    permissions:
-      contents: read
-      actions: read
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          cache: 'npm'
-
-      - name: Install npm dependencies
-        run: npm ci
-
-      - name: Build Vite assets
-        run: npm run build
-
-      - name: Create deployment package
-        run: |
-          rm -rf deployment-package
-          mkdir -p deployment-package/public
-          cp -r public/build deployment-package/public/build
-
-      - name: Upload deployment artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: chartjot-${{ github.sha }}
-          path: deployment-package/
-          retention-days: 7
-
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.5'
-          extensions: mbstring, xml, bcmath, ctype, json, tokenizer, pdo, pdo_mysql
-
-      - name: Cache Composer packages
-        id: composer-cache
-        uses: actions/cache@v5
-        with:
-          path: vendor
-          key: ${{ runner.os }}-php-${{ hashFiles('**/composer.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-php-
-
-      - name: Install Composer dependencies (for the Deployer CLI)
-        run: composer install --prefer-dist --no-progress --no-interaction --no-scripts
-
-      # Two keys in the agent: DEPLOY_PRIVATE_KEY logs in to the server; REPO_DEPLOY_KEY is a read-only
-      # GitHub deploy key for this repository. Deployer forwards the agent, so the server clones over
-      # SSH with REPO_DEPLOY_KEY without that key ever being stored on the server.
-      - name: Setup SSH keys
-        uses: webfactory/ssh-agent@v0.10.0
-        with:
-          ssh-private-key: |
-            ${{ secrets.DEPLOY_PRIVATE_KEY }}
-            ${{ secrets.REPO_DEPLOY_KEY }}
-
-      - name: Configure SSH host key checking
-        run: |
-          mkdir -p ~/.ssh
-          cat > ~/.ssh/config <<'EOF'
-          Host *
-            StrictHostKeyChecking no
-            UserKnownHostsFile=/dev/null
-          EOF
-          chmod 700 ~/.ssh
-          chmod 600 ~/.ssh/config
-
-      - name: Deploy with Deployer
-        run: vendor/bin/dep deploy production -o release_name=${{ github.run_number }}-${{ github.run_attempt }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_SHA: ${{ github.sha }}
-          GITHUB_REPO: ${{ github.repository }}
-
   create-release:
-    needs: [calculate-version, build-and-deploy]
+    needs: calculate-version
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    if: "!contains(github.event.head_commit.message, '[skip deploy]') && !contains(github.event.head_commit.message, '[no deploy]')"
     steps:
       - uses: actions/checkout@v6
         with:
