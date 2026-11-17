@@ -8,7 +8,6 @@
     "require": {
         "php": "^8.3",
         "blade-ui-kit/blade-heroicons": "^2.7",
-        "deployer/deployer": "^8.0",
         "laravel/framework": "^13.17",
         "laravel/horizon": "^5.50",
         "laravel/tinker": "^3.0",
