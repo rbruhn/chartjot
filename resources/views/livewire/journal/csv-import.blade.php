@@ -38,12 +38,6 @@ new class extends Component
             return;
         }
 
-        if ($this->journal->accounts()->doesntExist()) {
-            $this->errorMsg = 'Create at least one account before importing.';
-            $this->state    = 'failed';
-            return;
-        }
-
         $this->validate();
         Demo::ensureWritable(); // #115: before the file is stored
 
@@ -90,11 +84,6 @@ new class extends Component
         }
     }
 
-    public function hasAccounts(): bool
-    {
-        return $this->journal->accounts()->exists();
-    }
-
     public function clear(): void
     {
         $this->state    = 'idle';
@@ -110,18 +99,6 @@ new class extends Component
     class="space-y-4"
 >
     @if ($state === 'idle' || $state === 'uploading')
-        @if (! $this->hasAccounts())
-            <div class="flex items-center gap-4 rounded-lg border-2 border-dashed border-gray-200 bg-gray-50 px-5 py-4 dark:border-gray-700 dark:bg-gray-800/50">
-                <svg class="h-6 w-6 shrink-0 text-gray-300 dark:text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
-                </svg>
-                <p class="text-sm text-gray-500 dark:text-gray-400">
-                    Create at least one
-                    <a href="{{ route('journal.accounts') }}" wire:navigate class="font-semibold underline hover:no-underline">account</a>
-                    before importing.
-                </p>
-            </div>
-        @else
             <div
                 x-data="csvDropzone($wire)"
                 @dragover.prevent="dragging = true"
@@ -151,7 +128,6 @@ new class extends Component
                     class="sr-only"
                 />
             </div>
-        @endif
 
         @error('csvFile')
             <p class="text-sm text-red-600 dark:text-red-400">{{ $message }}</p>
