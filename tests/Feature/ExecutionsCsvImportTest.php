@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\AccountType;
 use App\Enums\Direction;
 use App\Enums\ExitReason;
 use App\Models\Account;
@@ -11,7 +12,6 @@ use App\Models\User;
 use App\Services\ExecutionsCsvImporter;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Facades\Storage;
 
 uses(LazilyRefreshDatabase::class);
 
@@ -22,8 +22,9 @@ uses(LazilyRefreshDatabase::class);
 function csvFixture(string $body): string
 {
     $header = "Instrument,Action,Quantity,Price,Time,ID,E/X,Position,Order ID,Name,Commission,Rate,Account,Connection,\n";
-    $path   = tempnam(sys_get_temp_dir(), 'csv_test_');
-    file_put_contents($path, $header . $body);
+    $path = tempnam(sys_get_temp_dir(), 'csv_test_');
+    file_put_contents($path, $header.$body);
+
     return $path;
 }
 
@@ -39,6 +40,7 @@ function journal(array $accountNames = ['Sim101']): Journal
     foreach ($accountNames as $name) {
         Account::factory()->create(['journal_id' => $j->id, 'name' => $name]);
     }
+
     return $j;
 }
 
@@ -53,12 +55,12 @@ function journalWithoutTimezone(): Journal
 
 test('a simple long trade is imported with correct P&L', function () {
     $csv = csvFixture(
-        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n" .
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n".
         "ES 12-26,Sell,1,5004.00,1/2/2026 9:05:00 AM,exec-2,Exit,- ,ord-2,Stop,\$5.97,1,Sim101,,\n"
     );
 
     $journal = journal();
-    $result  = importer()->import($journal, $csv);
+    $result = importer()->import($journal, $csv);
 
     expect($result['trades_created'])->toBe(1)
         ->and($result['trades_skipped'])->toBe(0)
@@ -76,7 +78,7 @@ test('a simple long trade is imported with correct P&L', function () {
 
 test('a simple short trade is imported with correct P&L', function () {
     $csv = csvFixture(
-        "ES 12-26,Sell,1,5010.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 S,ord-1,Entry,\$5.97,1,Sim101,,\n" .
+        "ES 12-26,Sell,1,5010.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 S,ord-1,Entry,\$5.97,1,Sim101,,\n".
         "ES 12-26,Buy,1,5006.00,1/2/2026 9:05:00 AM,exec-2,Exit,- ,ord-2,Target,\$5.97,1,Sim101,,\n"
     );
 
@@ -91,7 +93,7 @@ test('a simple short trade is imported with correct P&L', function () {
 
 test('executions are stored for each fill', function () {
     $csv = csvFixture(
-        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n" .
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n".
         "ES 12-26,Sell,1,5002.00,1/2/2026 9:05:00 AM,exec-2,Exit,- ,ord-2,Exit,\$5.97,1,Sim101,,\n"
     );
 
@@ -108,7 +110,7 @@ test('executions are stored for each fill', function () {
 
 test('re-importing the same CSV skips already-imported trades', function () {
     $csv = csvFixture(
-        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n" .
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n".
         "ES 12-26,Sell,1,5002.00,1/2/2026 9:05:00 AM,exec-2,Exit,- ,ord-2,Exit,\$5.97,1,Sim101,,\n"
     );
 
@@ -117,7 +119,7 @@ test('re-importing the same CSV skips already-imported trades', function () {
 
     // Re-create fixture (original was consumed/deleted by importer)
     $csv2 = csvFixture(
-        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n" .
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n".
         "ES 12-26,Sell,1,5002.00,1/2/2026 9:05:00 AM,exec-2,Exit,- ,ord-2,Exit,\$5.97,1,Sim101,,\n"
     );
     $result = importer()->import($journal, $csv2);
@@ -128,11 +130,11 @@ test('re-importing the same CSV skips already-imported trades', function () {
 
 test('the same executions in two different journals are not treated as duplicates', function () {
     $csv1 = csvFixture(
-        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n" .
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n".
         "ES 12-26,Sell,1,5002.00,1/2/2026 9:05:00 AM,exec-2,Exit,- ,ord-2,Exit,\$5.97,1,Sim101,,\n"
     );
     $csv2 = csvFixture(
-        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n" .
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n".
         "ES 12-26,Sell,1,5002.00,1/2/2026 9:05:00 AM,exec-2,Exit,- ,ord-2,Exit,\$5.97,1,Sim101,,\n"
     );
 
@@ -152,8 +154,8 @@ test('the same executions in two different journals are not treated as duplicate
 
 test('a scaled-in trade groups all fills into one trade', function () {
     $csv = csvFixture(
-        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n" .
-        "ES 12-26,Buy,2,5001.00,1/2/2026 9:01:00 AM,exec-2,Entry,3 L,ord-2,Entry,\$5.97,1,Sim101,,\n" .
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n".
+        "ES 12-26,Buy,2,5001.00,1/2/2026 9:01:00 AM,exec-2,Entry,3 L,ord-2,Entry,\$5.97,1,Sim101,,\n".
         "ES 12-26,Sell,3,5004.00,1/2/2026 9:05:00 AM,exec-3,Exit,- ,ord-3,Target,\$5.97,1,Sim101,,\n"
     );
 
@@ -168,8 +170,8 @@ test('a reversal fill is split into two trades', function () {
     // Long 1 → sell 2 reverses to short 1 → buy 1 closes
     // NT8 labels the reversal fill as Entry (opening the new direction)
     $csv = csvFixture(
-        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n" .
-        "ES 12-26,Sell,2,5002.00,1/2/2026 9:05:00 AM,exec-2,Entry,1 S,ord-2,Entry,\$5.97,1,Sim101,,\n" .
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n".
+        "ES 12-26,Sell,2,5002.00,1/2/2026 9:05:00 AM,exec-2,Entry,1 S,ord-2,Entry,\$5.97,1,Sim101,,\n".
         "ES 12-26,Buy,1,5001.00,1/2/2026 9:10:00 AM,exec-3,Exit,- ,ord-3,Stop,\$5.97,1,Sim101,,\n"
     );
 
@@ -181,9 +183,9 @@ test('a reversal fill is split into two trades', function () {
 
 test('fills from different accounts are grouped into separate trades', function () {
     $csv = csvFixture(
-        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,AccountA,,\n" .
-        "ES 12-26,Sell,1,5002.00,1/2/2026 9:05:00 AM,exec-2,Exit,- ,ord-2,Exit,\$5.97,1,AccountA,,\n" .
-        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-3,Entry,1 L,ord-3,Entry,\$5.97,1,AccountB,,\n" .
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,AccountA,,\n".
+        "ES 12-26,Sell,1,5002.00,1/2/2026 9:05:00 AM,exec-2,Exit,- ,ord-2,Exit,\$5.97,1,AccountA,,\n".
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-3,Entry,1 L,ord-3,Entry,\$5.97,1,AccountB,,\n".
         "ES 12-26,Sell,1,5002.00,1/2/2026 9:05:00 AM,exec-4,Exit,- ,ord-4,Exit,\$5.97,1,AccountB,,\n"
     );
 
@@ -198,7 +200,7 @@ test('fills from different accounts are grouped into separate trades', function 
 
 test('account name with bang separator is parsed correctly', function () {
     $csv = csvFixture(
-        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,TEST-ACCT-001!Rithmic!Rithmic,,\n" .
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,TEST-ACCT-001!Rithmic!Rithmic,,\n".
         "ES 12-26,Sell,1,5002.00,1/2/2026 9:05:00 AM,exec-2,Exit,- ,ord-2,Exit,\$5.97,1,TEST-ACCT-001!Rithmic!Rithmic,,\n"
     );
 
@@ -206,6 +208,107 @@ test('account name with bang separator is parsed correctly', function () {
 
     $trade = Trade::with('account')->first();
     expect($trade->account->name)->toBe('TEST-ACCT-001');
+});
+
+test('an account the journal has not seen is created with its trades', function () {
+    $csv = csvFixture(
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,APEX-123!Rithmic!Rithmic,,\n".
+        "ES 12-26,Sell,1,5002.00,1/2/2026 9:05:00 AM,exec-2,Exit,- ,ord-2,Exit,\$5.97,1,APEX-123!Rithmic!Rithmic,,\n".
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-3,Entry,1 L,ord-3,Entry,\$5.97,1,Sim202,,\n".
+        "ES 12-26,Sell,1,5002.00,1/2/2026 9:05:00 AM,exec-4,Exit,- ,ord-4,Exit,\$5.97,1,Sim202,,\n"
+    );
+
+    $journal = journal([]);
+    $result = importer()->import($journal, $csv);
+
+    expect($result['trades_created'])->toBe(2)
+        ->and($result['errors'])->toBeEmpty()
+        ->and(FailedTradeImport::count())->toBe(0);
+
+    $funded = $journal->accounts()->where('name', 'APEX-123')->sole();
+    $sim = $journal->accounts()->where('name', 'Sim202')->sole();
+    expect($funded->account_type)->toBe(AccountType::Funded)
+        ->and($funded->connection)->toBe('Rithmic')
+        ->and($funded->trades()->count())->toBe(1)
+        ->and($sim->account_type)->toBe(AccountType::Sim)
+        ->and($sim->connection)->toBeNull();
+});
+
+test('a row repeated in the file is imported once', function () {
+    $csv = csvFixture(
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n".
+        "ES 12-26,Sell,1,5002.00,1/2/2026 9:05:00 AM,exec-2,Exit,- ,ord-2,Exit,\$5.97,1,Sim101,,\n".
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n".
+        "ES 12-26,Sell,1,5002.00,1/2/2026 9:05:00 AM,exec-2,Exit,- ,ord-2,Exit,\$5.97,1,Sim101,,\n"
+    );
+
+    $result = importer()->import(journal(), $csv);
+
+    expect($result['trades_created'])->toBe(1)
+        ->and($result['errors'])->toBeEmpty()
+        ->and(TradeExecution::count())->toBe(2);
+});
+
+test('an overlapping export imports only the trades not already in the journal', function () {
+    $journal = journal();
+    importer()->import($journal, csvFixture(
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n".
+        "ES 12-26,Sell,1,5002.00,1/2/2026 9:05:00 AM,exec-2,Exit,- ,ord-2,Exit,\$5.97,1,Sim101,,\n"
+    ));
+
+    $result = importer()->import($journal, csvFixture(
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n".
+        "ES 12-26,Sell,1,5002.00,1/2/2026 9:05:00 AM,exec-2,Exit,- ,ord-2,Exit,\$5.97,1,Sim101,,\n".
+        "ES 12-26,Buy,1,5010.00,1/2/2026 10:00:00 AM,exec-3,Entry,1 L,ord-3,Entry,\$5.97,1,Sim101,,\n".
+        "ES 12-26,Sell,1,5012.00,1/2/2026 10:05:00 AM,exec-4,Exit,- ,ord-4,Exit,\$5.97,1,Sim101,,\n"
+    ));
+
+    expect($result['trades_created'])->toBe(1)
+        ->and($result['trades_skipped'])->toBe(1)
+        ->and(Trade::count())->toBe(2)
+        ->and(TradeExecution::count())->toBe(4);
+});
+
+test('a trade whose fills are already imported in a differently grouped trade is reported, not duplicated', function () {
+    $journal = journal();
+    importer()->import($journal, csvFixture(
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n".
+        "ES 12-26,Sell,1,5002.00,1/2/2026 9:05:00 AM,exec-2,Exit,- ,ord-2,Exit,\$5.97,1,Sim101,,\n"
+    ));
+
+    // exec-1 again, but this export groups it with a scale-in and a different exit.
+    $result = importer()->import($journal, csvFixture(
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n".
+        "ES 12-26,Buy,1,5001.00,1/2/2026 9:01:00 AM,exec-9,Entry,2 L,ord-9,Entry,\$5.97,1,Sim101,,\n".
+        "ES 12-26,Sell,2,5003.00,1/2/2026 9:06:00 AM,exec-10,Exit,- ,ord-10,Exit,\$5.97,1,Sim101,,\n"
+    ));
+
+    expect($result['trades_created'])->toBe(0)
+        ->and($result['errors'])->toHaveCount(1)
+        ->and($result['errors'][0])->toContain('1 of 3 executions')
+        ->and(Trade::count())->toBe(1)
+        ->and(TradeExecution::where('source_execution_id', 'exec-1')->count())->toBe(1);
+});
+
+test('fills the AddOn already reported are not imported again from a CSV', function () {
+    $journal = journal();
+    $trade = Trade::factory()->create([
+        'journal_id' => $journal->id,
+        'account_id' => $journal->accounts()->value('id'),
+        'source' => 'addon',
+    ]);
+    foreach (['exec-1', 'exec-2'] as $id) {
+        TradeExecution::factory()->create(['trade_id' => $trade->id, 'source_execution_id' => $id]);
+    }
+
+    $result = importer()->import($journal, csvFixture(
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n".
+        "ES 12-26,Sell,1,5002.00,1/2/2026 9:05:00 AM,exec-2,Exit,- ,ord-2,Exit,\$5.97,1,Sim101,,\n"
+    ));
+
+    expect($result['trades_created'])->toBe(0)
+        ->and($result['trades_skipped'])->toBe(1)
+        ->and(Trade::count())->toBe(1);
 });
 
 // ---------------------------------------------------------------------------
@@ -217,7 +320,7 @@ test('a file that is not an NT8 executions export is rejected', function () {
     file_put_contents($path, "Name,Date,Amount\nFoo,2026-01-01,100\n");
 
     expect(fn () => importer()->import(journal(), $path))
-        ->toThrow(\RuntimeException::class, 'NT8 Trade Performance');
+        ->toThrow(RuntimeException::class, 'NT8 Trade Performance');
 });
 
 test('a trade group with no entry fills records an error and continues', function () {
@@ -225,9 +328,9 @@ test('a trade group with no entry fills records an error and continues', functio
     // can only emit a trade when position returns to 0, so a sell followed by
     // a buy (both labeled Exit) gives an exit-only group.
     $csv = csvFixture(
-        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,AccountA,,\n" .
-        "ES 12-26,Sell,1,5002.00,1/2/2026 9:05:00 AM,exec-2,Exit,- ,ord-2,Exit,\$5.97,1,AccountA,,\n" .
-        "ES 12-26,Sell,1,5002.00,1/2/2026 9:06:00 AM,exec-3,Exit,1 S,ord-3,Exit,\$5.97,1,AccountB,,\n" .
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,AccountA,,\n".
+        "ES 12-26,Sell,1,5002.00,1/2/2026 9:05:00 AM,exec-2,Exit,- ,ord-2,Exit,\$5.97,1,AccountA,,\n".
+        "ES 12-26,Sell,1,5002.00,1/2/2026 9:06:00 AM,exec-3,Exit,1 S,ord-3,Exit,\$5.97,1,AccountB,,\n".
         "ES 12-26,Buy,1,5001.00,1/2/2026 9:07:00 AM,exec-4,Exit,- ,ord-4,Exit,\$5.97,1,AccountB,,\n"
     );
 
@@ -247,10 +350,10 @@ test('a malformed row is recorded as a failed import instead of aborting the imp
     // fill. Dropping just the bad fill would corrupt AccountB's position
     // tracking, so AccountB/ES is withheld entirely while AccountA imports.
     $csv = csvFixture(
-        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,AccountA,,\n" .
-        "ES 12-26,Sell,1,5002.00,1/2/2026 9:05:00 AM,exec-2,Exit,- ,ord-2,Exit,\$5.97,1,AccountA,,\n" .
-        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-3,Entry,1 L,ord-3,Entry,\$5.97,1,AccountB,,\n" .
-        $badRow . "\n"
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-1,Entry,1 L,ord-1,Entry,\$5.97,1,AccountA,,\n".
+        "ES 12-26,Sell,1,5002.00,1/2/2026 9:05:00 AM,exec-2,Exit,- ,ord-2,Exit,\$5.97,1,AccountA,,\n".
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-3,Entry,1 L,ord-3,Entry,\$5.97,1,AccountB,,\n".
+        $badRow."\n"
     );
 
     $journal = journal(['AccountA', 'AccountB']);
@@ -273,10 +376,10 @@ test('a malformed row is recorded as a failed import instead of aborting the imp
         ->and($result['failures'][0]['reason'])->toBe($failure->reason);
     Mail::assertNothingSent();
 })->with([
-    'bad date'         => ['ES 12-26,Sell,1,5002.00,not-a-date,exec-4,Exit,- ,ord-4,Exit,$5.97,1,AccountB,,', 'time'],
+    'bad date' => ['ES 12-26,Sell,1,5002.00,not-a-date,exec-4,Exit,- ,ord-4,Exit,$5.97,1,AccountB,,', 'time'],
     'overflowing date' => ['ES 12-26,Sell,1,5002.00,13/45/2026 9:05:00 AM,exec-4,Exit,- ,ord-4,Exit,$5.97,1,AccountB,,', 'time'],
     'non-numeric price' => ['ES 12-26,Sell,1,abc,1/2/2026 9:05:00 AM,exec-4,Exit,- ,ord-4,Exit,$5.97,1,AccountB,,', 'price'],
-    'bad quantity'     => ['ES 12-26,Sell,x,5002.00,1/2/2026 9:05:00 AM,exec-4,Exit,- ,ord-4,Exit,$5.97,1,AccountB,,', 'quantity'],
+    'bad quantity' => ['ES 12-26,Sell,x,5002.00,1/2/2026 9:05:00 AM,exec-4,Exit,- ,ord-4,Exit,$5.97,1,AccountB,,', 'quantity'],
 ]);
 
 // ---------------------------------------------------------------------------
@@ -285,7 +388,7 @@ test('a malformed row is recorded as a failed import instead of aborting the imp
 
 test('import is rejected when the journal has no timezone set', function () {
     $csv = csvFixture(
-        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-tz1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n" .
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-tz1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n".
         "ES 12-26,Sell,1,5004.00,1/2/2026 9:05:00 AM,exec-tz2,Exit,- ,ord-2,Stop,\$5.97,1,Sim101,,\n"
     );
 
@@ -301,15 +404,15 @@ test('each account timestamp is parsed using that account own timezone, not the 
     $journal = journal(); // journal timezone: America/New_York
     Account::factory()->create([
         'journal_id' => $journal->id,
-        'name'       => 'PacificAccount',
-        'timezone'   => 'America/Los_Angeles', // 3 hours behind New York
+        'name' => 'PacificAccount',
+        'timezone' => 'America/Los_Angeles', // 3 hours behind New York
     ]);
 
     // Identical local wall-clock time on both accounts.
     $csv = csvFixture(
-        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-ny1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n" .
-        "ES 12-26,Sell,1,5004.00,1/2/2026 9:05:00 AM,exec-ny2,Exit,- ,ord-2,Stop,\$5.97,1,Sim101,,\n" .
-        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-la1,Entry,1 L,ord-3,Entry,\$5.97,1,PacificAccount,,\n" .
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-ny1,Entry,1 L,ord-1,Entry,\$5.97,1,Sim101,,\n".
+        "ES 12-26,Sell,1,5004.00,1/2/2026 9:05:00 AM,exec-ny2,Exit,- ,ord-2,Stop,\$5.97,1,Sim101,,\n".
+        "ES 12-26,Buy,1,5000.00,1/2/2026 9:00:00 AM,exec-la1,Entry,1 L,ord-3,Entry,\$5.97,1,PacificAccount,,\n".
         "ES 12-26,Sell,1,5004.00,1/2/2026 9:05:00 AM,exec-la2,Exit,- ,ord-4,Stop,\$5.97,1,PacificAccount,,\n"
     );
 
