@@ -83,11 +83,17 @@ function cleanSetup(string $kind): Journal
 /** Scenario setup per importer: a journal where some rows will fail and the rest import. */
 function partialSetup(string $kind): Journal
 {
+    $journal = notifyJournal();
+
     if ($kind === ImportFinishedMail::KIND_EXECUTIONS) {
-        return notifyJournal(['SimTest1']);   // SimTest2's trade: unknown account
+        app(ExecutionsCsvImporter::class)->import($journal, uploadCopy('Executions.csv'));
+        // SimTest2's trade keeps only some of its fills, so re-importing it would duplicate them.
+        $trade = Trade::whereHas('account', fn ($q) => $q->where('name', 'SimTest2'))->firstOrFail();
+        $trade->executions()->orderBy('id')->first()->delete();
+
+        return $journal;
     }
 
-    $journal = notifyJournal();
     app(ExecutionsCsvImporter::class)->import($journal, uploadCopy('Executions.csv'));
     // SimTest2's trade is gone, so its Trades row has no matching trade.
     Trade::whereHas('account', fn ($q) => $q->where('name', 'SimTest2'))->delete();
@@ -206,15 +212,15 @@ test('the MAE/MFE summary counts legs across trades and skipped AddOn rows', fun
 test('no email variant puts trade or account row data in the body', function (string $kind) {
     $failures = [
         ['account_name' => 'SimTest2', 'source_trade_id' => 'csv_41cf44959b5f9ff1',
-         'reason' => "Account 'SimTest2' not found. Create it on the Accounts page before importing.", 'occurred_at' => '2026-10-01 09:00:00'],
+            'reason' => "Account 'SimTest2' not found. Create it on the Accounts page before importing.", 'occurred_at' => '2026-10-01 09:00:00'],
     ];
     $counts = $kind === ImportFinishedMail::KIND_EXECUTIONS
         ? ['trades_created' => 2, 'trades_skipped' => 0]
         : ['legs_imported' => 4, 'trades_enriched' => 2, 'rows_skipped' => 0];
 
     $succeeded = ImportFinishedMail::forResult($kind, 'My Journal', $counts + ['errors' => [], 'failures' => []]);
-    $partial   = ImportFinishedMail::forResult($kind, 'My Journal', $counts + ['errors' => [$failures[0]['reason']], 'failures' => $failures]);
-    $failed    = ImportFinishedMail::forException($kind, 'My Journal', 'File does not appear to be an NT8 export (missing MAE, MFE).');
+    $partial = ImportFinishedMail::forResult($kind, 'My Journal', $counts + ['errors' => [$failures[0]['reason']], 'failures' => $failures]);
+    $failed = ImportFinishedMail::forException($kind, 'My Journal', 'File does not appear to be an NT8 export (missing MAE, MFE).');
 
     foreach ([$succeeded, $partial, $failed] as $mail) {
         expect($mail->render())->not->toContain('SimTest2')

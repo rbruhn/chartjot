@@ -45,9 +45,9 @@ class ExecutionsCsvImporter
 
         [$rawFills, $malformedRows] = $this->parseFills($filePath);
 
-        $created  = 0;
-        $skipped  = 0;
-        $errors   = [];
+        $created = 0;
+        $skipped = 0;
+        $errors = [];
         $failures = [];
 
         // A malformed row can't be imported, and dropping just that fill would
@@ -62,18 +62,18 @@ class ExecutionsCsvImporter
                 .Str::limit($bad['instrument'], 32).' on this account were not imported; fix the row and re-import.';
 
             FailedTradeImport::create([
-                'journal_id'      => $journal->id,
-                'account_name'    => $bad['account_name'],
+                'journal_id' => $journal->id,
+                'account_name' => $bad['account_name'],
                 'source_trade_id' => null,
-                'reason'          => $reason,
-                'occurred_at'     => now(),
+                'reason' => $reason,
+                'occurred_at' => now(),
             ]);
 
             $failures[] = [
-                'account_name'    => $bad['account_name'],
+                'account_name' => $bad['account_name'],
                 'source_trade_id' => null,
-                'reason'          => $reason,
-                'occurred_at'     => now()->toDateTimeString(),
+                'reason' => $reason,
+                'occurred_at' => now()->toDateTimeString(),
             ];
 
             $errors[] = $reason;
@@ -84,44 +84,56 @@ class ExecutionsCsvImporter
             fn (array $f) => ! isset($withheldSeries[$f['account_name'].'|'.$f['instrument']])
         ));
 
+        $rawFills = $this->withoutRepeatedRows($rawFills);
         $fills = $this->resolveFillTimes($journal, $rawFills);
         $tradeGroups = $this->groupIntoTrades($fills);
+        $importedExecutionIds = $this->importedExecutionIds($journal, $fills);
 
         foreach ($tradeGroups as $group) {
             try {
-                $sourceTradeId = $this->sourceTradeId($group);
+                $executionIds = array_unique(array_column($group, 'source_execution_id'));
+                $alreadyImported = array_filter(
+                    $executionIds,
+                    fn (string $id) => isset($importedExecutionIds[$group[0]['account_name']][$id])
+                );
 
-                if (Trade::where('journal_id', $journal->id)
-                    ->where('source_trade_id', $sourceTradeId)
-                    ->exists()
-                ) {
+                if (count($alreadyImported) === count($executionIds)) {
                     $skipped++;
+
                     continue;
+                }
+
+                // Some of this trade's fills are already in the journal, in a trade grouped
+                // differently (e.g. by an export that started mid-position, or by the AddOn).
+                // Importing it would duplicate those executions, so it is reported instead.
+                if ($alreadyImported !== []) {
+                    throw new \RuntimeException(
+                        count($alreadyImported).' of '.count($executionIds)." executions for {$group[0]['instrument']} on account "
+                        ."{$group[0]['account_name']} are already imported in another trade, so this trade was not imported "
+                        .'again. Delete the existing trade and re-import if it is wrong.'
+                    );
                 }
 
                 DB::transaction(fn () => $this->insertTrade($journal, $group));
                 $created++;
             } catch (\Throwable $e) {
-                // Any trade that can't be inserted (an unknown account, or anything
-                // unexpected) is recorded, so it reaches the completion email's CSV.
-                $accountName = $e instanceof \App\Exceptions\UnknownAccountException
-                    ? $e->accountName
-                    : ($group[0]['account_name'] ?? 'Unknown');
+                // Any trade that can't be inserted is recorded, so it reaches the completion email's CSV.
+                $accountName = $group[0]['account_name'] ?? 'Unknown';
                 $tradeId = $this->sourceTradeId($group);
 
                 FailedTradeImport::create([
-                    'journal_id'      => $journal->id,
-                    'account_name'    => $accountName,
+                    'journal_id' => $journal->id,
+                    'account_name' => $accountName,
                     'source_trade_id' => $tradeId,
-                    'reason'          => mb_strimwidth($e->getMessage(), 0, 255, '…'),
-                    'occurred_at'     => now(),
+                    'reason' => mb_strimwidth($e->getMessage(), 0, 255, '…'),
+                    'occurred_at' => now(),
                 ]);
 
                 $failures[] = [
-                    'account_name'    => $accountName,
+                    'account_name' => $accountName,
                     'source_trade_id' => $tradeId,
-                    'reason'          => $e->getMessage(),
-                    'occurred_at'     => now()->toDateTimeString(),
+                    'reason' => $e->getMessage(),
+                    'occurred_at' => now()->toDateTimeString(),
                 ];
 
                 $errors[] = $e->getMessage();
@@ -132,8 +144,8 @@ class ExecutionsCsvImporter
         return [
             'trades_created' => $created,
             'trades_skipped' => $skipped,
-            'errors'         => $errors,
-            'failures'       => $failures,
+            'errors' => $errors,
+            'failures' => $failures,
         ];
     }
 
@@ -175,10 +187,10 @@ class ExecutionsCsvImporter
 
             if ($reason = $this->invalidRowReason($row)) {
                 $malformed[] = [
-                    'line'         => $line,
+                    'line' => $line,
                     'account_name' => $accountName,
-                    'instrument'   => trim($row[0]),
-                    'reason'       => $reason,
+                    'instrument' => trim($row[0]),
+                    'reason' => $reason,
                 ];
 
                 continue;
@@ -234,6 +246,52 @@ class ExecutionsCsvImporter
     }
 
     /**
+     * Drops rows that repeat an execution already in the file (same account and
+     * execution ID), as happens when overlapping exports are pasted together.
+     * Counting a fill twice would throw off the running position.
+     */
+    private function withoutRepeatedRows(array $rawFills): array
+    {
+        $seen = [];
+
+        return array_values(array_filter($rawFills, function (array $fill) use (&$seen) {
+            $key = $fill['account_name'].'|'.$fill['source_execution_id'];
+            if (isset($seen[$key])) {
+                return false;
+            }
+            $seen[$key] = true;
+
+            return true;
+        }));
+    }
+
+    /**
+     * Execution IDs from this file that the journal already holds, keyed by
+     * account name then execution ID. Covers trades from earlier CSV imports
+     * and from the AddOn, which both store NinjaTrader's execution ID.
+     *
+     * @return array<string, array<string, true>>
+     */
+    private function importedExecutionIds(Journal $journal, array $fills): array
+    {
+        $imported = [];
+
+        foreach (array_chunk(array_unique(array_column($fills, 'source_execution_id')), 500) as $ids) {
+            TradeExecution::query()
+                ->join('trades', 'trades.id', '=', 'trade_executions.trade_id')
+                ->join('accounts', 'accounts.id', '=', 'trades.account_id')
+                ->where('trades.journal_id', $journal->id)
+                ->whereIn('trade_executions.source_execution_id', $ids)
+                ->get(['accounts.name as account_name', 'trade_executions.source_execution_id'])
+                ->each(function (TradeExecution $execution) use (&$imported) {
+                    $imported[$execution->account_name][$execution->source_execution_id] = true;
+                });
+        }
+
+        return $imported;
+    }
+
+    /**
      * Convert each fill's raw timestamp using its own account's effective
      * timezone (account override, falling back to the journal default) —
      * not a single blanket timezone for the whole file. A CSV can cover
@@ -282,18 +340,18 @@ class ExecutionsCsvImporter
 
             if ($isReversal) {
                 $closeQty = abs($current);
-                $openQty  = abs($newPosition);
+                $openQty = abs($newPosition);
 
-                $closeFill                       = $fill;
+                $closeFill = $fill;
                 $closeFill['allocated_quantity'] = $closeQty;
-                $closeFill['role']               = 'exit';
-                $buckets[$key][]                 = $closeFill;
-                $trades[]                        = $buckets[$key];
+                $closeFill['role'] = 'exit';
+                $buckets[$key][] = $closeFill;
+                $trades[] = $buckets[$key];
 
-                $openFill                       = $fill;
+                $openFill = $fill;
                 $openFill['allocated_quantity'] = $openQty;
-                $openFill['role']               = 'entry';
-                $buckets[$key]                  = [$openFill];
+                $openFill['role'] = 'entry';
+                $buckets[$key] = [$openFill];
             } elseif ($newPosition === 0) {
                 $buckets[$key][] = $fill;
                 $trades[] = $buckets[$key];
@@ -313,14 +371,6 @@ class ExecutionsCsvImporter
         $first = $fills[0];
         $symbol = $first['instrument_symbol'];
         $specs = self::$instrumentSpecs[$symbol] ?? ['tick_size' => '0.25', 'point_value' => '50.00'];
-
-        $account = Account::where('journal_id', $journal->id)
-            ->where('name', $first['account_name'])
-            ->first();
-
-        if (! $account) {
-            throw new \App\Exceptions\UnknownAccountException($first['account_name']);
-        }
 
         $entryFills = array_values(array_filter($fills, fn ($f) => $f['role'] === 'entry'));
         $exitFills = array_values(array_filter($fills, fn ($f) => $f['role'] === 'exit'));
@@ -348,6 +398,12 @@ class ExecutionsCsvImporter
         $ticks = (int) round($points / $tickSize);
         $grossPnl = round($points * $totalEntryQty * $pointValue, 2);
         $netPnl = round($grossPnl - $totalCommission, 2);
+
+        $account = Account::resolveForJournal(
+            $journal,
+            $first['account_name'],
+            $first['connection'] !== 'Unknown' ? $first['connection'] : null
+        );
 
         $lastExit = end($exitFills);
         $exitReason = NinjaTraderCsv::exitReasonFromName($lastExit['order_name']);
