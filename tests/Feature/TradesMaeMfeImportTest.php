@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Services\ExecutionsCsvImporter;
 use App\Services\TradesMaeMfeImporter;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Mail;
 
 uses(LazilyRefreshDatabase::class);
@@ -280,6 +281,18 @@ test('a row with no matching trade is recorded as a failure with its raw row, an
     Mail::assertNothingSent();
 });
 
+test('a row for an account the journal has not seen is reported as unmatched and creates no account', function () {
+    $journal = maeJournal([]);
+
+    $result = importTradesCsv($journal, tradesRow(['account' => 'APEX-123']));
+
+    expect($result['trades_enriched'])->toBe(0)
+        ->and($result['errors'])->toHaveCount(1)
+        ->and($result['errors'][0])->toContain('No matching trade')
+        ->and($result['errors'][0])->toContain('Import the Executions export')
+        ->and($journal->accounts()->count())->toBe(0);
+});
+
 test('a matched trade whose rows do not cover all its contracts is a distinct failure and gets no legs', function () {
     $journal = maeJournal();
     $trade = threeContractTrade($journal);
@@ -367,7 +380,7 @@ test('Executions + Trades exports enrich every trade with no failures', function
     // The scale-in trade: SimTest1 long 2 at 9:30, +3 at 9:31 (their rows carry 9:31), out 3 at
     // 9:40 and 2 at 9:45.
     $scaleIn = Trade::whereHas('account', fn ($q) => $q->where('name', 'SimTest1'))
-        ->where('entry_at', \Illuminate\Support\Carbon::parse('2026-01-05 14:30:00', 'UTC'))->sole();
+        ->where('entry_at', Carbon::parse('2026-01-05 14:30:00', 'UTC'))->sole();
     expect($scaleIn->legs)->toHaveCount(3)
         ->and((float) $scaleIn->excursion_mae_points)->toBe(2.5)     // $250.00 on 2 ES contracts
         ->and((float) $scaleIn->excursion_mfe_points)->toBe(10.25)   // "$1,025.00" on 2 ES contracts

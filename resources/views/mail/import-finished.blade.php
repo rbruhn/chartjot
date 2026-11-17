@@ -44,8 +44,8 @@
                     only covers part of a trade — import the matching Executions export, or re-export the Trades grid
                     for the full range, then upload the Trades file again.
                 @else
-                    Most often an account name in the file doesn't match an account in your journal — create it on your
-                    <strong>Accounts</strong> page, then import the file again. Trades already imported are skipped.
+                    Most often a row is malformed, or a trade's fills overlap a trade already in your journal — fix the
+                    file or the existing trade, then import the file again. Trades already imported are skipped.
                 @endif
                 Rows that did import are already in your journal.
             </p>

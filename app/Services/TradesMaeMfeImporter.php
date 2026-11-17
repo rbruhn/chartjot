@@ -9,8 +9,6 @@ use App\Models\Journal;
 use App\Models\Trade;
 use App\Models\TradeLeg;
 use App\Support\NinjaTraderCsv;
-use Illuminate\Support\Carbon;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -48,39 +46,38 @@ class TradesMaeMfeImporter
     {
         if (blank($journal->timezone)) {
             return [
-                'legs_imported'   => 0,
+                'legs_imported' => 0,
                 'trades_enriched' => 0,
-                'rows_skipped'    => 0,
-                'errors'          => ['Journal timezone is not set. Configure it in Journal Settings before importing.'],
-                'failures'        => [],
+                'rows_skipped' => 0,
+                'errors' => ['Journal timezone is not set. Configure it in Journal Settings before importing.'],
+                'failures' => [],
             ];
         }
 
         [$rows, $failures] = $this->parseRows($journal, $filePath);
 
         $timezones = NinjaTraderCsv::accountTimezones($journal);
-        $accounts  = $journal->accounts()->get()->keyBy('name');
-        $byTrade   = [];
-        $trades    = [];
-        $skipped   = 0;
+        $accounts = $journal->accounts()->get()->keyBy('name');
+        $byTrade = [];
+        $trades = [];
+        $skipped = 0;
 
         foreach ($rows as $row) {
-            $account = $accounts->get($row['account_name']);
-            if (! $account) {
-                $failures[] = $this->failure($row, "Account '{$row['account_name']}' not found in this journal, so no imported trade can match this row.");
-                continue;
-            }
-
             $timezone = $timezones->get($row['account_name'], $journal->timezone);
-            $entryAt  = NinjaTraderCsv::parseTime($row['entry_raw'], $timezone)->utc();
-            $exitAt   = NinjaTraderCsv::parseTime($row['exit_raw'], $timezone)->utc();
+            $entryAt = NinjaTraderCsv::parseTime($row['entry_raw'], $timezone)->utc();
+            $exitAt = NinjaTraderCsv::parseTime($row['exit_raw'], $timezone)->utc();
 
-            $matches = Trade::where('journal_id', $journal->id)
-                ->where('account_id', $account->id)
-                ->where('instrument', $row['instrument'])
-                ->where('entry_at', '<=', $entryAt)
-                ->where('exit_at', '>=', $exitAt)
-                ->get();
+            // An account the journal hasn't seen has no trades yet; the Executions
+            // import creates it along with its trades, so the row is reported as unmatched.
+            $account = $accounts->get($row['account_name']);
+            $matches = $account
+                ? Trade::where('journal_id', $journal->id)
+                    ->where('account_id', $account->id)
+                    ->where('instrument', $row['instrument'])
+                    ->where('entry_at', '<=', $entryAt)
+                    ->where('exit_at', '>=', $exitAt)
+                    ->get()
+                : collect();
 
             if ($matches->count() !== 1) {
                 $failures[] = $this->failure($row, $matches->isEmpty()
@@ -88,6 +85,7 @@ class TradesMaeMfeImporter
                         ."spans {$row['entry_raw']} → {$row['exit_raw']}. Import the Executions export covering this trade first."
                     : "Ambiguous: {$matches->count()} trades on account {$row['account_name']} for {$row['instrument']} "
                         ."span {$row['entry_raw']} → {$row['exit_raw']}.");
+
                 continue;
             }
 
@@ -96,19 +94,20 @@ class TradesMaeMfeImporter
             // AddOn-reported trades already have live-tracked legs and excursion.
             if ($trade->source !== 'csv_import') {
                 $skipped++;
+
                 continue;
             }
 
             $row['exited_at'] = $exitAt;
-            $trades[$trade->id]  = $trade;
+            $trades[$trade->id] = $trade;
             $byTrade[$trade->id][] = $row;
         }
 
         $legsImported = 0;
-        $enriched     = 0;
+        $enriched = 0;
 
         foreach ($byTrade as $tradeId => $tradeRows) {
-            $trade   = $trades[$tradeId];
+            $trade = $trades[$tradeId];
             $covered = array_sum(array_column($tradeRows, 'quantity'));
 
             // A partial set of rows (e.g. an export cut off by a date filter) would
@@ -121,6 +120,7 @@ class TradesMaeMfeImporter
                         .'Re-export the Trades grid covering the whole trade.',
                         $trade->source_trade_id);
                 }
+
                 continue;
             }
 
@@ -131,11 +131,11 @@ class TradesMaeMfeImporter
 
         // Reported to the user by ImportTradesMaeMfeCsv's completion email.
         return [
-            'legs_imported'   => $legsImported,
+            'legs_imported' => $legsImported,
             'trades_enriched' => $enriched,
-            'rows_skipped'    => $skipped,
-            'errors'          => array_column($failures, 'reason'),
-            'failures'        => $this->recordFailures($journal, $failures),
+            'rows_skipped' => $skipped,
+            'errors' => array_column($failures, 'reason'),
+            'failures' => $this->recordFailures($journal, $failures),
         ];
     }
 
@@ -181,21 +181,22 @@ class TradesMaeMfeImporter
 
             [$accountName] = NinjaTraderCsv::parseAccountName($raw['Account']);
             $row = [
-                'line'         => $line,
-                'raw'          => $raw,
+                'line' => $line,
+                'raw' => $raw,
                 'account_name' => $accountName,
-                'instrument'   => $raw['Instrument'],
-                'entry_raw'    => $raw['Entry time'],
-                'exit_raw'     => $raw['Exit time'],
-                'exit_name'    => $raw['Exit name'],
+                'instrument' => $raw['Instrument'],
+                'entry_raw' => $raw['Entry time'],
+                'exit_raw' => $raw['Exit time'],
+                'exit_name' => $raw['Exit name'],
             ];
 
             if ($reason = $this->invalidRowReason($raw)) {
                 $failures[] = $this->failure($row, "Row {$line}: {$reason}");
+
                 continue;
             }
 
-            $row['quantity']   = (int) $raw['Qty'];
+            $row['quantity'] = (int) $raw['Qty'];
             $row['exit_price'] = (float) $raw['Exit price'];
             $row['mae_dollars'] = self::currency($raw['MAE']);
             $row['mfe_dollars'] = self::currency($raw['MFE']);
@@ -244,7 +245,7 @@ class TradesMaeMfeImporter
         }
 
         $negative = str_starts_with($value, '(') && str_ends_with($value, ')') || str_starts_with($value, '-');
-        $number   = str_replace(['$', ',', '(', ')', '-', ' '], '', $value);
+        $number = str_replace(['$', ',', '(', ')', '-', ' '], '', $value);
 
         return is_numeric($number) ? ($negative ? -1 : 1) * (float) $number : null;
     }
@@ -266,9 +267,9 @@ class TradesMaeMfeImporter
     {
         usort($rows, fn (array $a, array $b) => [$a['exited_at']->getTimestamp(), $a['line']] <=> [$b['exited_at']->getTimestamp(), $b['line']]);
 
-        $sign        = $trade->direction === Direction::Long ? 1 : -1;
-        $avgEntry    = $this->averageEntry($trade);
-        $pointValue  = (float) $trade->point_value;
+        $sign = $trade->direction === Direction::Long ? 1 : -1;
+        $avgEntry = $this->averageEntry($trade);
+        $pointValue = (float) $trade->point_value;
         $firstExitAt = $rows[0]['exited_at']->getTimestamp();
 
         $trade->legs()->delete();
@@ -278,26 +279,26 @@ class TradesMaeMfeImporter
             $perContract = $row['quantity'] * $pointValue;
 
             return TradeLeg::create([
-                'trade_id'           => $trade->id,
-                'sequence'           => $i + 1,
-                'runner'             => $row['exited_at']->getTimestamp() > $firstExitAt,
-                'exit_order_id'      => $row['exit_name'],
-                'order_name'         => $row['exit_name'],
-                'reason'             => NinjaTraderCsv::exitReasonFromName($row['exit_name']),
-                'quantity'           => $row['quantity'],
-                'exited_at'          => $row['exited_at'],
+                'trade_id' => $trade->id,
+                'sequence' => $i + 1,
+                'runner' => $row['exited_at']->getTimestamp() > $firstExitAt,
+                'exit_order_id' => $row['exit_name'],
+                'order_name' => $row['exit_name'],
+                'reason' => NinjaTraderCsv::exitReasonFromName($row['exit_name']),
+                'quantity' => $row['quantity'],
+                'exited_at' => $row['exited_at'],
                 'average_exit_price' => $row['exit_price'],
-                'points'             => round($points, 4),
-                'gross_pnl'          => round($points * $row['quantity'] * $pointValue, 2),
-                'mae_points'         => round($row['mae_dollars'] / $perContract, 4),
-                'mfe_points'         => round($row['mfe_dollars'] / $perContract, 4),
+                'points' => round($points, 4),
+                'gross_pnl' => round($points * $row['quantity'] * $pointValue, 2),
+                'mae_points' => round($row['mae_dollars'] / $perContract, 4),
+                'mfe_points' => round($row['mfe_dollars'] / $perContract, 4),
             ]);
         });
 
         $trade->update([
             'excursion_mae_points' => $legs->max(fn (TradeLeg $l) => (float) $l->mae_points),
             'excursion_mfe_points' => $legs->max(fn (TradeLeg $l) => (float) $l->mfe_points),
-            'excursion_complete'   => true,
+            'excursion_complete' => true,
         ]);
     }
 
@@ -321,10 +322,10 @@ class TradesMaeMfeImporter
     private function failure(array $row, string $reason, ?string $sourceTradeId = null): array
     {
         return [
-            'account_name'    => $row['account_name'] !== '' ? $row['account_name'] : 'Unknown',
+            'account_name' => $row['account_name'] !== '' ? $row['account_name'] : 'Unknown',
             'source_trade_id' => $sourceTradeId,
-            'reason'          => $reason,
-            'payload'         => $row['raw'],
+            'reason' => $reason,
+            'payload' => $row['raw'],
         ];
     }
 
@@ -339,20 +340,20 @@ class TradesMaeMfeImporter
         $now = now();
         foreach ($failures as $f) {
             FailedTradeImport::create([
-                'journal_id'      => $journal->id,
-                'account_name'    => $f['account_name'],
+                'journal_id' => $journal->id,
+                'account_name' => $f['account_name'],
                 'source_trade_id' => $f['source_trade_id'],
-                'reason'          => mb_strimwidth($f['reason'], 0, 255, '…'),
-                'payload'         => $f['payload'],
-                'occurred_at'     => $now,
+                'reason' => mb_strimwidth($f['reason'], 0, 255, '…'),
+                'payload' => $f['payload'],
+                'occurred_at' => $now,
             ]);
         }
 
         return array_map(fn (array $f) => [
-            'account_name'    => $f['account_name'],
+            'account_name' => $f['account_name'],
             'source_trade_id' => $f['source_trade_id'],
-            'reason'          => $f['reason'],
-            'occurred_at'     => $now->toDateTimeString(),
+            'reason' => $f['reason'],
+            'occurred_at' => $now->toDateTimeString(),
         ], $failures);
     }
 }
